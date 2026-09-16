@@ -1,0 +1,9 @@
+data/*.osm.pbf
+data/*.o5m
+data/work/
+data/nl_grid_d22_naive_reference.bin
+*.pbf
+*.pbf.part
+.venv/
+__pycache__/
+*.pyc
