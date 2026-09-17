@@ -46,9 +46,9 @@ def query_for_method(indexes, method, lat, lon):
     if method == "b":
         return indexes.b.query(lat, lon)
     if method == "c":
-        return indexes.c.query(lat, lon, boundary_mode="exact")
+        return indexes.c.query(lat, lon)
     if method == "d":
-        return indexes.c.query(lat, lon, boundary_mode="random")
+        return indexes.d.query(lat, lon)
     raise ValueError(f"unknown method {method!r}")
 
 

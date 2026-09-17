@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
-"""Load the compact grid index (data/nl_grid.bin) and answer point queries
+"""Load a compact grid index (data/nl_grid*.bin) and answer point queries
 with a single binary search for the common case -- no polygon math, no
-pointer chasing. Falls back to an exact point-in-polygon lookup (approach B)
-for the minority of queries landing in a cell that was still ambiguous at
-the grid's cap depth."""
+pointer chasing.
+
+Two flavors of grid file exist, both built by build_grid_index.py and both
+loaded by this same class:
+  - data/nl_grid.bin (BOUNDARY_FILL=sentinel, approach C): ambiguous cells
+    are marked BOUNDARY and resolved at query time via `polygon_fallback`
+    (approach B), exactly.
+  - data/nl_grid_d_random.bin / _nearest.bin (approach D): ambiguous cells
+    already have a real (possibly wrong) city id baked in at build time --
+    no BOUNDARY records exist in these files, so no fallback is needed at
+    query time at all.
+"""
 import bisect
-import hashlib
 import struct
 import sys
 from array import array
@@ -75,20 +83,7 @@ class GridIndex:
             code = (code << 1) | ((ix >> i) & 1)
         return code, ix, iy
 
-    def _random_city_for_cell(self, cell_code):
-        """Approach D: instead of falling back to a real point-in-polygon
-        lookup, just pick *some* city for an ambiguous cell -- not even a
-        real candidate, literally any city in the table. No polygon data
-        needed at all, at the cost of being visibly wrong near every
-        border. Hashed from the cell's own code (not truly random) so the
-        same cell always renders the same color instead of flickering."""
-        h = hashlib.md5(str(cell_code).encode()).digest()
-        idx = int.from_bytes(h[:4], "big") % len(self.cities)
-        return self.cities[idx]
-
-    def query(self, lat, lon, boundary_mode="exact"):
-        """boundary_mode: "exact" (approach C, real polygon fallback) or
-        "random" (approach D, arbitrary city, no polygon data needed)."""
+    def query(self, lat, lon):
         q, ix, iy = self._point_code(lat, lon)
         i = bisect.bisect_right(self.codes, q) - 1
         if i < 0:
@@ -103,8 +98,6 @@ class GridIndex:
             return None
         if payload == self.BOUNDARY:
             self.fallback_hits += 1
-            if boundary_mode == "random":
-                return self._random_city_for_cell(self.codes[i])
             if self.fallback is None:
                 raise RuntimeError("point falls in a boundary cell but no polygon_fallback was provided")
             return self.fallback.query(lat, lon)

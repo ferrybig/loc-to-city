@@ -51,8 +51,10 @@ class Indexes:
         self.a = NearestPointIndex.from_nl_csv()
         print("Loading approach B (exact polygon)...", file=sys.stderr)
         self.b = PolygonIndex.load()
-        print("Loading approach C (adaptive grid)...", file=sys.stderr)
+        print("Loading approach C (adaptive grid + exact fallback)...", file=sys.stderr)
         self.c = GridIndex(polygon_fallback=self.b)
+        print("Loading approach D (adaptive grid + random-local-candidate fill)...", file=sys.stderr)
+        self.d = GridIndex(Path("data/nl_grid_d_random.bin"))  # self-contained, no fallback needed
         print("All indexes loaded.", file=sys.stderr)
 
     def query_all(self, lat, lon):

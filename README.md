@@ -177,18 +177,31 @@ its own grid lookup on top.
   worth doing if the fallback dataset's size becomes the bottleneck at
   country/continent scale.
 
-### D. Adaptive grid + random fallback (no fallback data needed)
+### D. Adaptive grid, resolved at build time (no fallback data needed)
 
-`GridIndex.query(lat, lon, boundary_mode="random")` in the same
-`query_grid.py`. Same grid file as C, but a `BOUNDARY` cell is resolved by
-hashing the cell's own code to pick an arbitrary city from the table —
-not even a real candidate, just *some* city — instead of falling back to
-real polygon math. The point: this needs zero polygon geometry at rest,
-only the 7.4MB grid file itself, at the cost of being visibly wrong for
-any query that lands within a cap-depth cell of a real border. The tile
-overlay in the demo (below) makes this tradeoff directly visible: D looks
-identical to C in every uniform interior region and speckles with random
-noise in a thin band along every border.
+Same recursive build as C (`build_grid_index.py`), but controlled by
+`GRID_BOUNDARY_FILL`: instead of storing a `BOUNDARY` sentinel for an
+ambiguous cap-depth cell and deferring to real polygon math at query time,
+pick a winner for it *at build time*, from `cand` — the real candidate
+cities whose polygons actually touch that specific cell, never the whole
+country — and bake that city id straight into the record like any uniform
+cell. Two variants, `data/nl_grid_d_random.bin` (`random.choice(cand)`)
+and `data/nl_grid_d_nearest.bin` (whichever candidate's polygon is closest
+to the cell center — deterministic, same spirit as approach A but scoped
+to real local candidates instead of the whole country). Both are exactly
+7.4MB, identical in size to C, since it's the same leaf structure with a
+different payload.
+
+The result is a **fully self-contained file**: no `BOUNDARY` records exist
+in it at all, so `query_grid.py` needs no polygon fallback data at query
+time, ever — just the 7.4MB grid. The cost is precision: any query
+landing in a cell that was ambiguous at the cap depth gets whichever
+locally-plausible neighbor won that cell at build time, not necessarily
+the true one. The tile overlay (below) makes this directly visible: D is
+pixel-identical to C in every uniform interior region, and only near a
+real border does it start mixing in the (real, neighboring) candidate
+colors — a jagged noisy seam, not the totally-unrelated speckle an
+across-the-whole-country random pick would produce.
 
 ## Interactive demo
 
@@ -209,8 +222,10 @@ Open <http://127.0.0.1:8765>.
   *see* correctness rather than sample it: A renders as a scatter of clean
   Voronoi-cell blobs that ignore real borders entirely; B and C render
   identically (jagged borders that actually follow the polygons); D
-  matches C everywhere except a speckled noise band along every border,
-  where its random-fallback tradeoff shows up directly. The "resolution"
+  matches C everywhere except a jagged, noisy seam right along every
+  border — built only from the real neighboring candidates for that
+  cell, not a country-wide random pick — where its build-time tradeoff
+  shows up directly. The "resolution"
   select controls the pixel block size per query (1 = sharp but slow —
   up to 65k queries per tile; 64 = fast but blocky) — coarser settings
   also make the grid's actual cell size visible as real blockiness, not
@@ -234,6 +249,9 @@ docker run --rm -v "$PWD:/work" loc2city-tools bash -c "
 "
 
 python3 scripts/extract_boundaries.py     # -> data/nl_cities.geojson
-python3 scripts/build_grid_index.py       # -> data/nl_grid.bin (GRID_MAX_DEPTH env var, default 18)
-python3 scripts/benchmark.py              # compares all three approaches
+python3 scripts/build_grid_index.py       # -> data/nl_grid.bin (approach C; GRID_MAX_DEPTH env var, default 18)
+GRID_BOUNDARY_FILL=random  python3 scripts/build_grid_index.py  # -> data/nl_grid_d_random.bin  (approach D)
+GRID_BOUNDARY_FILL=nearest python3 scripts/build_grid_index.py  # -> data/nl_grid_d_nearest.bin (approach D, deterministic variant)
+python3 scripts/benchmark.py              # compares approaches A/B/C
+python3 webapp/server.py                  # interactive demo, all four approaches
 ```

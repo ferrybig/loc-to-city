@@ -36,8 +36,27 @@ that land in one. This gives *exact* (not 10m-quantized) results for
 boundary queries, a tiny flat file for the common case, and no need to
 tune MAX_DEPTH against the precision requirement at all -- it only trades
 off file size against how often the (still-correct) slow path is taken.
+
+GRID_BOUNDARY_FILL controls how an ambiguous cap-depth cell is resolved:
+  sentinel (default) -- store BOUNDARY, defer to a real polygon lookup at
+                         query time (approach C). Needs the fallback
+                         polygon dataset shipped alongside the grid.
+  random             -- pick uniformly at random *among the candidates
+                         that actually touch this cell* (`cand`, not the
+                         whole city table) and bake that city id into the
+                         record at build time. Approach D: self-contained,
+                         no polygon data needed at query time at all, at
+                         the cost of being wrong in a border-width band.
+  nearest            -- like `random` but deterministic: pick whichever
+                         candidate's polygon is closest to the cell
+                         center (same idea as approach A, just scoped to
+                         real local candidates instead of the whole
+                         country).
+Both `random` and `nearest` write to a different output file so they never
+clobber the sentinel/approach-C build.
 """
 import json
+import random
 import struct
 import sys
 import time
@@ -48,12 +67,17 @@ from shapely.strtree import STRtree
 from shapely.prepared import prep
 
 CITIES_PATH = Path("data/nl_cities.geojson")
-OUT_PATH = Path("data/nl_grid.bin")
 
 import os
 MAX_DEPTH = int(os.environ.get("GRID_MAX_DEPTH", "18"))
+BOUNDARY_FILL = os.environ.get("GRID_BOUNDARY_FILL", "sentinel")
+assert BOUNDARY_FILL in ("sentinel", "random", "nearest"), BOUNDARY_FILL
+OUT_PATH = Path("data/nl_grid.bin") if BOUNDARY_FILL == "sentinel" else Path(f"data/nl_grid_d_{BOUNDARY_FILL}.bin")
+
 NO_CITY = (1 << 15) - 1    # 32767, reserved sentinel: confirmed outside any city
 BOUNDARY = (1 << 15) - 2   # 32766, reserved sentinel: ambiguous at cap depth, needs exact fallback
+
+random.seed(42)  # reproducible builds
 
 
 def interleave(ix, iy, bits):
@@ -98,6 +122,7 @@ def main():
     prepared = [prep(g) for g in geoms]
     tree = STRtree(geoms)
     print(f"Loaded {len(geoms)} city polygons", file=sys.stderr)
+    print(f"MAX_DEPTH={MAX_DEPTH} BOUNDARY_FILL={BOUNDARY_FILL} -> {OUT_PATH}", file=sys.stderr)
 
     # NL bounding box, padded slightly
     minx = min(g.bounds[0] for g in geoms) - 0.01
@@ -118,6 +143,13 @@ def main():
     records = []
     stats = {"uniform_city": 0, "uniform_empty": 0, "boundary": 0, "nodes_visited": 0}
 
+    def resolve_ambiguous_cell(cellbox, cand):
+        if BOUNDARY_FILL == "random":
+            return random.choice(cand)
+        # "nearest": deterministic, closest candidate to the cell center
+        center = cellbox.centroid
+        return min(cand, key=lambda i: geoms[i].distance(center))
+
     def recurse(ix, iy, depth):
         stats["nodes_visited"] += 1
         lon0, lat0, lon1, lat1 = cell_bounds(ix, iy, depth)
@@ -136,7 +168,10 @@ def main():
             return
 
         if depth == MAX_DEPTH:
-            records.append(make_record(ix, iy, depth, BOUNDARY))
+            if BOUNDARY_FILL == "sentinel":
+                records.append(make_record(ix, iy, depth, BOUNDARY))
+            else:
+                records.append(make_record(ix, iy, depth, resolve_ambiguous_cell(cellbox, cand)))
             stats["boundary"] += 1
             return
 
