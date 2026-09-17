@@ -5,6 +5,7 @@ pointer chasing. Falls back to an exact point-in-polygon lookup (approach B)
 for the minority of queries landing in a cell that was still ambiguous at
 the grid's cap depth."""
 import bisect
+import hashlib
 import struct
 import sys
 from array import array
@@ -74,7 +75,20 @@ class GridIndex:
             code = (code << 1) | ((ix >> i) & 1)
         return code, ix, iy
 
-    def query(self, lat, lon):
+    def _random_city_for_cell(self, cell_code):
+        """Approach D: instead of falling back to a real point-in-polygon
+        lookup, just pick *some* city for an ambiguous cell -- not even a
+        real candidate, literally any city in the table. No polygon data
+        needed at all, at the cost of being visibly wrong near every
+        border. Hashed from the cell's own code (not truly random) so the
+        same cell always renders the same color instead of flickering."""
+        h = hashlib.md5(str(cell_code).encode()).digest()
+        idx = int.from_bytes(h[:4], "big") % len(self.cities)
+        return self.cities[idx]
+
+    def query(self, lat, lon, boundary_mode="exact"):
+        """boundary_mode: "exact" (approach C, real polygon fallback) or
+        "random" (approach D, arbitrary city, no polygon data needed)."""
         q, ix, iy = self._point_code(lat, lon)
         i = bisect.bisect_right(self.codes, q) - 1
         if i < 0:
@@ -89,6 +103,8 @@ class GridIndex:
             return None
         if payload == self.BOUNDARY:
             self.fallback_hits += 1
+            if boundary_mode == "random":
+                return self._random_city_for_cell(self.codes[i])
             if self.fallback is None:
                 raise RuntimeError("point falls in a boundary cell but no polygon_fallback was provided")
             return self.fallback.query(lat, lon)

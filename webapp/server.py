@@ -10,6 +10,7 @@ Loads all three indexes once at startup (a few seconds), then answers
 queries against in-memory data -- no per-request rebuilding.
 """
 import json
+import re
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +19,7 @@ from urllib.parse import urlparse, parse_qs
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import os
 os.chdir(REPO_ROOT)  # every approach module resolves its data paths relative to the repo root
@@ -25,8 +27,10 @@ os.chdir(REPO_ROOT)  # every approach module resolves its data paths relative to
 from approach_a_nearest_point import NearestPointIndex
 from approach_b_polygon import PolygonIndex
 from query_grid import GridIndex
+from tiles import render_tile_png
 
 STATIC_DIR = Path(__file__).resolve().parent
+TILE_RE = re.compile(r"^/tiles/(?P<method>[abcd])/(?P<z>\d+)/(?P<x>\d+)/(?P<y>\d+)\.png$")
 
 
 def place_to_json(p):
@@ -96,6 +100,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_png(self, body):
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "public, max-age=3600")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         parsed = urlparse(self.path)
 
@@ -113,6 +125,21 @@ class Handler(BaseHTTPRequestHandler):
                 return
             result = INDEXES.query_all(lat, lon)
             self._send_json(result)
+            return
+
+        m = TILE_RE.match(parsed.path)
+        if m:
+            qs = parse_qs(parsed.query)
+            z, x, y = int(m["z"]), int(m["x"]), int(m["y"])
+            try:
+                res = int(qs.get("res", ["8"])[0])
+            except ValueError:
+                res = 8
+            cs = qs.get("cs", ["oklch"])[0]
+            if cs not in ("oklch", "hsl"):
+                cs = "oklch"
+            png = render_tile_png(INDEXES, m["method"], z, x, y, resolution=res, color_space=cs)
+            self._send_png(png)
             return
 
         self._send_json({"error": "not found"}, status=404)

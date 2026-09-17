@@ -36,6 +36,17 @@
   .badge.fallback { background: #ef6c00; }
   .null-result { color: #999; font-style: italic; }
   .loading { font-size: 12px; color: #888; padding: 6px; }
+
+  #layer-panel {
+    position: absolute; top: 12px; right: 12px; z-index: 1000;
+    background: white; padding: 10px 14px; border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.25); font-size: 12px; width: 210px;
+  }
+  #layer-panel h2 { font-size: 13px; margin: 0 0 8px; }
+  #layer-panel label { display: block; margin-top: 8px; color: #333; }
+  #layer-panel select, #layer-panel input[type=range] { width: 100%; margin-top: 2px; }
+  #layer-panel .row-value { float: right; color: #888; font-weight: normal; }
+  #layer-panel .hint { color: #888; margin-top: 8px; line-height: 1.4; }
 </style>
 </head>
 <body>
@@ -46,6 +57,51 @@
   <div class="examples">
     <button onclick="jumpTo(52.48878991537549, 4.794346918807473)">Wormerveer example</button>
     <button onclick="jumpTo(52.034656091402674, 4.388124124642494)">Den Haag example</button>
+  </div>
+</div>
+
+<div id="layer-panel">
+  <h2>Tile overlay</h2>
+
+  <label>Approach
+    <select id="method-select">
+      <option value="none">None (base map only)</option>
+      <option value="a">A: nearest point</option>
+      <option value="b">B: exact polygon</option>
+      <option value="c" selected>C: grid + exact fallback</option>
+      <option value="d">D: grid + random fallback</option>
+    </select>
+  </label>
+
+  <label>Resolution (px per query)
+    <select id="res-select">
+      <option value="1">1 (sharpest, slowest)</option>
+      <option value="2">2</option>
+      <option value="4">4</option>
+      <option value="8" selected>8</option>
+      <option value="16">16</option>
+      <option value="32">32</option>
+      <option value="64">64 (blockiest, fastest)</option>
+    </select>
+  </label>
+
+  <label>Color space
+    <select id="cs-select">
+      <option value="oklch" selected>OKLCH</option>
+      <option value="hsl">HSL</option>
+    </select>
+  </label>
+
+  <label>Overlay opacity <span class="row-value" id="opacity-value">65%</span>
+    <input type="range" id="opacity-range" min="10" max="100" step="5" value="65">
+  </label>
+
+  <div class="hint">
+    Each pixel block is one query, colored by a hash of the resolved
+    city. Lower resolution = fewer queries = faster tiles, but blockier
+    borders -- that blockiness <em>is</em> the grid's actual cell size.
+    D never does real polygon math for boundary cells; watch it speckle
+    randomly near every border.
   </div>
 </div>
 
@@ -132,6 +188,46 @@ function jumpTo(lat, lon) {
 map.on('click', (e) => {
   queryAndPopup(e.latlng.lat, e.latlng.lng);
 });
+
+// ---- tile overlay ----
+const NL_BOUNDS = L.latLngBounds([[50.6, 3.0], [53.7, 7.4]]);
+let tileLayer = null;
+
+const methodSelect = document.getElementById('method-select');
+const resSelect = document.getElementById('res-select');
+const csSelect = document.getElementById('cs-select');
+const opacityRange = document.getElementById('opacity-range');
+const opacityValue = document.getElementById('opacity-value');
+
+function rebuildTileLayer() {
+  if (tileLayer) {
+    map.removeLayer(tileLayer);
+    tileLayer = null;
+  }
+  const method = methodSelect.value;
+  if (method === 'none') return;
+
+  const res = resSelect.value;
+  const cs = csSelect.value;
+  const url = `/tiles/${method}/{z}/{x}/{y}.png?res=${res}&cs=${cs}`;
+  tileLayer = L.tileLayer(url, {
+    tileSize: 256,
+    minZoom: 7,
+    maxZoom: 18,
+    bounds: NL_BOUNDS,
+    opacity: opacityRange.value / 100,
+  }).addTo(map);
+}
+
+methodSelect.addEventListener('change', rebuildTileLayer);
+resSelect.addEventListener('change', rebuildTileLayer);
+csSelect.addEventListener('change', rebuildTileLayer);
+opacityRange.addEventListener('input', () => {
+  opacityValue.textContent = `${opacityRange.value}%`;
+  if (tileLayer) tileLayer.setOpacity(opacityRange.value / 100);
+});
+
+rebuildTileLayer();
 </script>
 
 </body>

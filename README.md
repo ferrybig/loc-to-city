@@ -177,17 +177,44 @@ its own grid lookup on top.
   worth doing if the fallback dataset's size becomes the bottleneck at
   country/continent scale.
 
+### D. Adaptive grid + random fallback (no fallback data needed)
+
+`GridIndex.query(lat, lon, boundary_mode="random")` in the same
+`query_grid.py`. Same grid file as C, but a `BOUNDARY` cell is resolved by
+hashing the cell's own code to pick an arbitrary city from the table —
+not even a real candidate, just *some* city — instead of falling back to
+real polygon math. The point: this needs zero polygon geometry at rest,
+only the 7.4MB grid file itself, at the cost of being visibly wrong for
+any query that lands within a cap-depth cell of a real border. The tile
+overlay in the demo (below) makes this tradeoff directly visible: D looks
+identical to C in every uniform interior region and speckles with random
+noise in a thin band along every border.
+
 ## Interactive demo
 
 ```bash
 python3 webapp/server.py       # loads all three indexes once, serves on :8765
 ```
 
-Open <http://127.0.0.1:8765> and click anywhere in the Netherlands — a
-popup shows what each of the three approaches resolves that point to, with
-a match/differs badge against B (ground truth) and a per-query timing
-breakdown. Buttons for the two example coordinates from the brief are
-built in.
+Open <http://127.0.0.1:8765>.
+
+- **Click anywhere** in the Netherlands — a popup shows what each of
+  approaches A/B/C resolves that point to, with a match/differs badge
+  against B (ground truth) and a per-query timing breakdown. Buttons for
+  the two example coordinates from the brief are built in.
+- **Tile overlay** (top-right panel) renders any of the four approaches as
+  a Leaflet tile layer: each pixel block is one query, colored by hashing
+  the resolved city's id to a hue (`oklch(0.7463 0.1213 <hue>)` or
+  `hsl(<hue> 70.2% 46.52%)`, `webapp/colors.py`). This is a fast way to
+  *see* correctness rather than sample it: A renders as a scatter of clean
+  Voronoi-cell blobs that ignore real borders entirely; B and C render
+  identically (jagged borders that actually follow the polygons); D
+  matches C everywhere except a speckled noise band along every border,
+  where its random-fallback tradeoff shows up directly. The "resolution"
+  select controls the pixel block size per query (1 = sharp but slow —
+  up to 65k queries per tile; 64 = fast but blocky) — coarser settings
+  also make the grid's actual cell size visible as real blockiness, not
+  just a rendering artifact.
 
 ## Reproducing
 
