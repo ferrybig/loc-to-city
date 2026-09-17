@@ -177,6 +177,18 @@ its own grid lookup on top.
   worth doing if the fallback dataset's size becomes the bottleneck at
   country/continent scale.
 
+## Interactive demo
+
+```bash
+python3 webapp/server.py       # loads all three indexes once, serves on :8765
+```
+
+Open <http://127.0.0.1:8765> and click anywhere in the Netherlands — a
+popup shows what each of the three approaches resolves that point to, with
+a match/differs badge against B (ground truth) and a per-query timing
+breakdown. Buttons for the two example coordinates from the brief are
+built in.
+
 ## Reproducing
 
 Requires Docker (for `osmium-tool` + `gdal`, used once to extract boundary
