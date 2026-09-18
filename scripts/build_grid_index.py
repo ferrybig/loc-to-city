@@ -7,7 +7,7 @@ per query for the common case.
 Grid: world-aligned, lon in [-180,180), lat in [-90,90), split into a
 2^MAX_DEPTH x 2^MAX_DEPTH grid.
 
-On-disk format (v2, "LG02"): records are sorted by code, then split into
+On-disk format (v3, "LG03"): records are sorted by code, then split into
 three columnar streams and compressed together as one zlib blob:
   - codes:    delta-encoded (sorted ascending -> tiny deltas) and
               varint-packed, instead of 8 bytes each
@@ -237,7 +237,7 @@ def main():
     # ---- write binary file ----
     # header: magic(4s) max_depth(B) n_cities(I) n_records(Q) delta_len(Q) compressed_len(Q)
     with open(OUT_PATH, "wb") as f:
-        f.write(b"LG02")
+        f.write(b"LG03")
         f.write(struct.pack("<B", MAX_DEPTH))
         f.write(struct.pack("<I", len(features)))
         f.write(struct.pack("<Q", n))
@@ -249,10 +249,12 @@ def main():
             city = (p["name"] or "").encode()
             muni = (p["municipality"] or "").encode()
             region = (p["region"] or "").encode()
+            country = (p["country"] or "").encode()
             f.write(struct.pack("<B", len(name)) + name)
             f.write(struct.pack("<B", len(city)) + city)
             f.write(struct.pack("<B", len(muni)) + muni)
             f.write(struct.pack("<B", len(region)) + region)
+            f.write(struct.pack("<B", len(country)) + country)
         f.write(compressed)
 
     size = OUT_PATH.stat().st_size

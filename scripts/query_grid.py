@@ -3,7 +3,7 @@
 with a single binary search for the common case -- no polygon math, no
 pointer chasing.
 
-On-disk format (v2, "LG02"): records are stored pre-sorted by code as three
+On-disk format (v3, "LG03"): records are stored pre-sorted by code as three
 columnar streams -- delta-varint-encoded codes, 1-byte depths, 2-byte
 payloads -- concatenated and zlib-compressed as one blob. Decompressing and
 decoding the varints happens once here, at load time; every query after
@@ -62,7 +62,7 @@ class GridIndex:
         self.fallback_hits = 0
         data = Path(path).read_bytes()
         magic = data[0:4]
-        assert magic == b"LG02", magic
+        assert magic == b"LG03", magic
         self.max_depth = data[4]
         n_cities, = struct.unpack_from("<I", data, 5)
         n_records, = struct.unpack_from("<Q", data, 9)
@@ -83,9 +83,10 @@ class GridIndex:
             name = read_str()
             muni = read_str()
             region = read_str()
+            country = read_str()
             self.cities.append({
                 "id": city_id, "name": name, "municipality": muni,
-                "region": region, "country": "NL",
+                "region": region, "country": country,
             })
 
         self.NO_CITY = NO_CITY

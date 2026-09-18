@@ -51,6 +51,7 @@ class NearestPointIndex:
                     "longitude": float(r["longitude"]),
                     "region": r["admin1Name"],
                     "municipality": r["admin2Name"],
+                    "country": r["countryCode"],
                 })
         return cls(rows)
 
