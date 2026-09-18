@@ -7,12 +7,19 @@ per query for the common case.
 Grid: world-aligned, lon in [-180,180), lat in [-90,90), split into a
 2^MAX_DEPTH x 2^MAX_DEPTH grid.
 
-Each record packs into one uint64:
-  bits [63:20]  Morton code (2*MAX_DEPTH bits, zero-padded to full width --
-                see make_record()), directly comparable across depths
-  bits [19:15]  5-bit depth of the cell this record represents
-  bits [14:0]   15-bit payload: index into the city table, NO_CITY, or
-                BOUNDARY
+On-disk format (v2, "LG02"): records are sorted by code, then split into
+three columnar streams and compressed together as one zlib blob:
+  - codes:    delta-encoded (sorted ascending -> tiny deltas) and
+              varint-packed, instead of 8 bytes each
+  - depths:   1 byte per record
+  - payloads: 2 bytes per record (index into the city table, NO_CITY, or
+              BOUNDARY)
+This cut data/nl_grid.bin from 7.4MB to ~500KB in testing -- see the
+"Compact on-disk format" section of the README for the exact numbers and
+why (delta-varint alone shrinks the code stream ~8x before compression
+even starts, because sorted Morton codes are mostly small deltas). The
+per-cell code value itself is still the same zero-padded Morton code
+described in make_record() below; only the *storage* changed.
 
 Build: recursive subdivision starting from depth-8 seed cells covering the
 Netherlands' bounding box (so we never touch cells outside it). A cell stops
@@ -64,6 +71,7 @@ import random
 import struct
 import sys
 import time
+import zlib
 from pathlib import Path
 
 from shapely.geometry import shape, box
@@ -93,7 +101,7 @@ def interleave(ix, iy, bits):
     return code
 
 
-def make_record(ix, iy, depth, payload):
+def compute_code(ix, iy, depth):
     """Zero-pad the cell's path to full width: this makes the stored code
     equal the *smallest* full-precision code any point inside the cell can
     have, so `stored_code <= Q` holds for every point actually in the cell.
@@ -105,8 +113,19 @@ def make_record(ix, iy, depth, payload):
     """
     path_bits = interleave(ix, iy, depth)  # 2*depth bits
     shift = 2 * (MAX_DEPTH - depth)
-    code = path_bits << shift
-    return (code << 20) | (depth << 15) | payload
+    return path_bits << shift
+
+
+def varint_encode(value):
+    out = bytearray()
+    while True:
+        b = value & 0x7F
+        value >>= 7
+        if value:
+            out.append(b | 0x80)
+        else:
+            out.append(b)
+            return bytes(out)
 
 
 def cell_bounds(ix, iy, depth):
@@ -164,21 +183,22 @@ def main():
         cand = [int(i) for i in tree.query(cellbox) if geoms[i].intersects(cellbox)]
 
         if not cand:
-            records.append(make_record(ix, iy, depth, NO_CITY))
+            records.append((compute_code(ix, iy, depth), depth, NO_CITY))
             stats["uniform_empty"] += 1
             return
 
         fully_containing = [i for i in cand if prepared[i].contains(cellbox)]
         if len(fully_containing) >= 1:
-            records.append(make_record(ix, iy, depth, fully_containing[0]))
+            records.append((compute_code(ix, iy, depth), depth, fully_containing[0]))
             stats["uniform_city"] += 1
             return
 
         if depth == MAX_DEPTH:
             if BOUNDARY_FILL == "sentinel":
-                records.append(make_record(ix, iy, depth, BOUNDARY))
+                payload = BOUNDARY
             else:
-                records.append(make_record(ix, iy, depth, resolve_ambiguous_cell(cellbox, cand)))
+                payload = resolve_ambiguous_cell(cellbox, cand)
+            records.append((compute_code(ix, iy, depth), depth, payload))
             stats["boundary"] += 1
             return
 
@@ -191,17 +211,38 @@ def main():
             elapsed = time.time() - t0
             print(f"  seed {i+1}/{len(seeds)} done, {len(records)} leaves so far, {elapsed:.1f}s elapsed", file=sys.stderr)
 
-    records.sort()
+    records.sort(key=lambda r: r[0])
     print(f"Built {len(records)} leaf records in {time.time()-t0:.1f}s", file=sys.stderr)
     print(f"stats: {stats}", file=sys.stderr)
 
+    # ---- columnar + delta-varint + zlib encoding ----
+    n = len(records)
+    prev = 0
+    delta_parts = bytearray()
+    depth_parts = bytearray(n)
+    payload_parts = bytearray()
+    for idx, (code, depth, payload) in enumerate(records):
+        delta_parts += varint_encode(code - prev)
+        prev = code
+        depth_parts[idx] = depth
+        payload_parts += struct.pack("<H", payload)
+    delta_bytes = bytes(delta_parts)
+
+    blob = delta_bytes + bytes(depth_parts) + bytes(payload_parts)
+    compressed = zlib.compress(blob, level=9)
+    print(f"records blob: {len(blob):,} bytes raw "
+          f"(codes delta-varint: {len(delta_bytes):,}, depths: {len(depth_parts):,}, payloads: {len(payload_parts):,})"
+          f" -> {len(compressed):,} bytes zlib-9", file=sys.stderr)
+
     # ---- write binary file ----
-    # header: magic(4s) max_depth(B) n_cities(I) n_records(Q)
+    # header: magic(4s) max_depth(B) n_cities(I) n_records(Q) delta_len(Q) compressed_len(Q)
     with open(OUT_PATH, "wb") as f:
-        f.write(b"LG01")
+        f.write(b"LG02")
         f.write(struct.pack("<B", MAX_DEPTH))
         f.write(struct.pack("<I", len(features)))
-        f.write(struct.pack("<Q", len(records)))
+        f.write(struct.pack("<Q", n))
+        f.write(struct.pack("<Q", len(delta_bytes)))
+        f.write(struct.pack("<Q", len(compressed)))
         for f_ in features:
             p = f_["properties"]
             name = (p["id"] or "").encode()
@@ -212,10 +253,10 @@ def main():
             f.write(struct.pack("<B", len(city)) + city)
             f.write(struct.pack("<B", len(muni)) + muni)
             f.write(struct.pack("<B", len(region)) + region)
-        f.write(struct.pack(f"<{len(records)}Q", *records))
+        f.write(compressed)
 
     size = OUT_PATH.stat().st_size
-    print(f"Wrote {OUT_PATH} ({size/1024/1024:.2f} MiB, {size} bytes)", file=sys.stderr)
+    print(f"Wrote {OUT_PATH} ({size/1024/1024:.2f} MiB, {size:,} bytes)", file=sys.stderr)
 
 
 if __name__ == "__main__":

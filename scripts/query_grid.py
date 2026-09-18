@@ -3,27 +3,57 @@
 with a single binary search for the common case -- no polygon math, no
 pointer chasing.
 
+On-disk format (v2, "LG02"): records are stored pre-sorted by code as three
+columnar streams -- delta-varint-encoded codes, 1-byte depths, 2-byte
+payloads -- concatenated and zlib-compressed as one blob. Decompressing and
+decoding the varints happens once here, at load time; every query after
+that is a plain `bisect` over an in-memory array. See build_grid_index.py
+and the README's "Compact on-disk format" section for why (delta-varint
+alone shrinks the code stream ~8x before compression even starts, because
+sorted Morton codes are mostly small deltas -- cut nl_grid.bin from 7.4MB
+to ~500KB in testing).
+
 Two flavors of grid file exist, both built by build_grid_index.py and both
 loaded by this same class:
   - data/nl_grid.bin (BOUNDARY_FILL=sentinel, approach C): ambiguous cells
     are marked BOUNDARY and resolved at query time via `polygon_fallback`
     (approach B), exactly.
-  - data/nl_grid_d_random.bin / _nearest.bin (approach D): ambiguous cells
-    already have a real (possibly wrong) city id baked in at build time --
-    no BOUNDARY records exist in these files, so no fallback is needed at
-    query time at all.
+  - data/nl_grid_d_random.bin / _nearest.bin / _coverage.bin (approach D):
+    ambiguous cells already have a real (possibly wrong) city id baked in
+    at build time -- no BOUNDARY records exist in these files, so no
+    fallback is needed at query time at all.
 """
 import bisect
 import struct
 import sys
+import zlib
 from array import array
 from pathlib import Path
-
-import numpy as np
 
 GRID_PATH = Path("data/nl_grid.bin")
 NO_CITY = (1 << 15) - 1
 BOUNDARY = (1 << 15) - 2
+
+
+def varint_decode_stream(buf):
+    """Decode a run of varints back into cumulative (delta-decoded) values."""
+    out = []
+    pos = 0
+    n = len(buf)
+    prev = 0
+    while pos < n:
+        shift = 0
+        val = 0
+        while True:
+            b = buf[pos]
+            pos += 1
+            val |= (b & 0x7F) << shift
+            if not (b & 0x80):
+                break
+            shift += 7
+        prev += val
+        out.append(prev)
+    return out
 
 
 class GridIndex:
@@ -32,11 +62,13 @@ class GridIndex:
         self.fallback_hits = 0
         data = Path(path).read_bytes()
         magic = data[0:4]
-        assert magic == b"LG01", magic
+        assert magic == b"LG02", magic
         self.max_depth = data[4]
         n_cities, = struct.unpack_from("<I", data, 5)
         n_records, = struct.unpack_from("<Q", data, 9)
-        off = 17
+        delta_len, = struct.unpack_from("<Q", data, 17)
+        compressed_len, = struct.unpack_from("<Q", data, 25)
+        off = 33
 
         self.cities = []
         for _ in range(n_cities):
@@ -56,20 +88,19 @@ class GridIndex:
                 "region": region, "country": "NL",
             })
 
-        raw = np.frombuffer(data, dtype="<u8", count=n_records, offset=off)
-        codes = raw >> np.uint64(20)                                  # padded code
-        depths = ((raw >> np.uint64(15)) & np.uint64(0x1F)).astype(np.uint8)
-        payloads = (raw & np.uint64(0x7FFF)).astype(np.uint32)
         self.NO_CITY = NO_CITY
         self.BOUNDARY = BOUNDARY
-        order = np.argsort(codes, kind="stable")
-        # numpy's vectorized searchsorted has enormous fixed per-call
-        # overhead for a single scalar lookup (built for bulk queries, not
-        # one-at-a-time). A plain array.array + stdlib bisect is ~1000x
-        # faster here -- this is what an actual point query does.
-        self.codes = array("Q", codes[order].tolist())
-        self.depths = depths[order]
-        self.payloads = payloads[order]
+
+        compressed = data[off:off + compressed_len]
+        blob = zlib.decompress(compressed)
+        delta_bytes = blob[:delta_len]
+        depth_bytes = blob[delta_len:delta_len + n_records]
+        payload_bytes = blob[delta_len + n_records:delta_len + n_records + n_records * 2]
+
+        self.codes = array("Q", varint_decode_stream(delta_bytes))
+        self.depths = depth_bytes  # bytes, indexable directly
+        self.payloads = array("H")
+        self.payloads.frombytes(payload_bytes)
 
     def _point_code(self, lat, lon):
         n = 1 << self.max_depth
