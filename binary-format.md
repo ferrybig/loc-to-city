@@ -51,9 +51,9 @@ The meta chunk divides the world into sections. If you have 90 (which is *not* p
 * -178 - -176
 * -176 - -174
 
-Each chunk is a single `varint` describing the offset, from the previous one. Each value should be multiplied by 16. This wastes some bytes before the next zlib header starts, but has the advantage of that larger chunks can potentially fit in a smaller varint
+Each chunk is a single `varint` describing the offset, from the previous one. 
 
-Eg, when accessing index 0, you skip `index 0 * 16` bytes after the meta chunk. and when reading index 2, you skip `index 0 * 16 + index 1 * 16 + index 2 * 16` after the meta chunk.
+Eg, when accessing index 0, you skip `index 0` bytes after the meta chunk. and when reading index 2, you skip `index 0 + index 1 + index 2` after the meta chunk.
 
 A varint of 0 means that chunk of the map is fully empty, no further processing needed
 
@@ -80,7 +80,7 @@ We have the following data:
 * varint countries size (there is no need for a regio size, since we can sum all the next entries, same for cities)
 * Countries-to-region list (list of varints, 1 per country of the number of the following regios belong to that country)
 * Regions-to-cities list (list of varints, 1 per region of the number of the following cities belong to that country)
-* keyframe offset list (the first keyframe always has an offset and is not listed. You know the total amount of countries expected, so you can skip to the correct index). These are lengths-to-sum with. Each value should be multiplied by 16. This wastes some bytes before the next zlib header starts, but has the advantage of that larger chunks can potentially fit in a smaller varint
+* keyframe offset list (the first keyframe always has an offset and is not listed. You know the total amount of countries expected, so you can skip to the correct index). These are lengths-to-sum with.
 * zlib header, from here all compressed (repeats every keyframe, even in the middle of either country/region/city block)
   * Countries list (delimited by \0)
   * Regions (delimited by \0)
