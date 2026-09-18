@@ -220,7 +220,7 @@ function rebuildTileLayer() {
 
   const res = resSelect.value;
   const cs = csSelect.value;
-  const url = `/tiles/${method}/{z}/{x}/{y}.png?res=${res}&cs=${cs}&t=1`;
+  const url = `/tiles/${method}/{z}/{x}/{y}.png?res=${res}&cs=${cs}&t=2`;
   tileLayer = L.tileLayer(url, {
     tileSize: 256,
     minZoom: 4,
