@@ -52,8 +52,12 @@ GRID_BOUNDARY_FILL controls how an ambiguous cap-depth cell is resolved:
                          center (same idea as approach A, just scoped to
                          real local candidates instead of the whole
                          country).
-Both `random` and `nearest` write to a different output file so they never
-clobber the sentinel/approach-C build.
+  coverage           -- deterministic: pick whichever candidate covers the
+                         largest share of the cell's area (intersection
+                         area with the cell box), i.e. whichever city the
+                         cell is "mostly" inside of.
+`random`, `nearest` and `coverage` each write to their own output file so
+they never clobber the sentinel/approach-C build or each other.
 """
 import json
 import random
@@ -71,7 +75,7 @@ CITIES_PATH = Path("data/nl_cities.geojson")
 import os
 MAX_DEPTH = int(os.environ.get("GRID_MAX_DEPTH", "18"))
 BOUNDARY_FILL = os.environ.get("GRID_BOUNDARY_FILL", "sentinel")
-assert BOUNDARY_FILL in ("sentinel", "random", "nearest"), BOUNDARY_FILL
+assert BOUNDARY_FILL in ("sentinel", "random", "nearest", "coverage"), BOUNDARY_FILL
 OUT_PATH = Path("data/nl_grid.bin") if BOUNDARY_FILL == "sentinel" else Path(f"data/nl_grid_d_{BOUNDARY_FILL}.bin")
 
 NO_CITY = (1 << 15) - 1    # 32767, reserved sentinel: confirmed outside any city
@@ -146,6 +150,9 @@ def main():
     def resolve_ambiguous_cell(cellbox, cand):
         if BOUNDARY_FILL == "random":
             return random.choice(cand)
+        if BOUNDARY_FILL == "coverage":
+            # deterministic: whichever candidate covers the most area of the cell
+            return max(cand, key=lambda i: geoms[i].intersection(cellbox).area)
         # "nearest": deterministic, closest candidate to the cell center
         center = cellbox.centroid
         return min(cand, key=lambda i: geoms[i].distance(center))
