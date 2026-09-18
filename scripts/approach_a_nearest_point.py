@@ -55,6 +55,29 @@ class NearestPointIndex:
                 })
         return cls(rows)
 
+    @classmethod
+    def from_csv_bbox(cls, path=CSV_PATH, bbox=None):
+        """Same idea as from_nl_csv, but filtered by (minlon, minlat, maxlon,
+        maxlat) instead of a single country code -- existing_data.csv is
+        already worldwide, so a bbox is the natural way to scope it to
+        match a multi-country grid build (e.g. the Europe extract's bbox)
+        without hardcoding a country-code allowlist."""
+        rows = []
+        with open(path, newline="") as f:
+            for r in csv.DictReader(f):
+                lat, lon = float(r["latitude"]), float(r["longitude"])
+                if bbox and not (bbox[0] <= lon <= bbox[2] and bbox[1] <= lat <= bbox[3]):
+                    continue
+                rows.append({
+                    "name": r["name"],
+                    "latitude": lat,
+                    "longitude": lon,
+                    "region": r["admin1Name"],
+                    "municipality": r["admin2Name"],
+                    "country": r["countryCode"],
+                })
+        return cls(rows)
+
     def query(self, lat, lon):
         xyz = to_xyz(lat, lon)
         _, idx = self.tree.query(xyz)

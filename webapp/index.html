@@ -99,9 +99,12 @@
   <div class="hint">
     Each pixel block is one query, colored by a hash of the resolved
     city. Lower resolution = fewer queries = faster tiles, but blockier
-    borders -- that blockiness <em>is</em> the grid's actual cell size.
-    D never does real polygon math for boundary cells; watch it speckle
-    randomly near every border.
+    borders -- that blockiness <em>is</em> the grid's actual cell size
+    (this Europe-wide build uses ~25km cells, much coarser than the
+    Netherlands-only build's ~300m). D never does real polygon math for
+    boundary cells -- it bakes in whichever real neighboring city covers
+    the most of that cell at build time, so watch for a jagged seam
+    (not random speckle) right along borders instead.
   </div>
 </div>
 
@@ -109,7 +112,7 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-const map = L.map('map').setView([52.15, 5.3], 8);
+const map = L.map('map').setView([50.5, 10], 5);
 
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19,
@@ -196,7 +199,9 @@ map.on('click', (e) => {
 });
 
 // ---- tile overlay ----
-const NL_BOUNDS = L.latLngBounds([[50.6, 3.0], [53.7, 7.4]]);
+// Matches the Europe extract's bbox (see webapp/server.py EU_BBOX / the
+// README's "Europe scaling test" section), padded slightly.
+const DATA_BOUNDS = L.latLngBounds([[29.6, -32.0], [81.5, 46.8]]);
 let tileLayer = null;
 
 const methodSelect = document.getElementById('method-select');
@@ -218,9 +223,9 @@ function rebuildTileLayer() {
   const url = `/tiles/${method}/{z}/{x}/{y}.png?res=${res}&cs=${cs}&t=1`;
   tileLayer = L.tileLayer(url, {
     tileSize: 256,
-    minZoom: 7,
+    minZoom: 4,
     maxZoom: 24,
-    bounds: NL_BOUNDS,
+    bounds: DATA_BOUNDS,
     opacity: opacityRange.value / 100,
   }).addTo(map);
 }

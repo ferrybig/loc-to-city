@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """
 Tiny stdlib-only web server for the loc-to-city demo: serves the Leaflet
-page and a JSON API that runs all three lookup approaches for a clicked
+page and a JSON API that runs all four lookup approaches for a clicked
 point.
 
-    python3 webapp/server.py [port]
+    python3 webapp/server.py [port] [dataset]
 
-Loads all three indexes once at startup (a few seconds), then answers
-queries against in-memory data -- no per-request rebuilding.
+dataset is "eu" (default -- data/eu_*, all of Europe, see the README's
+"Europe scaling test" section) or "nl" (data/nl_*, the Netherlands-only
+build with finer admin_level=10 precision).
+
+Loads all four indexes once at startup, then answers queries against
+in-memory data -- no per-request rebuilding. The EU dataset's approach B
+(STRtree over ~152k polygons from a 248MB GeoJSON) takes noticeably longer
+to load than NL's.
 """
 import json
 import re
@@ -32,6 +38,11 @@ from tiles import render_tile_png
 STATIC_DIR = Path(__file__).resolve().parent
 TILE_RE = re.compile(r"^/tiles/(?P<method>[abcd])/(?P<z>\d+)/(?P<x>\d+)/(?P<y>\d+)\.png$")
 
+# Europe extract's bbox (see scripts/extract_boundaries_europe.py output),
+# padded slightly -- used to scope approach A's nearest-point CSV to the
+# same region the grid/polygon approaches actually cover.
+EU_BBOX = (-31.28, 30.02, 45.66, 70.11)  # (minlon, minlat, maxlon, maxlat)
+
 
 def place_to_json(p):
     if p is None:
@@ -46,15 +57,28 @@ def place_to_json(p):
 
 
 class Indexes:
-    def __init__(self):
-        print("Loading approach A (nearest point)...", file=sys.stderr)
-        self.a = NearestPointIndex.from_nl_csv()
-        print("Loading approach B (exact polygon)...", file=sys.stderr)
-        self.b = PolygonIndex.load()
-        print("Loading approach C (adaptive grid + exact fallback)...", file=sys.stderr)
-        self.c = GridIndex(polygon_fallback=self.b)
-        print("Loading approach D (adaptive grid + coverage-local-candidate fill)...", file=sys.stderr)
-        self.d = GridIndex(Path("data/nl_grid_d_coverage.bin"))  # self-contained, no fallback needed
+    def __init__(self, dataset="eu"):
+        self.dataset = dataset
+        if dataset == "eu":
+            cities_path = Path("data/eu_cities.geojson")
+            grid_path = Path("data/eu_grid.bin")
+            grid_d_path = Path("data/eu_grid_d_coverage.bin")
+        else:
+            cities_path = Path("data/nl_cities.geojson")
+            grid_path = Path("data/nl_grid.bin")
+            grid_d_path = Path("data/nl_grid_d_coverage.bin")
+
+        print(f"Loading approach A (nearest point, dataset={dataset})...", file=sys.stderr)
+        if dataset == "eu":
+            self.a = NearestPointIndex.from_csv_bbox(bbox=EU_BBOX)
+        else:
+            self.a = NearestPointIndex.from_nl_csv()
+        print(f"Loading approach B (exact polygon) from {cities_path}...", file=sys.stderr)
+        self.b = PolygonIndex.load(cities_path)
+        print(f"Loading approach C (adaptive grid + exact fallback) from {grid_path}...", file=sys.stderr)
+        self.c = GridIndex(grid_path, polygon_fallback=self.b)
+        print(f"Loading approach D (adaptive grid + coverage-local-candidate fill) from {grid_d_path}...", file=sys.stderr)
+        self.d = GridIndex(grid_d_path)  # self-contained, no fallback needed
         print("All indexes loaded.", file=sys.stderr)
 
     def query_all(self, lat, lon):
@@ -154,9 +178,10 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     global INDEXES
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
-    INDEXES = Indexes()
+    dataset = sys.argv[2] if len(sys.argv) > 2 else "eu"  # "eu" or "nl"
+    INDEXES = Indexes(dataset=dataset)
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    print(f"Serving on http://127.0.0.1:{port}", file=sys.stderr)
+    print(f"Serving on http://127.0.0.1:{port} (dataset={dataset})", file=sys.stderr)
     server.serve_forever()
 
 
