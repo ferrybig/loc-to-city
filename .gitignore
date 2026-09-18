@@ -7,3 +7,4 @@ data/nl_grid_d22_naive_reference.bin
 .venv/
 __pycache__/
 *.pyc
+agent-resources/
