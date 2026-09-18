@@ -39,23 +39,29 @@ The header contains the following data:
 * Attribution: `x bytes` An attribution field, so things like "`[OpenStreetMap](https://openstreetmap.org/copyright)`" can be captured. This field is designed for human ingestion and is markdown
 * Meta chunk width in chunks: `1-byte int`: base 2 number
 * Meta chunk height in chunks: `1-byte int`: base 2 number
-* Keyframe interval: `1-byte int`: base 2 number how often a keyframe exists in the "name list". A value of 0 means no keyframes used. Usually a value of around 16 (2 ^ 13) = 8192 seems to be fine for compression vs recall speed, through further testing needs to be done
+* Keyframe interval: `1-byte int`: base 2 number how often a keyframe exists in the "name list". A value of 0 means no keyframes used. Usually a value of around 13 (2 ^ 13) = 8192 seems to be fine for compression vs recall speed, through further testing needs to be done
 
 (TODO, maybe a scaling factor for latitude, so locations closer to the earths poles can be also made less detailed in the north/south directions to make sure each chunk is more or less square, or each chunk is a about the same size)
 
 ### Meta chunk
 
-The meta chunk divides the world into sections. If you have 90 meta chunks in width, you have bands like
+The meta chunk divides the world into sections. If you have 90 (which is *not* possible with the base 2 width system, but makes the visual below easier) meta chunks in width, you have bands like
 
 * -180 - -178
 * -178 - -176
 * -176 - -174
 
-Each chunk is a single `varint` describing the offset.
+Each chunk is a single `varint` describing the offset, from the previous one. Each value should be multiplied by 16. This wastes some bytes before the next zlib header starts, but has the advantage of that larger chunks can potentially fit in a smaller varint
 
-Eg, when accessing index 3, you do index 0 + index 1 + index 2
+Eg, when accessing index 0, you skip `index 0 * 16` bytes after the meta chunk. and when reading index 2, you skip `index 0 * 16 + index 1 * 16 + index 2 * 16` after the meta chunk.
 
 A varint of 0 means that chunk of the map is fully empty, no further processing needed
+
+A valid latitude is `-90 <= lat < 90`, values between -270 to -90 should have +180 subtracted, values between 90 to 270 should have 180 subtracted
+
+A valid longitude is `-180 <= lon < 180`, values between -540 to -180 should have +360 subtracted, values between 180 to 540 should have 360 subtracted
+
+If either latitude or longitude outside the valid range is passed it should be rejected
 
 Having more chunks means faster decoding at the expense of more storage space.
 
@@ -74,11 +80,11 @@ We have the following data:
 * varint countries size (there is no need for a regio size, since we can sum all the next entries, same for cities)
 * Countries-to-region list (list of varints, 1 per country of the number of the following regios belong to that country)
 * Regions-to-cities list (list of varints, 1 per region of the number of the following cities belong to that country)
-* keyframe offset list (the first keyframe always has an offset and is not listed. You know the total amount of countries expected, so you can skip to the correct index)
+* keyframe offset list (the first keyframe always has an offset and is not listed. You know the total amount of countries expected, so you can skip to the correct index). These are lengths-to-sum with. Each value should be multiplied by 16. This wastes some bytes before the next zlib header starts, but has the advantage of that larger chunks can potentially fit in a smaller varint
 * zlib header, from here all compressed (repeats every keyframe, even in the middle of either country/region/city block)
-* Countries list (delimited by \0)
-* Regions (delimited by \0)
-* Cities (delimited by \0)
+  * Countries list (delimited by \0)
+  * Regions (delimited by \0)
+  * Cities (delimited by \0)
 
 The 2 lists of ints means that the order of cities is significant. Countries are earlier in the list, and search tool that has a limit on results shows countries before regions, before cities, which *can* be seen as an advantage. Efficient storage of entries is more important than a fast search speed
 
@@ -88,6 +94,8 @@ The whole list of countries/regions/cities is a zlib compressed data blob, with 
 
 More keyframes means faster random access at the downside of space consumption by the format
 
+The keyframe count can be computed by the formulae ceil((countries+regions+cities)/interval) - 1
+
 ### Chunks
 
 Each chunks has zlib wrapper around it for compression
@@ -96,9 +104,9 @@ A chunk format is:
 
 * Palette: a list of `varint`, referring to the city/region/country indexes's. A `0` marks the end of the list
 * record count: `varint`
-* Records: adaptive Morton grid, first the depth variables, then the indexes to the palette. If palette is shorter than 255, use 1-byte integers, if palette is shorter than 2^16+1, use 2 byte integers, if palette is shorter than 2^48+1, use 3 byte integers, otherwise use 4 byte integers. Most chunks likely use the 2 byte ints.
+* Records: adaptive Morton grid, first the depth variables, then the indexes to the palette. A 0 means no city found. If palette is shorter than 255, use 1-byte integers, if palette is shorter than 2^16, use 2 byte integers, if palette is shorter than 2^24, use 3 byte integers, otherwise use 4 byte integers. Most chunks likely use the 2 byte ints.
 
-Note that pallette is also an incrementing list like before, eg to get the value of [2], do p[0] + p[1] + p[2]
+Note that pallette is also an incrementing list like before, eg to get the value of [2], do p[0] + p[1] + p[2]. The means that chunks are stored in the same row-major order as the meta chunk table. 
 
 ## examples
 
@@ -107,8 +115,13 @@ Note that pallette is also an incrementing list like before, eg to get the value
   * version: `0`
   * attribution: `''`
   * width in chunks: 2 (raw: `1`)
-  * width in chunks: 2 (raw: `1`)
+  * height in chunks: 2 (raw: `1`)
   * keyframe interval: \<no keyframes> (raw: 0)
+* chunk pointer
+  * 1024 (fictional length, which is the length of the header, so after this amount of bytes are skipped after the chunk pointers, the reading is now at chunk 0 )
+  * 0 (empty chunk)
+  * 0 (empty chunk)
+  * 0 (empty chunk)
 * City/Region/Country data
   * country size: `2`
   * Countries-to-region list:
@@ -138,11 +151,6 @@ Note that pallette is also an incrementing list like before, eg to get the value
     * city 1
     * city 1
     * city 1
-* chunk pointer
-  * 0 (empty chunk)
-  * 0 (empty chunk)
-  * 0 (empty chunk)
-  * 1024 (fictional length)
 * chunks (only 1 chunk is filled)
   * Pallete
   * adaptive Morton grid
