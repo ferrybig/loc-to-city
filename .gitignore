@@ -1,6 +1,8 @@
 data/*.osm.pbf
 data/*.o5m
 data/work/
+data/work-eu/
+data/eu_cities.geojson
 data/nl_grid_d22_naive_reference.bin
 *.pbf
 *.pbf.part

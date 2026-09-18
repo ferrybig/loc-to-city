@@ -3,8 +3,8 @@
 with a single binary search for the common case -- no polygon math, no
 pointer chasing.
 
-On-disk format (v3, "LG03"): records are stored pre-sorted by code as three
-columnar streams -- delta-varint-encoded codes, 1-byte depths, 2-byte
+On-disk format (v4, "LG05"): records are stored pre-sorted by code as three
+columnar streams -- delta-varint-encoded codes, 1-byte depths, 3-byte
 payloads -- concatenated and zlib-compressed as one blob. Decompressing and
 decoding the varints happens once here, at load time; every query after
 that is a plain `bisect` over an in-memory array. See build_grid_index.py
@@ -31,8 +31,8 @@ from array import array
 from pathlib import Path
 
 GRID_PATH = Path("data/nl_grid.bin")
-NO_CITY = (1 << 15) - 1
-BOUNDARY = (1 << 15) - 2
+NO_CITY = (1 << 24) - 1
+BOUNDARY = (1 << 24) - 2
 
 
 def varint_decode_stream(buf):
@@ -62,23 +62,30 @@ class GridIndex:
         self.fallback_hits = 0
         data = Path(path).read_bytes()
         magic = data[0:4]
-        assert magic == b"LG03", magic
+        assert magic == b"LG05", magic
         self.max_depth = data[4]
         n_cities, = struct.unpack_from("<I", data, 5)
         n_records, = struct.unpack_from("<Q", data, 9)
         delta_len, = struct.unpack_from("<Q", data, 17)
-        compressed_len, = struct.unpack_from("<Q", data, 25)
-        off = 33
+        city_table_compressed_len, = struct.unpack_from("<Q", data, 25)
+        compressed_len, = struct.unpack_from("<Q", data, 33)
+        off = 41
+
+        city_table = zlib.decompress(data[off:off + city_table_compressed_len])
+        off += city_table_compressed_len
 
         self.cities = []
+        toff = 0
+
+        def read_str():
+            nonlocal toff
+            ln = city_table[toff]
+            toff += 1
+            s = city_table[toff:toff + ln].decode()
+            toff += ln
+            return s
+
         for _ in range(n_cities):
-            def read_str():
-                nonlocal off
-                ln = data[off]
-                off += 1
-                s = data[off:off + ln].decode()
-                off += ln
-                return s
             city_id = read_str()
             name = read_str()
             muni = read_str()
@@ -96,12 +103,11 @@ class GridIndex:
         blob = zlib.decompress(compressed)
         delta_bytes = blob[:delta_len]
         depth_bytes = blob[delta_len:delta_len + n_records]
-        payload_bytes = blob[delta_len + n_records:delta_len + n_records + n_records * 2]
+        payload_bytes = blob[delta_len + n_records:delta_len + n_records + n_records * 3]
 
         self.codes = array("Q", varint_decode_stream(delta_bytes))
-        self.depths = depth_bytes  # bytes, indexable directly
-        self.payloads = array("H")
-        self.payloads.frombytes(payload_bytes)
+        self.depths = depth_bytes    # bytes, indexable directly
+        self.payloads = payload_bytes  # bytes, 3 bytes/record -- decoded on demand in query()
 
     def _point_code(self, lat, lon):
         n = 1 << self.max_depth
@@ -125,7 +131,7 @@ class GridIndex:
         # top (2*max_depth - shift) bits of q must match this record's path
         if (q >> shift) != (self.codes[i] >> shift):
             return None
-        payload = int(self.payloads[i])
+        payload = int.from_bytes(self.payloads[i * 3:i * 3 + 3], "little")
         if payload == self.NO_CITY:
             return None
         if payload == self.BOUNDARY:

@@ -345,6 +345,86 @@ and the accuracy discussion in the D section above.)
   [Goal](#goal-replacing-immichs-reverse-geocoding) section above hasn't
   been started yet.
 
+## Europe scaling test
+
+Ran the same pipeline against all of Europe (`europe-latest.osm.pbf`,
+Geofabrik) to see where it actually breaks, using `admin_level=8`
+uniformly as a "city" proxy across every country (NL's own
+admin_level=10/8/4 build is untouched — this is a separate, deliberately
+coarser probe: `scripts/extract_boundaries_europe.py`,
+`GRID_CITIES_PATH=data/eu_cities.geojson GRID_MAX_DEPTH=10
+python3 scripts/build_grid_index.py`). It found four real problems, all
+now fixed:
+
+1. **The build OOM'd the entire machine session**, not just the Python
+   process. Root cause: ~123 country-level (`admin_level=2`) OSM relations
+   at full precision include some extremely detailed coastlines (Norway,
+   Croatia...), and accumulating those alongside 152,165 city polygons in
+   memory at once spiked well past available RAM. Fixed by simplifying
+   geometry on load, before anything accumulates (city: ~55m tolerance,
+   region: ~220m, country: ~1.1km — coarse, but this is a containment test
+   for the region/country *label*, not the precision-critical grid).
+   Restarted the build under a `systemd-run --user --scope -p
+   MemoryMax=...` cgroup afterward so a repeat would only kill that scope,
+   not the session.
+2. **The payload field overflowed.** It was 2 bytes (uint16, max 65,535) —
+   fine for NL's 2,521 cities, a hard crash (`struct.error`) once Europe's
+   152,165 cities needed indices past that. Widened to 3 bytes (up to
+   16,777,214 cities) in both `build_grid_index.py` and `query_grid.py`;
+   bumped the on-disk format to "LG04" so an old 2-byte-payload file can
+   never be silently misread.
+3. **The city table, not the spatial index, dominates file size at this
+   scale.** The compact delta-varint/zlib encoding only ever applied to
+   the grid records — the city table (id/name/municipality/region/country
+   strings) was still written raw. At NL's 2,521 cities that was a
+   rounding error; at Europe's 152,165 it was **7.42MB out of a 7.42MB
+   file (99.94%)**, while the actual (compressed) spatial index was just
+   4.5KB. Compressing the city table too (bumped to "LG05") cut the whole
+   file to **1.65MB** — a 4.5x reduction from fixing the part that was
+   actually never a bottleneck at NL's scale.
+4. **Country resolution needed a fallback, and the fallback itself needed
+   a fix.** France's own `admin_level=2` OSM relation doesn't assemble
+   into a valid polygon in a Europe-only extract — it references overseas
+   department members that a geographic clip cuts away, breaking
+   multipolygon assembly entirely (a known OSM-data quirk, not a bug
+   here). Added a fallback to Natural Earth's country polygons
+   (`agent-resources/ne_10m_admin_0_countries.geojson` — the same dataset
+   Immich itself uses for `naturalearth_countries`), which dropped
+   `missing_country` from 47,200 to 69 (30% → 0.05%). Then hit a second,
+   independent quirk: Natural Earth's `ISO_A2` field is literally the
+   string `"-99"` for France specifically (a long-documented NE artifact
+   for a few disputed/edge cases) — fixed by preferring `ISO_A2_EH`
+   ("everywhere, including disputed") over `ISO_A2`.
+
+**What's still a known gap, not fixed:** Berlin resolves to `None`.
+Germany's three city-states (Berlin, Hamburg, Bremen) are simultaneously
+a federal state (`admin_level=4`) and a city, with no separate
+`admin_level=8` municipal boundary the way an ordinary German city has —
+so a single uniform admin-level assumption genuinely can't cover every
+country correctly. This is exactly the `extract_boundaries.py`-assumes-
+NL's-convention limitation called out above, just now observed concretely
+instead of theoretically. A real deployment would need a per-country
+admin_level mapping table, not one constant.
+
+**Numbers, end to end:**
+
+| Stage | Time | Peak memory | Result |
+|---|---|---|---|
+| Filter `europe-latest.osm.pbf` (35GB) for boundaries | 5m00s | ~2GB | 478MB pbf, 370,644 relations |
+| Export to GeoJSON | 1m23s | — | 4.36GB, 419,697 features |
+| Extract + resolve region/country (`extract_boundaries_europe.py`) | 3m19s | ~2.5GB | 248MB `eu_cities.geojson`, 152,165 cities |
+| Build grid, `MAX_DEPTH=10` (~25km cells — a fast scaling probe, not NL's precision) | 21s | ~2.8GB | 17,600 leaf records |
+| **Total on-disk (grid + compressed city table)** | | | **1.65MB** |
+
+152,165 cities is **60x** NL's 2,521, and the compact-format pipeline
+handled it in well under 10 minutes end to end (excluding the one-time
+pbf download) once the four fixes above landed — the design holds up;
+it just needed the payload width, city-table compression, and country
+fallback to actually get exercised at that scale before their limits
+showed up. Correctness spot-checked across NL, FR, DE, IT, ES, PL after
+the fixes: all resolve to the right city/region/country except the
+German-city-state gap noted above.
+
 ## Interactive demo
 
 ```bash

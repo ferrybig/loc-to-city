@@ -7,12 +7,12 @@ per query for the common case.
 Grid: world-aligned, lon in [-180,180), lat in [-90,90), split into a
 2^MAX_DEPTH x 2^MAX_DEPTH grid.
 
-On-disk format (v3, "LG03"): records are sorted by code, then split into
+On-disk format (v4, "LG05"): records are sorted by code, then split into
 three columnar streams and compressed together as one zlib blob:
   - codes:    delta-encoded (sorted ascending -> tiny deltas) and
               varint-packed, instead of 8 bytes each
   - depths:   1 byte per record
-  - payloads: 2 bytes per record (index into the city table, NO_CITY, or
+  - payloads: 3 bytes per record (index into the city table, NO_CITY, or
               BOUNDARY)
 This cut data/nl_grid.bin from 7.4MB to ~500KB in testing -- see the
 "Compact on-disk format" section of the README for the exact numbers and
@@ -78,16 +78,26 @@ from shapely.geometry import shape, box
 from shapely.strtree import STRtree
 from shapely.prepared import prep
 
-CITIES_PATH = Path("data/nl_cities.geojson")
-
 import os
+CITIES_PATH = Path(os.environ.get("GRID_CITIES_PATH", "data/nl_cities.geojson"))
+OUT_PREFIX = os.environ.get("GRID_OUT_PREFIX", "data/nl_grid")  # -> <prefix>.bin or <prefix>_d_<fill>.bin
+
 MAX_DEPTH = int(os.environ.get("GRID_MAX_DEPTH", "18"))
 BOUNDARY_FILL = os.environ.get("GRID_BOUNDARY_FILL", "sentinel")
 assert BOUNDARY_FILL in ("sentinel", "random", "nearest", "coverage"), BOUNDARY_FILL
-OUT_PATH = Path("data/nl_grid.bin") if BOUNDARY_FILL == "sentinel" else Path(f"data/nl_grid_d_{BOUNDARY_FILL}.bin")
+OUT_PATH = Path(f"{OUT_PREFIX}.bin") if BOUNDARY_FILL == "sentinel" else Path(f"{OUT_PREFIX}_d_{BOUNDARY_FILL}.bin")
 
-NO_CITY = (1 << 15) - 1    # 32767, reserved sentinel: confirmed outside any city
-BOUNDARY = (1 << 15) - 2   # 32766, reserved sentinel: ambiguous at cap depth, needs exact fallback
+
+# Payload is a 3-byte (24-bit) city-table index -- up to 16,777,214 distinct
+# cities. This was originally 2 bytes (uint16, max 65,535): fine for NL's
+# 2,521 cities, but a real bug once the Europe build's 152,165 cities blew
+# straight through it (struct.error packing a payload > 65535). Widened
+# instead of just bumping to 4 bytes, since payload is roughly half the
+# uncompressed records blob (see README) and doubling it would have been
+# needless -- 3 bytes covers any realistic world-scale city count with room
+# to spare.
+NO_CITY = (1 << 24) - 1    # reserved sentinel: confirmed outside any city
+BOUNDARY = (1 << 24) - 2   # reserved sentinel: ambiguous at cap depth, needs exact fallback
 
 random.seed(42)  # reproducible builds
 
@@ -225,7 +235,7 @@ def main():
         delta_parts += varint_encode(code - prev)
         prev = code
         depth_parts[idx] = depth
-        payload_parts += struct.pack("<H", payload)
+        payload_parts += payload.to_bytes(3, "little")
     delta_bytes = bytes(delta_parts)
 
     blob = delta_bytes + bytes(depth_parts) + bytes(payload_parts)
@@ -234,27 +244,32 @@ def main():
           f"(codes delta-varint: {len(delta_bytes):,}, depths: {len(depth_parts):,}, payloads: {len(payload_parts):,})"
           f" -> {len(compressed):,} bytes zlib-9", file=sys.stderr)
 
+    # City table: at NL's scale (2,521 cities) this was a rounding error next
+    # to the records blob, so it was written raw. At Europe's scale (152,165
+    # cities) it completely dominates -- ~7.4MB raw vs. a 4.5KB compressed
+    # records blob in testing, i.e. 99.94% of the file was the uncompressed
+    # city table. Compress it too, same as the records.
+    city_table = bytearray()
+    for f_ in features:
+        p = f_["properties"]
+        for field in ("id", "name", "municipality", "region", "country"):
+            s = (p[field] or "").encode()
+            city_table += struct.pack("<B", len(s)) + s
+    city_table_compressed = zlib.compress(bytes(city_table), level=9)
+    print(f"city table: {len(city_table):,} bytes raw -> {len(city_table_compressed):,} bytes zlib-9", file=sys.stderr)
+
     # ---- write binary file ----
-    # header: magic(4s) max_depth(B) n_cities(I) n_records(Q) delta_len(Q) compressed_len(Q)
+    # header: magic(4s) max_depth(B) n_cities(I) n_records(Q) delta_len(Q)
+    #         city_table_compressed_len(Q) records_compressed_len(Q)
     with open(OUT_PATH, "wb") as f:
-        f.write(b"LG03")
+        f.write(b"LG05")
         f.write(struct.pack("<B", MAX_DEPTH))
         f.write(struct.pack("<I", len(features)))
         f.write(struct.pack("<Q", n))
         f.write(struct.pack("<Q", len(delta_bytes)))
+        f.write(struct.pack("<Q", len(city_table_compressed)))
         f.write(struct.pack("<Q", len(compressed)))
-        for f_ in features:
-            p = f_["properties"]
-            name = (p["id"] or "").encode()
-            city = (p["name"] or "").encode()
-            muni = (p["municipality"] or "").encode()
-            region = (p["region"] or "").encode()
-            country = (p["country"] or "").encode()
-            f.write(struct.pack("<B", len(name)) + name)
-            f.write(struct.pack("<B", len(city)) + city)
-            f.write(struct.pack("<B", len(muni)) + muni)
-            f.write(struct.pack("<B", len(region)) + region)
-            f.write(struct.pack("<B", len(country)) + country)
+        f.write(city_table_compressed)
         f.write(compressed)
 
     size = OUT_PATH.stat().st_size
