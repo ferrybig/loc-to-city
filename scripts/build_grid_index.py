@@ -199,7 +199,16 @@ def main():
 
         fully_containing = [i for i in cand if prepared[i].contains(cellbox)]
         if len(fully_containing) >= 1:
-            records.append((compute_code(ix, iy, depth), depth, fully_containing[0]))
+            # Prefer the smallest (finest-grained) polygon when several fully
+            # contain the cell. Overlapping city datasets are possible (e.g.
+            # the Europe extract's gap-filled entries can add a coarse
+            # container -- a canton -- alongside an already-covered finer
+            # one -- a municipality -- if the coarse one's own representative
+            # point happened to land in an unrelated gap); picking the
+            # smallest area is a simple, general way to prefer the more
+            # specific place instead of depending on arbitrary tree order.
+            winner = min(fully_containing, key=lambda i: geoms[i].area)
+            records.append((compute_code(ix, iy, depth), depth, winner))
             stats["uniform_city"] += 1
             return
 

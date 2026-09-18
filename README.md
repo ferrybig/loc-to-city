@@ -396,34 +396,94 @@ now fixed:
    for a few disputed/edge cases) — fixed by preferring `ISO_A2_EH`
    ("everywhere, including disputed") over `ISO_A2`.
 
-**What's still a known gap, not fixed:** Berlin resolves to `None`.
-Germany's three city-states (Berlin, Hamburg, Bremen) are simultaneously
-a federal state (`admin_level=4`) and a city, with no separate
-`admin_level=8` municipal boundary the way an ordinary German city has —
-so a single uniform admin-level assumption genuinely can't cover every
-country correctly. This is exactly the `extract_boundaries.py`-assumes-
-NL's-convention limitation called out above, just now observed concretely
-instead of theoretically. A real deployment would need a per-country
-admin_level mapping table, not one constant.
+**The gap that was left "known, not fixed" turned out to be much bigger
+than it looked.** Berlin resolving to `None` was flagged above as a
+narrow German-city-state quirk. Visually inspecting the tile overlay
+across the rest of Europe showed the same failure mode — `B: no city` —
+recurring in Germany (Oberhausen, Münster), the UK (Wiltshire), Bosnia
+(Tuzla), Poland, and Latvia: a single hardcoded `admin_level=8` isn't
+just imprecise for some countries, it's flatly the wrong level for many
+of them, and worse, it can be wrong *within* a country too:
 
-**Numbers, end to end:**
+- **Germany's ~107 "kreisfreie Städte"** (independent cities — Oberhausen,
+  Münster, Berlin, Hamburg...) are tagged `admin_level=6`, not 8, because
+  they're simultaneously their own county; ordinary towns are 8. These
+  aren't alternatives to pick between — they're *complementary*: level 8
+  alone covers ~96% of Germany's area but silently omits exactly the
+  cities most likely to matter.
+- **The UK** only has a matching boundary at `admin_level=10` in some
+  areas; **Latvia's** municipalities are `admin_level=7`; several
+  countries mix levels for genuinely different things (a settlement
+  polygon at one level, its containing municipality at another).
+
+A single per-country constant doesn't capture "two complementary levels
+that are both correct for different places within the same country," so
+`extract_boundaries_europe.py` now auto-detects coverage in three passes
+instead of one:
+
+1. **Pass 1** accumulates polygon area by `(country, admin_level)` across
+   every candidate level (5 through 11), country resolved against Natural
+   Earth. (An earlier attempt included any level covering ≥3% of a
+   country's area as "supplementary," which seemed like a natural fix for
+   the kreisfreie-Stadt case — it backfired: Germany's `admin_level=5`
+   ("Regierungsbezirk," a *region*) also has high area coverage, simply
+   because it's the union of everything below it. Raw area share can't
+   tell a genuine standalone leaf apart from a coarse parent container.)
+2. **Pass 2** picks one *primary* level per country — the finest level
+   whose own area already covers ≥60% of the country — and keeps every
+   relation at that level. This alone reproduces the original single-level
+   behavior (Germany: 8, Latvia: 8, UK: 10, Poland: 7 — i.e. gmina, not 8).
+3. **Pass 3** re-scans once more for relations at *other* levels, and adds
+   one only if nothing kept so far covers its location: a query against
+   the pass-2 result at that relation's own representative point. An
+   ordinary Kreis's point falls inside one of its own child Gemeinden
+   (already covered → skipped, correctly excluded as a redundant
+   container); a kreisfreie Stadt's point falls inside nothing at all
+   (genuine gap → added). This is the actual test that distinguishes a
+   leaf from a container that the area-share heuristic couldn't.
+
+This turned the 152,165 single-level cities into 195,530 primary +
+gap-filled cities, all now resolving correctly — but it also introduced
+a new kind of overlap: in the small number of countries with genuinely
+nested complementary levels (Bosnia's cantons and municipalities), a
+coarse gap-filled relation can end up geometrically containing an
+already-correct finer one. `build_grid_index.py`'s cell classification
+picked whichever fully-containing polygon its spatial index happened to
+return first, with no preference for the more specific one — fixed by
+preferring the smallest-area polygon whenever several fully contain the
+same cell. That resolves the common case, but not the narrower one where
+a grid cell's boundary happens to sit inside the coarse polygon without
+also being fully inside the fine one at the built depth — recursion
+already stops once *any* single polygon fully contains a cell, so it
+doesn't force itself deeper just because a smaller candidate is nearby
+but not (yet, at this depth) a clean fully-containing match. Tuzla is
+exactly this case: approach B (exact polygon, no grid involved) correctly
+returns the municipality, while C/D's grid currently returns the
+containing canton — right country, one level too coarse. Known, not
+chased further this round; forcing recursion to prefer the smallest
+candidate in `cand` rather than the first fully-containing one would fix
+it, at the cost of recursing deeper through every such overlap zone.
+
+The grid was also rebuilt at `MAX_DEPTH=14` (~1.2–1.6km cells) instead of
+the original `10` (~25km) — still nowhere near NL's ~300m, but a
+substantial precision jump that stayed cheap (205s to build, 3.57MB) once
+the coverage fix was in place.
+
+**Numbers, end to end (current build):**
 
 | Stage | Time | Peak memory | Result |
 |---|---|---|---|
 | Filter `europe-latest.osm.pbf` (35GB) for boundaries | 5m00s | ~2GB | 478MB pbf, 370,644 relations |
 | Export to GeoJSON | 1m23s | — | 4.36GB, 419,697 features |
-| Extract + resolve region/country (`extract_boundaries_europe.py`) | 3m19s | ~2.5GB | 248MB `eu_cities.geojson`, 152,165 cities |
-| Build grid, `MAX_DEPTH=10` (~25km cells — a fast scaling probe, not NL's precision) | 21s | ~2.8GB | 17,600 leaf records |
-| **Total on-disk (grid + compressed city table)** | | | **1.65MB** |
+| Extract + resolve region/country, 3-pass coverage detection | 11m52s | ~2.5GB | 313MB `eu_cities.geojson`, 202,154 cities |
+| Build grid, `MAX_DEPTH=14` (~1.2–1.6km cells) | 3m26s | — | 2,539,977 leaf records |
+| **Total on-disk (grid + compressed city table)** | | | **3.57MB** |
 
-152,165 cities is **60x** NL's 2,521, and the compact-format pipeline
-handled it in well under 10 minutes end to end (excluding the one-time
-pbf download) once the four fixes above landed — the design holds up;
-it just needed the payload width, city-table compression, and country
-fallback to actually get exercised at that scale before their limits
-showed up. Correctness spot-checked across NL, FR, DE, IT, ES, PL after
-the fixes: all resolve to the right city/region/country except the
-German-city-state gap noted above.
+202,154 cities is **80x** NL's 2,521. Correctness spot-checked against
+every location from this round's bug reports (Germany x2, England,
+Bosnia, Poland, Latvia) plus the original NL regression pair: all resolve
+to the right country now, and all but Tuzla (see above) to the right
+city too.
 
 ## Interactive demo
 
