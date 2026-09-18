@@ -53,8 +53,8 @@ class Indexes:
         self.b = PolygonIndex.load()
         print("Loading approach C (adaptive grid + exact fallback)...", file=sys.stderr)
         self.c = GridIndex(polygon_fallback=self.b)
-        print("Loading approach D (adaptive grid + random-local-candidate fill)...", file=sys.stderr)
-        self.d = GridIndex(Path("data/nl_grid_d_random.bin"))  # self-contained, no fallback needed
+        print("Loading approach D (adaptive grid + coverage-local-candidate fill)...", file=sys.stderr)
+        self.d = GridIndex(Path("data/nl_grid_d_coverage.bin"))  # self-contained, no fallback needed
         print("All indexes loaded.", file=sys.stderr)
 
     def query_all(self, lat, lon):
@@ -66,15 +66,19 @@ class Indexes:
         hits_before = self.c.fallback_hits
         rc = self.c.query(lat, lon)
         t3 = time.perf_counter()
+        rd = self.d.query(lat, lon)
+        t4 = time.perf_counter()
         fallback_used = self.c.fallback_hits > hits_before
 
         return {
             "a": place_to_json(ra),
             "b": place_to_json(rb),
             "c": place_to_json(rc),
+            "d": place_to_json(rd),
             "a_time_us": (t1 - t0) * 1e6,
             "b_time_us": (t2 - t1) * 1e6,
             "c_time_us": (t3 - t2) * 1e6,
+            "d_time_us": (t4 - t3) * 1e6,
             "c_fallback": fallback_used,
         }
 

@@ -51,14 +51,14 @@
 </head>
 <body>
 
-<div id="panel">
+<!-- <div id="panel">
   <h1>loc-to-city: three techniques, one click</h1>
   <p>Click anywhere in the Netherlands to compare nearest-point, exact polygon, and the adaptive grid.</p>
   <div class="examples">
     <button onclick="jumpTo(52.48878991537549, 4.794346918807473)">Wormerveer example</button>
     <button onclick="jumpTo(52.034656091402674, 4.388124124642494)">Den Haag example</button>
   </div>
-</div>
+</div> -->
 
 <div id="layer-panel">
   <h2>Tile overlay</h2>
@@ -69,7 +69,7 @@
       <option value="a">A: nearest point</option>
       <option value="b">B: exact polygon</option>
       <option value="c" selected>C: grid + exact fallback</option>
-      <option value="d">D: grid + random fallback</option>
+      <option value="d">D: grid + coverage fallback</option>
     </select>
   </label>
 
@@ -126,7 +126,7 @@ function fmtPlace(r) {
   return bits.join(', ');
 }
 
-function buildTable(data) {
+function buildTable(data, lat, lon) {
   const names = [data.a && data.a.name, data.b && data.b.name, data.c && data.c.name];
   const groundTruth = data.b ? data.b.name : null;
 
@@ -152,8 +152,14 @@ function buildTable(data) {
     <td>${fmtPlace(data.c)} ${badge(data.c && data.c.name)}${data.c_fallback ? '<span class="badge fallback">exact fallback used</span>' : ''}</td>
     <td>${data.c_time_us.toFixed(1)}&micro;s</td>
   </tr>`;
+  rows += `<tr>
+    <td class="method-name">D: adaptive grid + coverage fill</td>
+    <td>${fmtPlace(data.d)} ${badge(data.d && data.d.name)}</td>
+    <td>${data.d_time_us.toFixed(1)}&micro;s</td>
+  </tr>`;
+  const header = `<p>Location: ${lat.toFixed(6)}, ${lon.toFixed(6)}</p>`;
 
-  return `<table class="result-table">
+  return `${header}<table class="result-table">
     <tr><th>Method</th><th>Result</th><th>Query time</th></tr>
     ${rows}
   </table>`;
@@ -174,7 +180,7 @@ async function queryAndPopup(lat, lon) {
       popup.setContent(`<div class="loading">Error: ${data.error}</div>`);
       return;
     }
-    popup.setContent(buildTable(data));
+    popup.setContent(buildTable(data, lat, lon));
   } catch (e) {
     popup.setContent(`<div class="loading">Request failed: ${e}</div>`);
   }
@@ -209,11 +215,11 @@ function rebuildTileLayer() {
 
   const res = resSelect.value;
   const cs = csSelect.value;
-  const url = `/tiles/${method}/{z}/{x}/{y}.png?res=${res}&cs=${cs}`;
+  const url = `/tiles/${method}/{z}/{x}/{y}.png?res=${res}&cs=${cs}&t=1`;
   tileLayer = L.tileLayer(url, {
     tileSize: 256,
     minZoom: 7,
-    maxZoom: 18,
+    maxZoom: 24,
     bounds: NL_BOUNDS,
     opacity: opacityRange.value / 100,
   }).addTo(map);

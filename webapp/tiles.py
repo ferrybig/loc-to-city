@@ -29,14 +29,9 @@ def tile_pixel_to_lonlat(z, x, y, px, py, tile_size=TILE_SIZE):
 
 
 def city_color_id(result):
-    """A stable-ish key to color by. Approach A's rows (from the geonames
-    CSV) don't carry the same 'id' the OSM-derived approaches do, so fall
-    back to name+region -- good enough for a color key."""
+    """A stable-ish key to color by. Use a combination of name and region."""
     if result is None:
         return None
-    cid = result.get("id")
-    if cid:
-        return cid
     return f"{result.get('name')}|{result.get('region')}"
 
 

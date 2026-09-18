@@ -222,7 +222,7 @@ Open <http://127.0.0.1:8765>.
   *see* correctness rather than sample it: A renders as a scatter of clean
   Voronoi-cell blobs that ignore real borders entirely; B and C render
   identically (jagged borders that actually follow the polygons); D
-  matches C everywhere except a jagged, noisy seam right along every
+  matches C everywhere except a jagged, coverage based seam right along every
   border — built only from the real neighboring candidates for that
   cell, not a country-wide random pick — where its build-time tradeoff
   shows up directly. The "resolution"
