@@ -9,16 +9,28 @@ import {
   type PlaceTableInfo,
 } from "./placeTable.js";
 import { parseChunk, type ChunkRecords } from "./chunk.js";
-import { mortonEncode, shiftRight } from "./morton.js";
+import { mortonEncode, mortonDecode, shiftRight } from "./morton.js";
 import { safeInflate } from "./zlibUtil.js";
+import { chunkBoundingBox, cellBoundingBox, type BoundingBox } from "./cellBounds.js";
 
 export interface QueryResult {
   country: string[] | null;
   region: string[] | null;
   city: string[] | null;
+  /**
+   * The lat/lon rectangle this result is valid for -- every coordinate in
+   * this box resolves to the exact same result as the one just queried.
+   * Callers doing many nearby lookups (e.g. a tile renderer sampling a
+   * grid of pixels) can cache on this to skip repeat queries that would
+   * land in the same underlying cell. It's as tight as the cell that
+   * produced the result when one was matched; for "unknown" results it's
+   * the whole empty chunk when possible, otherwise the single finest-grain
+   * cell containing the query point (always correct, just not maximal --
+   * the actual empty region in a gap between records isn't generally a
+   * plain rectangle, so this doesn't try to find its full extent).
+   */
+  boundingBox: BoundingBox;
 }
-
-const UNKNOWN: QueryResult = { country: null, region: null, city: null };
 
 export class CGeoDataReader {
   private readonly chunkCache = new Map<number, ChunkRecords>();
@@ -71,25 +83,38 @@ export class CGeoDataReader {
     const x = gx - c * cellsPerChunkSide;
     const y = gy - r * cellsPerChunkSide;
     const chunkIndex = r * W + c;
+    const chunkBox = chunkBoundingBox(c, r, W, H);
 
     const chunk = this.getChunk(chunkIndex);
-    if (!chunk) return UNKNOWN;
+    if (!chunk) return unknownResult(chunkBox); // whole chunk is empty
 
     const q = mortonEncode(x, y, D);
     const j = bisectRightMinusOne(chunk.codes, q);
-    if (j < 0) return UNKNOWN;
+    // Neither of these two "no record covers this" cases can recover the
+    // gap's true extent without redoing the encoder's own subdivision
+    // work, so fall back to the single finest cell around the query point.
+    const finestCellBox = () => cellBoundingBox(chunkBox, x, y, D);
+    if (j < 0) return unknownResult(finestCellBox());
 
     const depth = chunk.depths[j]!;
     const shift = 2 * (D - depth);
-    if (shiftRight(q, shift) !== shiftRight(chunk.codes[j]!, shift)) {
-      return UNKNOWN; // gap between records
+    const code = chunk.codes[j]!;
+    if (shiftRight(q, shift) !== shiftRight(code, shift)) {
+      return unknownResult(finestCellBox()); // gap between records
     }
 
+    // A real record matched: recover its exact cell (Section 8.1) for a
+    // tight, correct bounding box, whether or not it resolves to a place.
+    const { x: fullX, y: fullY } = mortonDecode(code, D);
+    const cellX = shiftRight(fullX, D - depth);
+    const cellY = shiftRight(fullY, D - depth);
+    const matchedCellBox = cellBoundingBox(chunkBox, cellX, cellY, depth);
+
     const k = chunk.paletteIndices[j]!;
-    if (k === 0) return UNKNOWN;
+    if (k === 0) return unknownResult(matchedCellBox);
 
     const placeId = chunk.palette[k - 1]!;
-    return this.resolveNames(placeId);
+    return this.resolveNames(placeId, matchedCellBox);
   }
 
   private getChunk(index: number): ChunkRecords | undefined {
@@ -112,7 +137,7 @@ export class CGeoDataReader {
     return names;
   }
 
-  private resolveNames(placeId: number): QueryResult {
+  private resolveNames(placeId: number, boundingBox: BoundingBox): QueryResult {
     const resolved = resolveIdentifier(this.placeTable, placeId);
     const C = this.placeTable.countryCount;
     const R = this.placeTable.totalRegions;
@@ -121,8 +146,12 @@ export class CGeoDataReader {
     const region = "regionId" in resolved ? this.getName(C + resolved.regionId) : null;
     const city = resolved.level === "city" ? this.getName(C + R + resolved.cityId) : null;
 
-    return { country, region, city };
+    return { country, region, city, boundingBox };
   }
+}
+
+function unknownResult(boundingBox: BoundingBox): QueryResult {
+  return { country: null, region: null, city: null, boundingBox };
 }
 
 /** bisect_right(sorted, value) - 1, per Section 9 step 6. */

@@ -8,6 +8,7 @@
 import { PNG } from "pngjs";
 import type { CGeoDataReader, QueryResult } from "@loc-to-city/reader";
 import { colorKeyToRgb, type ColorSpace } from "./colors.js";
+import { BoundingBoxCache } from "./boundingBoxCache.js";
 
 const TILE_SIZE = 256;
 
@@ -45,6 +46,13 @@ export function renderTilePng(
   const clampedResolution = Math.max(1, Math.min(resolution, TILE_SIZE));
   const gridSize = Math.max(1, Math.floor(TILE_SIZE / clampedResolution));
 
+  // Many of this tile's sample points land in the same underlying grid
+  // cell, especially once zoomed in -- reuse the reader's own boundingBox
+  // for that cell instead of re-querying for each repeat hit. Scoped to
+  // one render call: simple, and a stale entry across tiles/chunks isn't a
+  // concern this way.
+  const cache = new BoundingBoxCache();
+
   const small = new PNG({ width: gridSize, height: gridSize });
   for (let gy = 0; gy < gridSize; gy++) {
     const cy = gy * clampedResolution + clampedResolution / 2;
@@ -59,7 +67,13 @@ export function renderTilePng(
         continue;
       }
 
-      const colorKey = colorKeyForResult(reader.query(lat, lon));
+      let result = cache.lookup(lat, lon);
+      if (!result) {
+        result = reader.query(lat, lon);
+        cache.insert(result);
+      }
+
+      const colorKey = colorKeyForResult(result);
       if (colorKey === null) continue;
 
       const [r, g, b] = colorKeyToRgb(colorKey, colorSpace);

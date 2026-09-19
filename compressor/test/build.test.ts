@@ -81,7 +81,11 @@ test("well inside Shelbyville resolves to Shelbyville", () => {
 test("far from either square resolves to unknown", () => {
   const { bytes } = buildCGeoDataFile(hierarchy, cities, options);
   const reader = CGeoDataReader.open(bytes);
-  assert.deepEqual(reader.query(50, 50), { country: null, region: null, city: null });
+  const result = reader.query(50, 50);
+  assert.deepEqual(
+    { country: result.country, region: result.region, city: result.city },
+    { country: null, region: null, city: null },
+  );
 });
 
 test("a cell straddling the shared border still resolves to exactly one city", () => {

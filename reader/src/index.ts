@@ -1,4 +1,10 @@
 export { CGeoDataReader, type QueryResult } from "./reader.js";
+export {
+  chunkBoundingBox,
+  cellBoundingBox,
+  boundingBoxContains,
+  type BoundingBox,
+} from "./cellBounds.js";
 export { readVarint, writeVarint, readVarintList, readDeltaVarintList, IncompleteBufferError } from "./varint.js";
 export { mortonEncode, mortonDecode, shiftRight, lowBits } from "./morton.js";
 export { parseHeader, type CGeoDataHeader } from "./header.js";

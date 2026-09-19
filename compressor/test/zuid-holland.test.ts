@@ -10,6 +10,7 @@ import {
   parsePlaceTable,
   resolveIdentifier,
   readNameEntry,
+  type QueryResult,
 } from "@loc-to-city/reader";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -19,6 +20,15 @@ const BIN_PATH = path.resolve(__dirname, "../../data/zuid-holland.bin");
 // followed by the compressor CLI (see README/plan for the exact command).
 // Skip gracefully rather than failing if it hasn't been built yet.
 const skip = !existsSync(BIN_PATH);
+
+// boundingBox varies with exact geometry, so it isn't a useful thing to
+// hardcode in most of these tests -- just check the three place fields.
+function assertUnknown(result: QueryResult): void {
+  assert.deepEqual(
+    { country: result.country, region: result.region, city: result.city },
+    { country: null, region: null, city: null },
+  );
+}
 
 test("zuid-holland.bin: structural facts (1 country, 12 regions, 187 cities)", { skip }, () => {
   const source = openSource(BIN_PATH);
@@ -75,6 +85,6 @@ test("zuid-holland.bin: a point in Utrecht (no city data) still resolves to its 
 
 test("zuid-holland.bin: outside the Netherlands entirely is unknown", { skip }, () => {
   const reader = CGeoDataReader.open(BIN_PATH);
-  assert.deepEqual(reader.query(53.5, 3.5), { country: null, region: null, city: null }); // North Sea
-  assert.deepEqual(reader.query(51.2, 4.4), { country: null, region: null, city: null }); // Belgium
+  assertUnknown(reader.query(53.5, 3.5)); // North Sea
+  assertUnknown(reader.query(51.2, 4.4)); // Belgium
 });
