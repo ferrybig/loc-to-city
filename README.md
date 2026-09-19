@@ -84,8 +84,10 @@ proving techniques out, but the on-disk format and algorithms are chosen
 with a JS port in mind: zlib (not zstd/brotli) because both Node's `zlib`
 module and the browser `DecompressionStream` API support it natively with
 no extra dependency; varint decoding and binary search are both trivial
-loops with no library requirement either way. The actual JS port hasn't
-been done yet.
+loops with no library requirement either way. The JS port has started: see
+[The CGEODATA format and its JavaScript/TypeScript
+implementation](#the-cgeodata-format-and-its-javascripttypescript-implementation)
+below.
 
 ## TL;DR results
 
@@ -341,9 +343,11 @@ and the accuracy discussion in the D section above.)
   bottleneck at country/continent scale. Approach D sidesteps this
   entirely by not needing a fallback dataset at all, at a small accuracy
   cost near borders.
-- Still Python throughout; the JS port called for in the
-  [Goal](#goal-replacing-immichs-reverse-geocoding) section above hasn't
-  been started yet.
+- Still Python throughout, and still not what Immich would actually load
+  (Immich runs Node.js). The JS/TS port covers a new, formally-specified
+  format (`binary-format.md`, "CGEODATA") rather than these exact `.bin`
+  files -- see [The CGEODATA format and its JavaScript/TypeScript
+  implementation](#the-cgeodata-format-and-its-javascripttypescript-implementation).
 
 ## Europe scaling test
 
@@ -540,3 +544,130 @@ GRID_BOUNDARY_FILL=coverage python3 scripts/build_grid_index.py  # -> data/nl_gr
 python3 scripts/benchmark.py              # compares approaches A/B/C
 python3 webapp/server.py                  # interactive demo, all four approaches
 ```
+
+## The CGEODATA format and its JavaScript/TypeScript implementation
+
+Everything above is the Python prototype that found and fixed the real
+problems. `binary-format.md` specifies the actual result: CGEODATA, a
+from-scratch binary format (not the same bytes as the Python `.bin` files)
+designed from the start to be readable with zero runtime dependencies in
+Node.js and browsers -- the hard constraint from the
+[Goal](#goal-replacing-immichs-reverse-geocoding) section. It keeps the
+adaptive Morton-grid idea from approach D, adds a "meta chunk" layer that
+shards the world into independently-decompressible pieces so a lookup never
+has to touch more than a small, bounded part of the file, and stores the
+place hierarchy (country → region → city) as delta-coded counts plus
+keyframe-compressed name blocks so names can be recovered by id without
+decompressing the whole list. Read `binary-format.md` for the actual spec;
+this section just covers the code that implements it.
+
+Three npm workspaces, all TypeScript:
+
+- **`reader/`** — the format's reference reader. Zero runtime dependencies
+  (only Node's built-in `zlib`), matching the spec's own constraint. Tested
+  against `binary-format.md`'s Appendix A worked example byte-for-byte, not
+  just self-consistency with the compressor below.
+- **`compressor/`** — turns a GeoJSON of city polygons, region (province)
+  polygons, and a country polygon, plus a small place-hierarchy JSON, into a
+  `.bin` file. Free to use real dependencies (`@turf/*` for polygon math,
+  `rbush` for the candidate spatial index), since it's a build-time tool,
+  not something Immich would load.
+- **`demo/`** — a click-to-query Leaflet page plus a grid tile overlay, the
+  JS/TS equivalent of `webapp/`'s demo but for one format with one lookup
+  path instead of comparing four approaches.
+
+```bash
+npm install                                # installs all three workspaces
+npm run build --workspaces                 # tsc for each package
+npm test -w reader                         # Appendix A conformance + varint/Morton unit tests
+npm test -w compressor                     # synthetic-dataset unit tests + (if built) real-data tests
+
+# Build a small test dataset: 1 country (Netherlands), all 12 provinces
+# with real polygons (11 have 0 cities -- Section 7.2 explicitly allows
+# that), but only the 187 cities in Zuid-Holland, filtered from the
+# already-committed data/nl_cities.geojson. Provinces come from the raw
+# osmium export (data/work/nl-admin.geojson, see "Reproducing" above); the
+# country polygon comes from the Natural Earth file already used for
+# country resolution elsewhere in this repo.
+npx tsx compressor/scripts/prepare-zuid-holland.ts
+npx tsx compressor/src/cli.ts data/nl-regions.json data/zuid-holland-cities.geojson \
+  data/zuid-holland.bin --regions data/nl-provinces.geojson --countries data/nl-country.geojson \
+  --width-exp 6 --height-exp 6 --max-depth 10 --keyframe-exp 13 \
+  --attribution "[OpenStreetMap](https://openstreetmap.org/copyright)"
+
+npm test -w compressor                     # now also runs the Zuid-Holland structural + query tests
+
+npx tsx demo/src/server.ts                 # serves data/zuid-holland.bin on :8766
+cd demo && npx playwright install chromium && npx playwright test   # click-to-query e2e
+```
+
+Both of this phase's known accuracy regressions resolve correctly through
+the full JS/TS stack (compressor → `.bin` → reader → demo), the same way
+they do through the Python prototype:
+
+```
+52.034656, 4.388124   -> Den Haag, not Nootdorp
+51.970738, 4.123725   -> Europoort, not Hoek van Holland
+```
+
+### Two real bugs found by browser testing
+
+Manually clicking around the demo (not just running the two coordinates
+above) surfaced a real gap: a point inside Utrecht -- outside every one of
+Zuid-Holland's 187 city polygons, but still genuinely inside the
+Netherlands -- resolved to fully `unknown` instead of `country: The
+Netherlands, region: Utrecht`. Two separate bugs, found in order:
+
+1. **The compressor never had region or country geometry at all.** Only
+   city polygons were ever fed into the spatial index, even though the
+   place table already listed all 12 provinces. There was no OSM boundary
+   data checked into the repo for that -- `data/work/nl-admin.geojson` (the
+   raw osmium export, gitignored, still present locally from the earlier
+   NL extraction) has clean `admin_level=4` province polygons; the country
+   polygon comes from the Natural Earth file already used elsewhere in this
+   repo. `prepare-zuid-holland.ts` now extracts and simplifies both
+   (`@turf/simplify`, same tolerances the Python prototype used:
+   ~220m for regions, ~1.1km for the country), and the compressor merges
+   them into the same candidate index as cities, keyed by their real place
+   ids (Section 7.1) so a chunk's palette can reference any level.
+2. **Adding those candidates immediately broke city resolution.** The
+   recursion's stopping rule was "stop once *any* touching place fully
+   contains the cell." That's fine with cities alone (nothing coarser is
+   ever a candidate), but a region polygon trivially fully-contains a cell
+   long before that cell has shrunk small enough to fit inside one of its
+   much smaller cities -- so the old rule stopped immediately at the
+   region, and Den Haag/Europoort briefly started resolving to
+   `region: Zuid-Holland, city: null` instead of their actual city. Fixed
+   by only stopping once *every* touching place fully contains the cell
+   (Section 10's "prefer the smallest" tie-break was already correct, it
+   just needed to not fire prematurely): if even one touching candidate's
+   boundary still crosses the cell, that's exactly the signal to keep
+   subdividing.
+
+### Performance: what a CPU profile actually showed
+
+Region and country polygons cover far more area than 187 city polygons, so
+naturally this got slower -- but `--cpu-prof` (`node --cpu-prof --import
+tsx/esm ...`) showed the actual bottleneck wasn't depth or polygon count,
+it was one specific call: the max-depth ambiguous-cell fallback used
+`@turf/intersect` to compute exact overlap area, and Turf v7's polygon
+clipping is backed by `BigNumber`-based exact arithmetic for robustness --
+~45% of all CPU samples in one profiled build were inside that one
+dependency. Since Section 10 only asks for the candidate with the
+*largest* area share, not an exact area, that call was replaced with a
+cheap 5x5 point-sampling grid (`@turf/boolean-point-in-polygon`, plain
+floating-point ray casting) counting which candidate contains the most
+sample points -- a ~5x wall-clock speedup with byte-identical output on the
+already-working city-only build. `touches()`/`fullyContains()` still go
+through the same exact-arithmetic engine (via `@turf/boolean-intersects`/
+`@turf/boolean-contains`) and remain the dominant cost after that fix --
+replacing those is the next real lever, not yet done.
+
+Current numbers for this dataset (country + 12 provinces + 187 Zuid-Holland
+cities): `--max-depth 10` (~600m cells at this grid size) takes about 76
+seconds. `--max-depth 12` (~150m) was reachable in ~21s *before* the
+containment-rule fix above, but that number was measured against the
+buggy, prematurely-truncated recursion -- worth re-measuring once
+`touches`/`fullyContains` are also sped up, rather than trusting it as-is.
+Worth fixing before running this over all of the Netherlands, let alone
+Europe.
