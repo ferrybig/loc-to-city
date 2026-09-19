@@ -1,0 +1,32 @@
+{
+  "name": "@loc-to-city/compressor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "cgeodata-compress": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsx --test test/*.test.ts",
+    "dev": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@loc-to-city/reader": "*",
+    "@turf/area": "^7.2.0",
+    "@turf/bbox": "^7.2.0",
+    "@turf/boolean-contains": "^7.2.0",
+    "@turf/boolean-intersects": "^7.2.0",
+    "@turf/boolean-point-in-polygon": "^7.2.0",
+    "@turf/helpers": "^7.2.0",
+    "@turf/simplify": "^7.2.0",
+    "rbush": "^4.0.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^24.0.0",
+    "@types/geojson": "^7946.0.16",
+    "@types/rbush": "^4.0.0"
+  }
+}

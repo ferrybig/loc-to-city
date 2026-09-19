@@ -1,0 +1,114 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import type { FeatureCollection, Polygon } from "geojson";
+import {
+  CGeoDataReader,
+  openSource,
+  readHeaderAndDirectory,
+  parsePlaceTable,
+  resolveIdentifier,
+  readNameEntry,
+} from "@loc-to-city/reader";
+import { buildCGeoDataFile } from "../src/build.js";
+import type { HierarchyCountry } from "../src/hierarchy.js";
+import type { CityProperties } from "../src/placeIds.js";
+
+// A tiny synthetic dataset: one country, two regions (only one of which has
+// cities -- Section 7.2 explicitly allows a region's city count to be 0),
+// and two adjacent, non-overlapping 1x1 degree city squares. This exercises
+// full-containment leaves (well inside each square), ambiguous-cell
+// resolution at max_depth (right along the shared border, where neither
+// square fully contains the cell), and the empty-region path -- all without
+// touching real OSM data.
+const hierarchy: HierarchyCountry[] = [{ code: "TL", name: "Testland", regions: ["Alpha", "Beta"] }];
+
+const cities: FeatureCollection<Polygon, CityProperties> = {
+  type: "FeatureCollection",
+  features: [
+    {
+      type: "Feature",
+      properties: { id: "springfield", name: "Springfield", region: "Alpha", country: "TL" },
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [0, 0],
+            [1, 0],
+            [1, 1],
+            [0, 1],
+            [0, 0],
+          ],
+        ],
+      },
+    },
+    {
+      type: "Feature",
+      properties: { id: "shelbyville", name: "Shelbyville", region: "Alpha", country: "TL" },
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [1, 0],
+            [2, 0],
+            [2, 1],
+            [1, 1],
+            [1, 0],
+          ],
+        ],
+      },
+    },
+  ],
+};
+
+const options = { attribution: "test fixture", widthExp: 0, heightExp: 0, maxDepth: 10, keyframeExp: 0 };
+
+test("well inside Springfield resolves to Springfield / Alpha / Testland", () => {
+  const { bytes } = buildCGeoDataFile(hierarchy, cities, options);
+  const reader = CGeoDataReader.open(bytes);
+  const result = reader.query(0.5, 0.25);
+  assert.deepEqual(result.country, ["Testland"]);
+  assert.deepEqual(result.region, ["Alpha"]);
+  assert.deepEqual(result.city, ["Springfield"]);
+});
+
+test("well inside Shelbyville resolves to Shelbyville", () => {
+  const { bytes } = buildCGeoDataFile(hierarchy, cities, options);
+  const reader = CGeoDataReader.open(bytes);
+  const result = reader.query(0.5, 1.75);
+  assert.deepEqual(result.city, ["Shelbyville"]);
+});
+
+test("far from either square resolves to unknown", () => {
+  const { bytes } = buildCGeoDataFile(hierarchy, cities, options);
+  const reader = CGeoDataReader.open(bytes);
+  assert.deepEqual(reader.query(50, 50), { country: null, region: null, city: null });
+});
+
+test("a cell straddling the shared border still resolves to exactly one city", () => {
+  const { bytes } = buildCGeoDataFile(hierarchy, cities, options);
+  const reader = CGeoDataReader.open(bytes);
+  // Right on the shared edge: neither square fully contains a cell here at
+  // any depth, so this only succeeds if max-depth area-share resolution
+  // picks a winner instead of leaving a gap.
+  const result = reader.query(0.5, 1.0 - 1e-9);
+  assert.ok(result.city?.[0] === "Springfield" || result.city?.[0] === "Shelbyville", `got ${result.city}`);
+});
+
+test("Beta (0 cities) is still present and resolvable by name", () => {
+  const { bytes, stats } = buildCGeoDataFile(hierarchy, cities, options);
+  assert.equal(stats.countryCount, 1);
+  assert.equal(stats.regionCount, 2);
+  assert.equal(stats.cityCount, 2);
+
+  const source = openSource(bytes);
+  const { header, directory } = readHeaderAndDirectory(source);
+  const placeTable = parsePlaceTable(source, directory.placeTableStart, directory.placeTableLength, header.keyframeExp);
+
+  // Beta is region index 1 (Alpha is 0), global id = countryCount + 1 = 2.
+  const resolved = resolveIdentifier(placeTable, 2);
+  assert.deepEqual(resolved, { level: "region", countryId: 0, regionId: 1 });
+  assert.deepEqual(readNameEntry(source, placeTable, 2), ["Beta"]);
+
+  const betaCityCount = placeTable.cityRegionPrefix[2]! - placeTable.cityRegionPrefix[1]!;
+  assert.equal(betaCityCount, 0);
+});
