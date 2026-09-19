@@ -1,0 +1,22 @@
+{
+  "name": "@loc-to-city/data-ingest",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@loc-to-city/compressor": "*",
+    "@turf/bbox": "^7.2.0",
+    "@turf/boolean-point-in-polygon": "^7.2.0",
+    "@turf/point-on-feature": "^7.2.0",
+    "@turf/simplify": "^7.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^24.0.0",
+    "@types/geojson": "^7946.0.16"
+  }
+}

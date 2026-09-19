@@ -1,9 +1,9 @@
-data/*.osm.pbf
 data/*.o5m
-data/work/
-data/work-eu/
 data/eu_cities.geojson
+data/eu-cities-filtered.geojson
 data/nl_grid_d22_naive_reference.bin
+data-ingest/work/
+data-ingest/work-eu/
 *.pbf
 *.pbf.part
 .venv/

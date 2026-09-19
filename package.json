@@ -1,10 +1,11 @@
 {
   "name": "loc-to-city",
   "private": true,
-  "description": "CGEODATA reverse-geocoding format: reader, compressor, and demo",
+  "description": "CGEODATA reverse-geocoding format: data-ingest, reader, compressor, and demo",
   "workspaces": [
     "reader",
     "compressor",
+    "data-ingest",
     "demo"
   ],
   "engines": {

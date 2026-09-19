@@ -9,24 +9,23 @@
 // province -- or inside the Netherlands but outside any known province --
 // resolve to that region/country instead of "unknown" (Section 7.1: "a cell
 // whose most specific known place is a region resolves to that region").
-// Provinces come from data/work/nl-admin.geojson (the raw osmium export,
-// admin_level=4 -- see README's "Reproducing" section for how it's
+// Provinces come from data-ingest/work/nl-admin.geojson (the raw osmium
+// export, admin_level=4 -- see README's "Reproducing" section for how it's
 // produced); the country polygon comes from Natural Earth, the same source
-// scripts/extract_boundaries_europe.py already uses for country resolution.
+// prepare-europe.ts uses for country resolution.
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { Feature, FeatureCollection, Polygon, MultiPolygon } from "geojson";
 import simplify from "@turf/simplify";
-import type { CityProperties } from "../src/placeIds.js";
-import type { HierarchyCountry } from "../src/hierarchy.js";
+import type { CityProperties, HierarchyCountry } from "@loc-to-city/compressor";
 import { readGeoJSONSeq } from "./lib/geojsonseq.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
 
 const CITIES_SOURCE = path.join(REPO_ROOT, "data/nl_cities.geojson");
-const PROVINCES_SOURCE = path.join(REPO_ROOT, "data/work/nl-admin.geojson");
+const PROVINCES_SOURCE = path.join(REPO_ROOT, "data-ingest/work/nl-admin.geojson");
 const COUNTRIES_SOURCE = path.join(REPO_ROOT, "agent-resources/ne_10m_admin_0_countries.geojson");
 
 const HIERARCHY_OUT = path.join(REPO_ROOT, "data/nl-regions.json");
@@ -71,10 +70,11 @@ function buildCities(): number {
         // -- fall back to that rather than violating Section 7.4's "MUST
         // NOT be empty" for the local name.
         if (f.properties.name != null) return f;
-        if (f.properties.municipality == null) {
+        const municipality = f.properties.municipality;
+        if (municipality == null) {
           throw new Error(`feature ${String(f.properties.id)} has neither a name nor a municipality`);
         }
-        return { ...f, properties: { ...f.properties, name: f.properties.municipality } };
+        return { ...f, properties: { ...f.properties, name: String(municipality) } };
       }),
   };
   writeFileSync(CITIES_OUT, JSON.stringify(filtered));
@@ -92,11 +92,11 @@ function buildProvinces(): number {
     throw new Error(`missing province geometry for: ${missing.join(", ")}`);
   }
 
-  const collection: FeatureCollection<Polygon | MultiPolygon, { name: string }> = {
+  const collection: FeatureCollection<Polygon | MultiPolygon, { name: string; country: string }> = {
     type: "FeatureCollection",
     features: provinces.map((f) => {
       const simplified = simplify(f, { tolerance: REGION_SIMPLIFY_TOLERANCE });
-      return { ...simplified, properties: { name: f.properties.name! } };
+      return { ...simplified, properties: { name: f.properties.name!, country: "NL" } };
     }),
   };
   writeFileSync(PROVINCES_OUT, JSON.stringify(collection));

@@ -16,8 +16,8 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BIN_PATH = path.resolve(__dirname, "../../data/zuid-holland.bin");
 
-// This dataset is produced by `compressor/scripts/prepare-zuid-holland.ts`
-// followed by the compressor CLI (see README/plan for the exact command).
+// This dataset is produced by `data-ingest/src/prepare-zuid-holland.ts`
+// followed by the compressor CLI (see README for the exact command).
 // Skip gracefully rather than failing if it hasn't been built yet.
 const skip = !existsSync(BIN_PATH);
 
