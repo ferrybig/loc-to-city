@@ -1,0 +1,138 @@
+import { openSource, type RandomAccessSource } from "./source.js";
+import { readHeaderAndDirectory } from "./container.js";
+import type { CGeoDataHeader } from "./header.js";
+import type { CGeoDataDirectory } from "./directory.js";
+import {
+  parsePlaceTable,
+  resolveIdentifier,
+  readNameEntry,
+  type PlaceTableInfo,
+} from "./placeTable.js";
+import { parseChunk, type ChunkRecords } from "./chunk.js";
+import { mortonEncode, shiftRight } from "./morton.js";
+import { safeInflate } from "./zlibUtil.js";
+
+export interface QueryResult {
+  country: string[] | null;
+  region: string[] | null;
+  city: string[] | null;
+}
+
+const UNKNOWN: QueryResult = { country: null, region: null, city: null };
+
+export class CGeoDataReader {
+  private readonly chunkCache = new Map<number, ChunkRecords>();
+  private readonly nameCache = new Map<number, string[]>();
+
+  private constructor(
+    private readonly source: RandomAccessSource,
+    readonly header: CGeoDataHeader,
+    private readonly directory: CGeoDataDirectory,
+    private readonly placeTable: PlaceTableInfo,
+  ) {}
+
+  static open(input: string | Uint8Array): CGeoDataReader {
+    const source = openSource(input);
+    const { header, directory } = readHeaderAndDirectory(source);
+    const placeTable = parsePlaceTable(
+      source,
+      directory.placeTableStart,
+      directory.placeTableLength,
+      header.keyframeExp,
+    );
+    return new CGeoDataReader(source, header, directory, placeTable);
+  }
+
+  close(): void {
+    this.source.close?.();
+  }
+
+  /** Section 9's lookup procedure. */
+  query(lat: number, lon: number): QueryResult {
+    if (!(lat >= -90 && lat < 90)) {
+      throw new RangeError(`latitude ${lat} is outside the valid range [-90, 90)`);
+    }
+    if (!(lon >= -180 && lon < 180)) {
+      throw new RangeError(`longitude ${lon} is outside the valid range [-180, 180)`);
+    }
+
+    const { width: W, height: H, maxDepth: D } = this.header;
+    const NX = W * 2 ** D;
+    const NY = H * 2 ** D;
+
+    let gx = Math.floor(((lon + 180) / 360) * NX);
+    let gy = Math.floor(((lat + 90) / 180) * NY);
+    gx = Math.min(Math.max(gx, 0), NX - 1);
+    gy = Math.min(Math.max(gy, 0), NY - 1);
+
+    const cellsPerChunkSide = 2 ** D;
+    const c = Math.floor(gx / cellsPerChunkSide);
+    const r = Math.floor(gy / cellsPerChunkSide);
+    const x = gx - c * cellsPerChunkSide;
+    const y = gy - r * cellsPerChunkSide;
+    const chunkIndex = r * W + c;
+
+    const chunk = this.getChunk(chunkIndex);
+    if (!chunk) return UNKNOWN;
+
+    const q = mortonEncode(x, y, D);
+    const j = bisectRightMinusOne(chunk.codes, q);
+    if (j < 0) return UNKNOWN;
+
+    const depth = chunk.depths[j]!;
+    const shift = 2 * (D - depth);
+    if (shiftRight(q, shift) !== shiftRight(chunk.codes[j]!, shift)) {
+      return UNKNOWN; // gap between records
+    }
+
+    const k = chunk.paletteIndices[j]!;
+    if (k === 0) return UNKNOWN;
+
+    const placeId = chunk.palette[k - 1]!;
+    return this.resolveNames(placeId);
+  }
+
+  private getChunk(index: number): ChunkRecords | undefined {
+    const length = this.directory.chunkLengths[index]!;
+    if (length === 0) return undefined;
+    const cached = this.chunkCache.get(index);
+    if (cached) return cached;
+    const compressed = this.source.readSync(this.directory.chunkOffsets[index]!, length);
+    const inflated = safeInflate(compressed);
+    const chunk = parseChunk(inflated, this.header.maxDepth);
+    this.chunkCache.set(index, chunk);
+    return chunk;
+  }
+
+  private getName(globalId: number): string[] {
+    const cached = this.nameCache.get(globalId);
+    if (cached) return cached;
+    const names = readNameEntry(this.source, this.placeTable, globalId);
+    this.nameCache.set(globalId, names);
+    return names;
+  }
+
+  private resolveNames(placeId: number): QueryResult {
+    const resolved = resolveIdentifier(this.placeTable, placeId);
+    const C = this.placeTable.countryCount;
+    const R = this.placeTable.totalRegions;
+
+    const country = this.getName(resolved.countryId);
+    const region = "regionId" in resolved ? this.getName(C + resolved.regionId) : null;
+    const city = resolved.level === "city" ? this.getName(C + R + resolved.cityId) : null;
+
+    return { country, region, city };
+  }
+}
+
+/** bisect_right(sorted, value) - 1, per Section 9 step 6. */
+function bisectRightMinusOne(sorted: number[], value: number): number {
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (sorted[mid]! <= value) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo - 1;
+}
