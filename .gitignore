@@ -10,3 +10,8 @@ data/nl_grid_d22_naive_reference.bin
 __pycache__/
 *.pyc
 agent-resources/
+
+node_modules/
+dist/
+playwright-report/
+test-results/

@@ -1,0 +1,20 @@
+{
+  "name": "loc-to-city",
+  "private": true,
+  "description": "CGEODATA reverse-geocoding format: reader, compressor, and demo",
+  "workspaces": [
+    "reader",
+    "compressor",
+    "demo"
+  ],
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "allowScripts": {
+    "esbuild": true
+  }
+}
