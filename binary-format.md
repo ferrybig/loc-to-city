@@ -95,7 +95,9 @@ We have the following data:
 
 The 2 lists of ints means that the order of cities is significant. Countries are earlier in the list, and search tool that has a limit on results shows countries before regions, before cities, which *can* be seen as an advantage. Efficient storage of entries is more important than a fast search speed
 
-Each country/region/city has an unique id. The id is the index. Ids can only occur a single time, eg an id used by a country cannot be used by a region. Inside the chunks, we refer to the indexes of cities in the main list
+Each country/region/city has an unique id. The id is the index. Ids can only occur a single time, eg an id used by a country cannot be used by a region. Inside the chunks, we refer to the indexes of cities in the main list.
+
+Cities/regions/countries can have multiple names, the different names are stored all within the city/region/country fields, separated by |. The first name should be the canonical name of how that regions calls it, the second should be the international name (eg `Nederland|The Netherlands`), it can then be followed with other names. If something doesn't have an international name, only 1 name is shown. If something has multiple names, more names are added to the list. A place having multiple names is relevant for searching.
 
 The whole list of countries/regions/cities is a zlib compressed data blob, with the zlib container restarting every X keyframes
 
