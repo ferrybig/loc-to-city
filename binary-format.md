@@ -51,11 +51,14 @@ The meta chunk divides the world into sections. If you have 90 (which is *not* p
 * -178 - -176
 * -176 - -174
 
-Each chunk is a single `varint` describing the offset, from the previous one. 
+Immediately after the header comes:
 
-Eg, when accessing index 0, you skip `index 0` bytes after the meta chunk. and when reading index 2, you skip `index 0 + index 1 + index 2` after the meta chunk.
+* Length of the City/Region/Country data section, in bytes: `varint`. This lets a reader skip straight from the chunk-length table to the start of chunk data, without ever touching (or decompressing) the name lists.
+* Chunk-length table: `width * height` varints, one per meta-chunk cell, in row-major order. Entry `i` is the compressed byte length of chunk `i` — nothing more, no shifting. A value of `0` means that chunk is fully empty: no bytes are stored for it, and it should never be decompressed.
 
-A varint of 0 means that chunk of the map is fully empty, no further processing needed
+Chunk `i`'s absolute file offset is `(end of the chunk-length table) + (City/Region/Country section length) + sum(entries[0..i-1])`. Since each entry is a plain, un-shifted length, reaching chunk `i` only means summing the `i` entries before it — none of those need to be decompressed to do that.
+
+The last chunk's declared length is there for consistency (and lets a reader sanity-check the file), but isn't strictly required: each chunk is its own independent zlib stream, so decompression naturally stops at that chunk's own end-of-stream marker regardless of what, if anything, follows it in the file.
 
 A valid latitude is `-90 <= lat < 90`
 
@@ -64,6 +67,8 @@ A valid longitude is `-180 <= lon < 180`
 If either latitude or longitude outside the valid range is passed it should be rejected
 
 Callers are responsible for performing wrap of longitude values, if desired.
+
+A `(lat, lon)` point maps to a meta chunk index via `row * width + col`, where `col = floor((lon + 180) / 360 * width)` and `row = floor((lat + 90) / 180 * height)` — i.e. row-major, matching the chunk-length table and chunk storage order.
 
 Having more chunks means faster decoding at the expense of more storage space.
 
@@ -100,15 +105,19 @@ The keyframe count can be computed by the formulae ceil((countries+regions+citie
 
 ### Chunks
 
-Each chunks has zlib wrapper around it for compression
+Each chunk has its own zlib wrapper — an independent stream, decodable without touching any other chunk.
 
 A chunk format is:
 
-* Palette: a list of `varint`, referring to the city/region/country indexes's. A `0` marks the end of the list
-* record count: `varint`
-* Records: adaptive Morton grid, first the depth variables, then the indexes to the palette. A 0 means no city found. If palette is shorter than 255, use 1-byte integers, if palette is shorter than 2^16, use 2 byte integers, if palette is shorter than 2^24, use 3 byte integers, otherwise use 4 byte integers. Most chunks likely use the 2 byte ints.
+* Palette count: `varint`, the number of entries in the palette.
+* Palette: that many `varint`s, referring to city/region/country indexes. Like the other incrementing lists in this format, entries are deltas — to get palette[2], sum `p[0] + p[1] + p[2]`. (An explicit count instead of a `0`-terminator, so a real index of `0` — the very first country — can still be referenced.)
+* Record count: `varint`.
+* Records, stored as three separate columnar arrays (same-typed values adjacent compresses better than interleaving them):
+  1. **Codes** — length-prefixed (`varint` byte length, since entries are variable-width): `record count` Morton codes, delta-varint-encoded and sorted ascending, so a lookup binary-searches then linear-scans a handful of deltas. Codes are **chunk-local**: cell `0` is this chunk's own top-left corner, not global `(-90, -180)` — this keeps codes, and their deltas, small, since they never need to spend bits on which chunk they're in.
+  2. **Depths** — one byte per record, same order as codes: the quadtree recursion depth at which that leaf cell was resolved. Fixed size (`record count` bytes), no length prefix needed.
+  3. **Palette indices** — one entry per record, same order again. A `0` means "no city found" at that cell, so real palette entries are addressed starting from local index `1`. Fixed size (`record count * width` bytes, no length prefix needed), where `width` is: 1 byte if the palette has fewer than 255 entries, 2 bytes if fewer than `2^16`, 3 bytes if fewer than `2^24`, otherwise 4 bytes. Most chunks likely use 1 or 2 byte indices, since a single meta-chunk cell rarely touches more than a handful of distinct cities.
 
-Note that pallette is also an incrementing list like before, eg to get the value of [2], do p[0] + p[1] + p[2]. The means that chunks are stored in the same row-major order as the meta chunk table. 
+Chunks are stored in the same row-major order as the meta chunk table.
 
 ## examples
 
@@ -119,11 +128,14 @@ Note that pallette is also an incrementing list like before, eg to get the value
   * width in chunks: 2 (raw: `1`)
   * height in chunks: 2 (raw: `1`)
   * keyframe interval: \<no keyframes> (raw: 0)
-* chunk pointer
-  * 1024 (fictional length, which is the length of the header, so after this amount of bytes are skipped after the chunk pointers, the reading is now at chunk 0 )
-  * 0 (empty chunk)
-  * 0 (empty chunk)
-  * 0 (empty chunk)
+* Meta chunk
+  * City/Region/Country data section length: `50` (fictional)
+  * chunk-length table (`width * height` = 4 entries, row-major):
+    * 0 (empty chunk)
+    * 0 (empty chunk)
+    * 0 (empty chunk)
+    * 200 (fictional length -- the only filled chunk, index 3)
+  * so chunk 3's offset is `(end of this table) + 50 + 0 + 0 + 0`, and it spans 200 bytes to EOF
 * City/Region/Country data
   * country size: `2`
   * Countries-to-region list:
@@ -153,6 +165,10 @@ Note that pallette is also an incrementing list like before, eg to get the value
     * city 1
     * city 1
     * city 1
-* chunks (only 1 chunk is filled)
-  * Pallete
-  * adaptive Morton grid
+* chunks (only chunk 3 is filled)
+  * Palette count: `2`
+  * Palette: `5, 3` (deltas -- real indexes are `5` and `5+3=8`)
+  * Record count: `3`
+  * Codes (delta-varint, chunk-local): first code `120`, then deltas `4, 11` -> decoded codes are `120, 124, 135`
+  * Depths: `9, 9, 10`
+  * Palette indices (1-byte, palette has 2 entries): `1, 2, 1` -> leaves 1 and 3 resolve to global index `5`, leaf 2 resolves to global index `8`
