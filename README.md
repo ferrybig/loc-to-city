@@ -2,8 +2,19 @@
 
 Proof of concept: resolving a GPS coordinate to a city/region/country,
 scoped to the Netherlands, using real OpenStreetMap administrative
-boundaries instead of nearest-point lookup. Four techniques are built and
-benchmarked against each other on the same data.
+boundaries instead of nearest-point lookup. Four techniques were built and
+benchmarked against each other on the same data, in a Python prototype
+(`scripts/`/`webapp/`) that found and fixed the real problems and produced
+`binary-format.md`'s CGEODATA spec.
+
+**The working, current system is [reader/, compressor/, and
+demo/](#the-cgeodata-format-and-its-javascripttypescript-implementation)**
+-- a from-scratch JavaScript/TypeScript implementation of CGEODATA, since
+that's what Immich (the actual target) runs. `scripts/` and `webapp/` have
+since been deleted, now that this supersedes them; the prose describing
+them further down documents real investigation history and design
+rationale that's still in effect, even though those files no longer exist
+in the tree.
 
 **Target precision:** 10m or better. **Constraint:** size matters — the
 existing production system stores one lat/lon point per place (double
@@ -489,40 +500,46 @@ Bosnia, Poland, Latvia) plus the original NL regression pair: all resolve
 to the right country now, and all but Tuzla (see above) to the right
 city too.
 
-## Interactive demo
+## Interactive demo (Python prototype, removed)
 
-```bash
-python3 webapp/server.py       # loads all four indexes once, serves on :8765
-```
+`webapp/` was the Python version of this demo, since deleted along with the
+rest of `scripts/`/`webapp/` (see the top of this document) -- its
+`python3 webapp/server.py` command no longer works. Kept here as a record
+of what the visual A/B/C/D comparison looked like, since it's what actually
+made the accuracy differences between approaches obvious rather than just
+numbers in a table:
 
-Open <http://127.0.0.1:8765>.
+- **Click anywhere** in the Netherlands — a popup showed what each of
+  approaches A/B/C/D resolved that point to, with a match/differs badge
+  against B (ground truth) and a per-query timing breakdown.
+- **Tile overlay** rendered any of the four approaches as a Leaflet tile
+  layer: each pixel block was one query, colored by hashing the resolved
+  city's id to a hue. A rendered as a scatter of clean Voronoi-cell blobs
+  that ignored real borders entirely; B and C rendered identically (jagged
+  borders that actually followed the polygons); D matched C everywhere
+  except a jagged seam right along every border, where its build-time
+  tradeoff showed up directly.
 
-- **Click anywhere** in the Netherlands — a popup shows what each of
-  approaches A/B/C/D resolves that point to, with a match/differs badge
-  against B (ground truth) and a per-query timing breakdown. Buttons for
-  the two example coordinates from the brief are built in.
-- **Tile overlay** (top-right panel) renders any of the four approaches as
-  a Leaflet tile layer: each pixel block is one query, colored by hashing
-  the resolved city's id to a hue (`oklch(0.7463 0.1213 <hue>)` or
-  `hsl(<hue> 70.2% 46.52%)`, `webapp/colors.py`). This is a fast way to
-  *see* correctness rather than sample it: A renders as a scatter of clean
-  Voronoi-cell blobs that ignore real borders entirely; B and C render
-  identically (jagged borders that actually follow the polygons); D
-  matches C everywhere except a jagged seam right along every border —
-  built only from the real neighboring candidates for that cell, not a
-  country-wide random pick — where its build-time tradeoff shows up
-  directly. The "resolution" select controls the pixel block size per
-  query (1 = sharp but slow — up to 65k queries per tile; 64 = fast but
-  blocky) — coarser settings also make the grid's actual cell size visible
-  as real blockiness, not just a rendering artifact. Even the demo's
-  default 300m-ish cell resolution (well short of the original 10m target)
-  already looks unmistakably closer to the real boundaries than approach
-  A's Voronoi blobs.
+The current, working demo is `demo/` (Node.js/TypeScript) -- see
+[The CGEODATA format and its JavaScript/TypeScript
+implementation](#the-cgeodata-format-and-its-javascripttypescript-implementation)
+below for how to run it.
 
 ## Reproducing
 
+The Docker/osmium extraction step below is still needed -- the current
+`compressor/scripts/prepare-zuid-holland.ts` reads its output
+(`data/work/nl-admin.geojson`) directly, and `data/work/` is gitignored, so
+a fresh clone needs to regenerate it. Everything past that step used to be
+a list of Python commands (`scripts/extract_boundaries.py`,
+`scripts/build_grid_index.py`, `scripts/benchmark.py`, `webapp/server.py`);
+those scripts are gone now, superseded by the JS/TS toolchain -- see [The
+CGEODATA format and its JavaScript/TypeScript
+implementation](#the-cgeodata-format-and-its-javascripttypescript-implementation)
+for the commands that replace them.
+
 Requires Docker (for `osmium-tool` + `gdal`, used once to extract boundary
-relations from the `.osm.pbf`) and Python 3 with `shapely` and `numpy`.
+relations from the `.osm.pbf`).
 
 ```bash
 docker build -t loc2city-tools -f Dockerfile.tools .
@@ -535,14 +552,6 @@ docker run --rm -v "$PWD:/work" loc2city-tools bash -c "
   osmium export data/work/nl-admin.osm.pbf -o data/work/nl-admin.geojson \
     --overwrite -f geojsonseq --geometry-types=polygon,multipolygon
 "
-
-python3 scripts/extract_boundaries.py     # -> data/nl_cities.geojson
-python3 scripts/build_grid_index.py       # -> data/nl_grid.bin              (approach C; GRID_MAX_DEPTH env var, default 18)
-GRID_BOUNDARY_FILL=random   python3 scripts/build_grid_index.py  # -> data/nl_grid_d_random.bin   (approach D)
-GRID_BOUNDARY_FILL=nearest  python3 scripts/build_grid_index.py  # -> data/nl_grid_d_nearest.bin  (approach D, deterministic variant)
-GRID_BOUNDARY_FILL=coverage python3 scripts/build_grid_index.py  # -> data/nl_grid_d_coverage.bin (approach D, area-coverage variant)
-python3 scripts/benchmark.py              # compares approaches A/B/C
-python3 webapp/server.py                  # interactive demo, all four approaches
 ```
 
 ## The CGEODATA format and its JavaScript/TypeScript implementation
