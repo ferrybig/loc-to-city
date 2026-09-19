@@ -57,11 +57,13 @@ Eg, when accessing index 0, you skip `index 0` bytes after the meta chunk. and w
 
 A varint of 0 means that chunk of the map is fully empty, no further processing needed
 
-A valid latitude is `-90 <= lat < 90`, values between -270 to -90 should have +180 subtracted, values between 90 to 270 should have 180 subtracted
+A valid latitude is `-90 <= lat < 90`
 
-A valid longitude is `-180 <= lon < 180`, values between -540 to -180 should have +360 subtracted, values between 180 to 540 should have 360 subtracted
+A valid longitude is `-180 <= lon < 180` 
 
 If either latitude or longitude outside the valid range is passed it should be rejected
+
+Callers are responsible for performing wrap of longitude values, if desired.
 
 Having more chunks means faster decoding at the expense of more storage space.
 
