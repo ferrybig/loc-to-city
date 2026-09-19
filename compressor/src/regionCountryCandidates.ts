@@ -12,15 +12,20 @@ import type { CandidateEntry } from "./candidateIndex.js";
 export function buildRegionCountryCandidates(
   hierarchy: HierarchyCountry[],
   countries: FeatureCollection<Polygon | MultiPolygon, { code: string }> | undefined,
-  regions: FeatureCollection<Polygon | MultiPolygon, { name: string }> | undefined,
+  regions: FeatureCollection<Polygon | MultiPolygon, { name: string; country: string }> | undefined,
 ): CandidateEntry[] {
   const entries: CandidateEntry[] = [];
 
   const countryByCode = new Map<string, Feature<Polygon | MultiPolygon>>();
   for (const feature of countries?.features ?? []) countryByCode.set(feature.properties.code, feature);
 
-  const regionByName = new Map<string, Feature<Polygon | MultiPolygon>>();
-  for (const feature of regions?.features ?? []) regionByName.set(feature.properties.name, feature);
+  // Keyed by (country code, region name), not name alone -- two different
+  // countries can otherwise have a same-named region (this is a real risk
+  // at multi-country scale, not just theoretical).
+  const regionByKey = new Map<string, Feature<Polygon | MultiPolygon>>();
+  for (const feature of regions?.features ?? []) {
+    regionByKey.set(`${feature.properties.country} ${feature.properties.name}`, feature);
+  }
 
   const countryCount = hierarchy.length;
   hierarchy.forEach((country, countryId) => {
@@ -31,7 +36,7 @@ export function buildRegionCountryCandidates(
   let regionId = countryCount;
   hierarchy.forEach((country, countryId) => {
     for (const regionName of country.regions) {
-      const feature = regionByName.get(regionName);
+      const feature = regionByKey.get(`${country.code} ${regionName}`);
       if (feature) entries.push({ globalId: regionId, feature, ancestorIds: [countryId] });
       regionId++;
     }

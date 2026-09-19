@@ -43,7 +43,10 @@ function main(): void {
   >;
   const regionsPath = flags["regions"];
   const regions = regionsPath
-    ? (JSON.parse(readFileSync(regionsPath, "utf8")) as FeatureCollection<Polygon | MultiPolygon, { name: string }>)
+    ? (JSON.parse(readFileSync(regionsPath, "utf8")) as FeatureCollection<
+        Polygon | MultiPolygon,
+        { name: string; country: string }
+      >)
     : undefined;
   const countriesPath = flags["countries"];
   const countries = countriesPath

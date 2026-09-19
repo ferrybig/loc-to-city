@@ -17,7 +17,7 @@ export interface BuildOptions {
   /** Region (province) polygons, matched to the hierarchy by `properties.name`.
    * Without these, a point outside every city polygon but still inside a
    * region resolves to "unknown" instead of that region (Section 7.1). */
-  regions?: FeatureCollection<Polygon | MultiPolygon, { name: string }> | undefined;
+  regions?: FeatureCollection<Polygon | MultiPolygon, { name: string; country: string }> | undefined;
   /** Country polygons, matched to the hierarchy by `properties.code`. */
   countries?: FeatureCollection<Polygon | MultiPolygon, { code: string }> | undefined;
   onChunkBuilt?: (info: { chunkIndex: number; chunkCount: number; recordCount: number }) => void;
