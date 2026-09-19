@@ -703,7 +703,7 @@ npx tsx data-ingest/src/prepare-europe.ts
 npx tsx compressor/src/cli.ts data/eu-hierarchy.json data/eu-cities-filtered.geojson \
   data/europe.bin --regions data/eu-regions.geojson --countries data/eu-country-polygons.geojson \
   --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 13 \
-  --attribution "[OpenStreetMap](https://openstreetmap.org/copyright)"
+  --attribution "[OpenStreetMap](https://openstreetmap.org/copyright)" --workers 16
 ```
 
 Result: **41 countries, 642 regions, 138,106 cities, 2.53MB, 2,531,710
@@ -751,3 +751,44 @@ coarse for a first full-continent pass, matching how the Zuid-Holland test
 started at depth 8 before working up to 10. Pushing depth further, and
 replacing the remaining `touches()`/`fullyContains()` cost (see above), are
 both open follow-ups before this is production-scale.
+
+### Parallel compression (`--workers`)
+
+Every chunk is independent -- `buildChunkRecords` touches the shared
+candidate index exactly once, at the very start, then does nothing but
+pure array/geometry work on an already-narrowed list. That makes it
+embarrassingly parallel, and the machine this was built on has 16 cores
+sitting mostly idle during a sequential build. `--workers N` (default:
+`os.availableParallelism()`; `--workers 0` keeps the original sequential
+path, `--workers 1` runs through the exact same worker-thread code as any
+other count but with just one, making it a genuine A/B control rather than
+a special case) spreads chunk work across `node:worker_threads`.
+
+Design notes worth keeping in mind if you touch this code: job candidate
+arrays are sent to workers via `postMessage` on demand (not written to
+temp files -- measured to be ~1% overhead even for the worst chunk, and
+files would've meant serializing 426MB up front before any worker could
+start); jobs are dispatched worst-first by a cheap coordinate-count cost
+estimate, since per-chunk cost is skewed up to 1000x and a naive
+round-robin split would strand one worker with every hard chunk; and
+candidate array order must survive the trip unchanged; two tie-breaks in
+`quadtree.ts` (the smallest-area pick among fully-containing candidates,
+and the largest-share pick at max depth) both break ties by
+first-in-array-wins, so a sort or a `Set`/`Map` round-trip anywhere in the
+handoff would silently change output for ambiguous cells.
+
+**Measured on the Europe build** (same inputs/flags as above, `--workers 0`
+vs `--workers 16`, 16-core machine): **34m55s sequential → 8m17s parallel,
+a ~4.2x speedup** at 1346% average CPU utilization. Output is
+byte-for-byte identical at every worker count tested (0, 1, 3, 16) against
+both the Zuid-Holland and Europe datasets -- parallelizing changed nothing
+about the result, only how long it takes to get there. 4.2x on 16 cores is
+well short of linear, consistent with what's already known about this
+workload: a handful of chunks take 10-27 seconds *alone* (a hard floor no
+amount of parallelism removes), and 16 threads doing simultaneous heavy
+floating-point/allocation work contend for memory bandwidth and cache in
+ways a single thread doesn't. Note also that the "34m55s" sequential
+number here supersedes the rough "several minutes" estimate in the section
+above -- that one was eyeballed from file timestamps across an interleaved
+profiling session, never actually measured in isolation; this is the first
+time it was.

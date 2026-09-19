@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
 import { loadHierarchy } from "./hierarchy.js";
-import { buildCGeoDataFile } from "./build.js";
+import { buildCGeoDataFileParallel } from "./buildParallel.js";
 import type { CityProperties } from "./placeIds.js";
 
 function parseArgs(argv: string[]): { positional: string[]; flags: Record<string, string> } {
@@ -23,14 +24,15 @@ function parseArgs(argv: string[]): { positional: string[]; flags: Record<string
   return { positional, flags };
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const { positional, flags } = parseArgs(process.argv.slice(2));
   const [hierarchyPath, citiesPath, outPath] = positional;
   if (!hierarchyPath || !citiesPath || !outPath) {
     console.error(
       "usage: cgeodata-compress <hierarchy.json> <cities.geojson> <out.bin> " +
         "[--regions regions.geojson] [--countries countries.geojson] " +
-        "[--width-exp N] [--height-exp N] [--max-depth N] [--keyframe-exp N] [--attribution TEXT]",
+        "[--width-exp N] [--height-exp N] [--max-depth N] [--keyframe-exp N] [--attribution TEXT] " +
+        "[--workers N]",
     );
     process.exitCode = 1;
     return;
@@ -56,6 +58,12 @@ function main(): void {
       >)
     : undefined;
 
+  const workersFlag = flags["workers"];
+  const workers = workersFlag === undefined ? availableParallelism() : Number(workersFlag);
+  if (!Number.isInteger(workers) || workers < 0) {
+    throw new Error(`--workers must be a non-negative integer, got ${JSON.stringify(workersFlag)}`);
+  }
+
   const options = {
     attribution: flags["attribution"] ?? "",
     widthExp: Number(flags["width-exp"] ?? 6),
@@ -64,12 +72,14 @@ function main(): void {
     keyframeExp: Number(flags["keyframe-exp"] ?? 13),
     regions,
     countries,
+    workers,
     onChunkBuilt: ({ chunkIndex, chunkCount, recordCount }: { chunkIndex: number; chunkCount: number; recordCount: number }) => {
       console.error(`  chunk ${chunkIndex}/${chunkCount}: ${recordCount} records`);
     },
   };
 
-  const { bytes, stats } = buildCGeoDataFile(hierarchy, cities, options);
+  console.error(`building with ${workers} worker${workers === 1 ? "" : "s"}${workers === 0 ? " (sequential)" : ""}...`);
+  const { bytes, stats } = await buildCGeoDataFileParallel(hierarchy, cities, options);
   writeFileSync(outPath, bytes);
 
   console.error(
@@ -80,4 +90,7 @@ function main(): void {
   );
 }
 
-main();
+main().catch((err: unknown) => {
+  console.error(err);
+  process.exitCode = 1;
+});

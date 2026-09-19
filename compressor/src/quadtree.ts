@@ -1,5 +1,5 @@
 import { mortonEncode } from "@loc-to-city/reader";
-import type { CandidateIndex, IndexedCandidate } from "./candidateIndex.js";
+import type { IndexedCandidate } from "./candidateIndex.js";
 import { cellPolygon, fullyContains, touches, countContainedSamples, type CellBounds } from "./geometry.js";
 
 export interface ChunkRecord {
@@ -48,19 +48,23 @@ function pruneAncestors(candidates: IndexedCandidate[]): IndexedCandidate[] {
  * a candidate. Pruning is recomputed fresh at every cell (never inherited
  * from a parent), so a genuine gap with no covering city -- deep inside a
  * region but outside every one of its cities -- still correctly falls back
- * to that region once no city touches that specific cell anymore. */
+ * to that region once no city touches that specific cell anymore.
+ *
+ * `rootCandidates` must already be the result of querying the spatial
+ * index for `chunkBounds` (i.e. `CandidateIndex.candidatesForBbox`), in
+ * that exact order -- this function never touches the index itself, which
+ * is what makes it safe to run inside a worker thread given only a plain
+ * array. Order matters beyond just "which candidates": two tie-breaks
+ * below (the smallest-area pick among fully-containing candidates, and the
+ * max-depth largest-share pick) break ties by first-in-array-wins, so a
+ * caller that reorders `rootCandidates` (sorting, round-tripping through a
+ * Set/Map, etc.) can silently change the output. */
 export function buildChunkRecords(
-  index: CandidateIndex,
+  rootCandidates: IndexedCandidate[],
   chunkBounds: CellBounds,
   maxDepth: number,
 ): ChunkRecord[] {
   const records: ChunkRecord[] = [];
-  const rootCandidates = index.candidatesForBbox(
-    chunkBounds.lonMin,
-    chunkBounds.latMin,
-    chunkBounds.lonMax,
-    chunkBounds.latMax,
-  );
 
   function cellBoundsOf(cellX: number, cellY: number, depth: number): CellBounds {
     const cellsPerSide = 2 ** depth;
