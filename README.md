@@ -570,23 +570,31 @@ keyframe-compressed name blocks so names can be recovered by id without
 decompressing the whole list. Read `binary-format.md` for the actual spec;
 this section just covers the code that implements it.
 
-Three npm workspaces, all TypeScript:
+Four npm workspaces, all TypeScript:
 
 - **`reader/`** — the format's reference reader. Zero runtime dependencies
   (only Node's built-in `zlib`), matching the spec's own constraint. Tested
   against `binary-format.md`'s Appendix A worked example byte-for-byte, not
   just self-consistency with the compressor below.
-- **`compressor/`** — turns a GeoJSON of city polygons, region (province)
-  polygons, and a country polygon, plus a small place-hierarchy JSON, into a
-  `.bin` file. Free to use real dependencies (`@turf/*` for polygon math,
-  `rbush` for the candidate spatial index), since it's a build-time tool,
-  not something Immich would load.
+- **`compressor/`** — turns a GeoJSON of city polygons, region polygons,
+  and a country polygon, plus a small place-hierarchy JSON, into a `.bin`
+  file. Free to use real dependencies (`@turf/*` for polygon math, `rbush`
+  for the candidate spatial index), since it's a build-time tool, not
+  something Immich would load. Exposes its own types
+  (`CityProperties`/`HierarchyCountry`/...) as a package, so `data-ingest`
+  can import them instead of reaching into its `src/`.
+- **`data-ingest/`** — owns everything OSM-shaped: the raw `.osm.pbf`
+  extracts (`data-ingest/osm/`, gitignored) and osmium's exported
+  intermediate GeoJSON (`data-ingest/work*/`, also gitignored), plus the
+  scripts that turn those into whatever a specific compressor run needs
+  (`prepare-zuid-holland.ts`, `prepare-europe.ts`). Its outputs land in
+  `data/`, which is what you point the compressor at.
 - **`demo/`** — a click-to-query Leaflet page plus a grid tile overlay, the
   JS/TS equivalent of `webapp/`'s demo but for one format with one lookup
   path instead of comparing four approaches.
 
 ```bash
-npm install                                # installs all three workspaces
+npm install                                # installs all four workspaces
 npm run build --workspaces                 # tsc for each package
 npm test -w reader                         # Appendix A conformance + varint/Morton unit tests
 npm test -w compressor                     # synthetic-dataset unit tests + (if built) real-data tests
@@ -595,10 +603,10 @@ npm test -w compressor                     # synthetic-dataset unit tests + (if 
 # with real polygons (11 have 0 cities -- Section 7.2 explicitly allows
 # that), but only the 187 cities in Zuid-Holland, filtered from the
 # already-committed data/nl_cities.geojson. Provinces come from the raw
-# osmium export (data/work/nl-admin.geojson, see "Reproducing" above); the
-# country polygon comes from the Natural Earth file already used for
-# country resolution elsewhere in this repo.
-npx tsx compressor/scripts/prepare-zuid-holland.ts
+# osmium export (data-ingest/work/nl-admin.geojson, see "Reproducing"
+# above); the country polygon comes from the Natural Earth file already
+# used for country resolution elsewhere in this repo.
+npx tsx data-ingest/src/prepare-zuid-holland.ts
 npx tsx compressor/src/cli.ts data/nl-regions.json data/zuid-holland-cities.geojson \
   data/zuid-holland.bin --regions data/nl-provinces.geojson --countries data/nl-country.geojson \
   --width-exp 6 --height-exp 6 --max-depth 10 --keyframe-exp 13 \
@@ -630,11 +638,11 @@ Netherlands, region: Utrecht`. Two separate bugs, found in order:
 1. **The compressor never had region or country geometry at all.** Only
    city polygons were ever fed into the spatial index, even though the
    place table already listed all 12 provinces. There was no OSM boundary
-   data checked into the repo for that -- `data/work/nl-admin.geojson` (the
-   raw osmium export, gitignored, still present locally from the earlier
-   NL extraction) has clean `admin_level=4` province polygons; the country
-   polygon comes from the Natural Earth file already used elsewhere in this
-   repo. `prepare-zuid-holland.ts` now extracts and simplifies both
+   data checked into the repo for that -- `data-ingest/work/nl-admin.geojson`
+   (the raw osmium export, gitignored, still present locally from the
+   earlier NL extraction) has clean `admin_level=4` province polygons; the
+   country polygon comes from the Natural Earth file already used elsewhere
+   in this repo. `prepare-zuid-holland.ts` now extracts and simplifies both
    (`@turf/simplify`, same tolerances the Python prototype used:
    ~220m for regions, ~1.1km for the country), and the compressor merges
    them into the same candidate index as cities, keyed by their real place
@@ -678,5 +686,68 @@ seconds. `--max-depth 12` (~150m) was reachable in ~21s *before* the
 containment-rule fix above, but that number was measured against the
 buggy, prematurely-truncated recursion -- worth re-measuring once
 `touches`/`fullyContains` are also sped up, rather than trusting it as-is.
-Worth fixing before running this over all of the Netherlands, let alone
-Europe.
+
+### Europe-wide build
+
+`data-ingest/src/prepare-europe.ts` reuses `data/eu_cities.geojson` (the
+Python prototype's output, still on disk though the script that made it is
+gone), pulls region polygons from a streamed pass over the 4.3GB
+`data-ingest/work-eu/eu-admin.geojson` (peak RSS ~355MB -- this is exactly
+the class of file whose naive full read OOM'd the whole machine earlier in
+this project; streaming it with a hand-rolled RS-delimited reader instead
+of `JSON.parse`-ing it whole was not optional), and country polygons from
+the Natural Earth file already used elsewhere in this repo:
+
+```bash
+npx tsx data-ingest/src/prepare-europe.ts
+npx tsx compressor/src/cli.ts data/eu-hierarchy.json data/eu-cities-filtered.geojson \
+  data/europe.bin --regions data/eu-regions.geojson --countries data/eu-country-polygons.geojson \
+  --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 13 \
+  --attribution "[OpenStreetMap](https://openstreetmap.org/copyright)"
+```
+
+Result: **41 countries, 642 regions, 138,106 cities, 2.53MB, 2,531,710
+records across 409 of 4096 chunks.** Spot-checked against several major
+European cities plus the original Wormerveer/Den Haag pair -- all resolve
+correctly (Paris → Île-de-France → Paris, Rome → Lazio → Roma, Warsaw →
+województwo mazowieckie → Warszawa, ...), a point mid-Atlantic resolves
+fully unknown, and per-query time is single-digit milliseconds.
+
+Two real problems turned up going from ~200 candidates (Zuid-Holland) to
+~139,000 (all of Europe), neither of which the small test could have
+caught:
+
+1. **A third of all cities (62,339 of 202,154) have no region at all** in
+   `eu_cities.geojson`, concentrated almost entirely in three countries:
+   Ireland (99.9% of its 50,223 cities), Estonia (100% of 4,650), and
+   Portugal (94% of 3,265). Near-total, not edge-case -- those countries
+   almost certainly don't tag their primary administrative division as
+   `admin_level=4` in OSM the way most of Europe does, the same kind of
+   per-country variance the old Python pipeline's city-level admin_level
+   auto-detection existed to handle, just never applied to regions. Cities
+   without a region can't be grouped into the hierarchy, so they're
+   excluded from city-level matching for now (that area still resolves at
+   country level; see Dublin above) -- flagged loudly in the script's own
+   output rather than silently dropped. Worth fixing properly later by
+   porting that per-country auto-detection logic; out of scope for a first
+   full-continent pass.
+2. **Region/country polygon vertex count directly drives build time at
+   this scale, and Russia is enormous.** At the tolerance the old Python
+   prototype used (~1.1km), Russia's simplified polygon was still ~14,800
+   vertices, and its bounding box overlaps a huge share of the world's
+   chunk grid -- an early attempt at this depth made zero progress in 90+
+   seconds. A short profiling harness (`node`'s inspector `Session` API,
+   since neither `SIGTERM` nor an internal timer can interrupt a
+   synchronous CPU-bound call to check progress) confirmed individual
+   chunks in dense areas taking 10-27 seconds each. Simplifying region/
+   country polygons ~5x more aggressively (they're fallback layers here,
+   not the primary source of precision -- cities keep their own tolerance)
+   cut Russia to ~4,500 vertices and made the build tractable: a handful of
+   very dense chunks around Germany/Benelux still take tens of seconds
+   each, but the whole continent completes.
+
+`--max-depth 8` here (~2.4km cells at this grid size) is deliberately
+coarse for a first full-continent pass, matching how the Zuid-Holland test
+started at depth 8 before working up to 10. Pushing depth further, and
+replacing the remaining `touches()`/`fullyContains()` cost (see above), are
+both open follow-ups before this is production-scale.
