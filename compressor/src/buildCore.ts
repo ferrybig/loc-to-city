@@ -28,9 +28,20 @@ export interface BuildOptions {
    * which chunks are worth spending quadtree time on. An empty set builds
    * no chunks at all, which still yields a complete, readable place table. */
   onlyChunks?: ReadonlySet<number> | undefined;
-  /** Fires once per non-empty chunk. The worker-pool path fires this out
-   * of order (whichever worker finishes next), not in chunk-index order. */
-  onChunkBuilt?: (info: { chunkIndex: number; chunkCount: number; recordCount: number }) => void;
+  /** Fires once per chunk that actually did quadtree work -- which
+   * includes chunks that produced no records (`recordCount === 0`), since
+   * those still cost real time and are exactly the ones worth seeing when
+   * hunting for slow areas. Chunks skipped before any work (empty root
+   * bbox query, or excluded by `onlyChunks`) never fire it. The worker-pool
+   * path fires this out of order (whichever worker finishes next), not in
+   * chunk-index order. `elapsedMs` covers the same span in both paths:
+   * `buildChunkRecords` plus `encodeChunk`, excluding any queueing. */
+  onChunkBuilt?: (info: {
+    chunkIndex: number;
+    chunkCount: number;
+    recordCount: number;
+    elapsedMs: number;
+  }) => void;
 }
 
 export interface BuildStats {

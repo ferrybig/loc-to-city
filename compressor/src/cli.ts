@@ -67,6 +67,8 @@ async function main(): Promise<void> {
     throw new Error(`--workers must be a non-negative integer, got ${JSON.stringify(workersFlag)}`);
   }
 
+  const timings: Array<{ chunkIndex: number; recordCount: number; elapsedMs: number }> = [];
+
   const widthExp = Number(flags["width-exp"] ?? 6);
   const heightExp = Number(flags["height-exp"] ?? 6);
   const chunkCount = 2 ** widthExp * 2 ** heightExp;
@@ -93,8 +95,11 @@ async function main(): Promise<void> {
     countries,
     workers,
     onlyChunks,
-    onChunkBuilt: ({ chunkIndex, chunkCount, recordCount }: { chunkIndex: number; chunkCount: number; recordCount: number }) => {
-      console.error(`  chunk ${chunkIndex}/${chunkCount}: ${recordCount} records`);
+    onChunkBuilt: (info: { chunkIndex: number; chunkCount: number; recordCount: number; elapsedMs: number }) => {
+      timings.push({ chunkIndex: info.chunkIndex, recordCount: info.recordCount, elapsedMs: info.elapsedMs });
+      console.error(
+        `  chunk ${info.chunkIndex}/${info.chunkCount}: ${info.recordCount} records, ${info.elapsedMs.toFixed(0)}ms`,
+      );
     },
   };
 
@@ -108,6 +113,19 @@ async function main(): Promise<void> {
       `(${stats.unmatchedCityCount} unmatched), ${stats.nonEmptyChunkCount}/${stats.chunkCount} ` +
       `non-empty chunks, ${stats.totalRecords} records`,
   );
+
+  if (timings.length > 0) {
+    const totalChunkMs = timings.reduce((sum, t) => sum + t.elapsedMs, 0);
+    console.error(
+      `chunk time: ${(totalChunkMs / 1000).toFixed(1)}s of work across ${timings.length} chunks ` +
+        `(mean ${(totalChunkMs / timings.length).toFixed(0)}ms)`,
+    );
+    const slowest = [...timings].sort((a, b) => b.elapsedMs - a.elapsedMs).slice(0, 10);
+    console.error("slowest chunks (rerun one on its own with --only-chunks N):");
+    for (const t of slowest) {
+      console.error(`  chunk ${t.chunkIndex}: ${(t.elapsedMs / 1000).toFixed(1)}s, ${t.recordCount} records`);
+    }
+  }
 }
 
 main().catch((err: unknown) => {

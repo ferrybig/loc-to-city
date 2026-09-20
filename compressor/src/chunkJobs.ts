@@ -20,7 +20,7 @@ export interface ChunkJob {
 export type WorkerRequest = { type: "job"; job: ChunkJob } | { type: "exit" };
 
 export type WorkerResponse =
-  | { type: "done"; chunkIndex: number; recordCount: number; bytes: Uint8Array | null }
+  | { type: "done"; chunkIndex: number; recordCount: number; bytes: Uint8Array | null; elapsedMs: number }
   | { type: "failed"; chunkIndex: number; message: string; stack: string | undefined };
 
 export interface ChunkWorkerData {

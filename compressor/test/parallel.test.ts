@@ -90,6 +90,45 @@ test("output is byte-identical across worker counts (0, 1, 2, 3, 16)", async () 
   }
 });
 
+test("per-chunk timing is reported for every chunk that did work, in both paths", async () => {
+  interface Built {
+    chunkIndex: number;
+    recordCount: number;
+    elapsedMs: number;
+  }
+
+  // workers: 0 delegates to the sequential build, so this covers both paths.
+  const sequential: Built[] = [];
+  const sequentialResult = await buildCGeoDataFileParallel(hierarchy, cities, {
+    ...options,
+    workers: 0,
+    onChunkBuilt: (info) => sequential.push(info),
+  });
+
+  const parallel: Built[] = [];
+  await buildCGeoDataFileParallel(hierarchy, cities, {
+    ...options,
+    workers: 4,
+    onChunkBuilt: (info) => parallel.push(info),
+  });
+
+  for (const built of [...sequential, ...parallel]) {
+    assert.ok(Number.isFinite(built.elapsedMs), `chunk ${built.chunkIndex} reported ${built.elapsedMs}ms`);
+    assert.ok(built.elapsedMs >= 0, `chunk ${built.chunkIndex} reported negative time`);
+  }
+
+  // The callback fires for bbox-non-empty chunks that produce nothing too
+  // (those still burn real time), so this set is larger than the file's
+  // non-empty chunk count -- and it must not depend on worker count.
+  const byIndex = (built: Built[]): number[] => built.map((b) => b.chunkIndex).sort((a, b) => a - b);
+  assert.deepEqual(byIndex(parallel), byIndex(sequential));
+  assert.ok(sequential.length > sequentialResult.stats.nonEmptyChunkCount, "zero-record chunks should report too");
+  assert.deepEqual(
+    sequential.filter((b) => b.recordCount === 0).map((b) => b.chunkIndex).sort((a, b) => a - b),
+    [CHUNK_INDEX_BBOX_ONLY_A, CHUNK_INDEX_BBOX_ONLY_B],
+  );
+});
+
 test("a worker pool cleans up and rejects on a malformed candidate geometry", async () => {
   const poisonCities: FeatureCollection<Polygon | MultiPolygon, CityProperties> = {
     type: "FeatureCollection",

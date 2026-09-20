@@ -8,6 +8,9 @@ export interface ChunkResult {
   chunkIndex: number;
   recordCount: number;
   bytes: Buffer | null;
+  /** Wall-clock time this chunk's quadtree + encode took inside its
+   * worker, excluding queueing and message passing. */
+  elapsedMs: number;
 }
 
 /** Runs every job in `jobs` across a pool of `min(workerCount,
@@ -76,7 +79,12 @@ export function runChunkJobs(jobs: ChunkJob[], workerCount: number, maxDepth: nu
           response.bytes === null
             ? null
             : Buffer.from(response.bytes.buffer, response.bytes.byteOffset, response.bytes.byteLength);
-        results.push({ chunkIndex: response.chunkIndex, recordCount: response.recordCount, bytes });
+        results.push({
+          chunkIndex: response.chunkIndex,
+          recordCount: response.recordCount,
+          bytes,
+          elapsedMs: response.elapsedMs,
+        });
 
         if (results.length === jobs.length) {
           settled = true;

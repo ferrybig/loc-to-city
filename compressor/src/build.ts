@@ -29,13 +29,17 @@ export function buildCGeoDataFile(
     const rootCandidates = candidateIndex.candidatesForBbox(bounds.lonMin, bounds.latMin, bounds.lonMax, bounds.latMax);
     if (rootCandidates.length === 0) continue;
 
+    const startedAt = performance.now();
     const records = buildChunkRecords(rootCandidates, bounds, options.maxDepth);
-    if (records.length === 0) continue;
+    const encoded = records.length === 0 ? null : encodeChunk(records);
+    const elapsedMs = performance.now() - startedAt;
 
-    chunkBytes[chunkIndex] = encodeChunk(records);
+    options.onChunkBuilt?.({ chunkIndex, chunkCount: width * height, recordCount: records.length, elapsedMs });
+    if (encoded === null) continue;
+
+    chunkBytes[chunkIndex] = encoded;
     totalRecords += records.length;
     nonEmptyChunkCount++;
-    options.onChunkBuilt?.({ chunkIndex, chunkCount: width * height, recordCount: records.length });
   }
 
   return finishBuild(prepared, options, chunkBytes, totalRecords, nonEmptyChunkCount);

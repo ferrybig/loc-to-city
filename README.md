@@ -880,6 +880,22 @@ worldwide inputs that's 77KB in 1.8s, which is enough to serve
 name lookups (a search endpoint, say) without paying for the spatial index
 at all.
 
+Each chunk is also timed (`buildChunkRecords` + `encodeChunk`, measured
+identically in the sequential and worker-thread paths), reported through
+`onChunkBuilt` and summarised by the CLI as a total, a mean, and the ten
+slowest chunks -- printed as indices you can paste straight back into
+`--only-chunks`. Timings deliberately stay out of `BuildStats`, which is
+the determinism oracle the byte-identity tests compare with `deepEqual`.
+The callback also fires for chunks that produce *no* records, since a
+chunk whose bbox catches a huge polygon can burn real time and still
+resolve to nothing -- invisible otherwise.
+
+This is worth running even on small datasets. On Zuid-Holland (187
+cities, `--max-depth 10`): 36.5s of chunk work across 240 chunks, of
+which **chunk 3232 alone is 30.0s** -- 82% of the entire build in one
+chunk, with 25,921 of the 40,546 records. The cost was never spread
+evenly.
+
 The immediate use is measurement. Building only chunk 1274 (the one
 containing Sydney) from the worldwide inputs takes **52 seconds and
 produces 36,808 records** -- for comparison, the entire Europe build

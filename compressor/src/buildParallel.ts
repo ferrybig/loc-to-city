@@ -40,11 +40,16 @@ export async function buildCGeoDataFileParallel(
   let totalRecords = 0;
   let nonEmptyChunkCount = 0;
   for (const result of results) {
+    options.onChunkBuilt?.({
+      chunkIndex: result.chunkIndex,
+      chunkCount: width * height,
+      recordCount: result.recordCount,
+      elapsedMs: result.elapsedMs,
+    });
     if (result.bytes === null) continue;
     chunkBytes[result.chunkIndex] = result.bytes;
     totalRecords += result.recordCount;
     nonEmptyChunkCount++;
-    options.onChunkBuilt?.({ chunkIndex: result.chunkIndex, chunkCount: width * height, recordCount: result.recordCount });
   }
 
   return finishBuild(prepared, options, chunkBytes, totalRecords, nonEmptyChunkCount);
