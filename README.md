@@ -183,8 +183,8 @@ described separately below, since it applies to C and D alike.)
 
 **What didn't work, and why:** the original design (see the note in the
 brief) pushes every ambiguous cell down to a fixed 10m floor and classifies
-it there. We built that first (`GRID_MAX_DEPTH=22`, `data/
-nl_grid_d22_naive_reference.bin`, gitignored — it's 135MB) and it lost to
+it there. We built that first (`GRID_MAX_DEPTH=22`, written at the time to
+`data/nl_grid_d22_naive_reference.bin` — 135MB) and it lost to
 the 112MB budget it was supposed to beat. Dutch woonplaats boundaries follow
 canals, have enclaves, and pack many small localities tightly together, so
 "ambiguous" cells are common well below the 1km scale — forcing all of them
@@ -221,12 +221,16 @@ city id straight into the record like any uniform cell. Three variants,
 each writing its own file so they never clobber each other or the
 sentinel/approach-C build:
 
-- `data/nl_grid_d_random.bin` — `random.choice(cand)`
-- `data/nl_grid_d_nearest.bin` — deterministic: whichever candidate's
+- `nl_grid_d_random.bin` — `random.choice(cand)`
+- `nl_grid_d_nearest.bin` — deterministic: whichever candidate's
   polygon is closest to the cell center (same spirit as approach A, just
   scoped to real local candidates instead of the whole country)
-- `data/nl_grid_d_coverage.bin` — deterministic: whichever candidate
+- `nl_grid_d_coverage.bin` — deterministic: whichever candidate
   covers the largest share of the cell's area (the demo's default "D")
+
+(Those three outputs, and the naive reference above, have since been
+deleted along with the Python code that produced them. The comparison
+they settled is what mattered, and it's recorded here.)
 
 The result is a **fully self-contained file**: no `BOUNDARY` records exist
 in it at all, so `query_grid.py` needs no polygon fallback data at query
