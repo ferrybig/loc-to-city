@@ -140,10 +140,22 @@ export async function loadPrimaryGeometries(
  * entirely over Pass 1's already-collected `cityCandidates` metadata (no
  * additional file I/O) plus Pass 2's in-memory primary geometry index --
  * both are already exactly the data this test needs. */
-export function detectGapFill(index: AdminBoundaryIndex, primary: PrimaryLevelResult, primaryGeom: PrimaryGeometryIndex): CityCandidateMeta[] {
+export function detectGapFill(
+  index: AdminBoundaryIndex,
+  primary: PrimaryLevelResult,
+  primaryGeom: PrimaryGeometryIndex,
+  countries?: ReadonlySet<string> | undefined,
+): CityCandidateMeta[] {
   const gapFill: CityCandidateMeta[] = [];
 
   for (const candidate of index.cityCandidates) {
+    // When primaries were loaded for only some countries, only those
+    // countries' candidates can be judged: a candidate elsewhere would
+    // find nothing covering it and be wrongly promoted to a gap-fill.
+    // Restricting by country is sound because a candidate's
+    // representative point can only fall inside a primary of its own
+    // country.
+    if (countries && !countries.has(candidate.country)) continue;
     if (primary.primaryIds.has(candidate.id)) continue;
     const [x, y] = candidate.repPoint;
     const hits = primaryGeom.tree.search({ minX: x, minY: y, maxX: x, maxY: y });

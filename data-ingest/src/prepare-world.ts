@@ -21,7 +21,7 @@
 // pieces; this file just orchestrates them and writes the same output
 // shapes prepare-europe.ts already produces, so the compressor CLI needs
 // no changes at all.
-import { writeFileSync } from "node:fs";
+import { createWriteStream, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from "geojson";
@@ -29,7 +29,9 @@ import type { CityProperties, HierarchyCountry } from "@loc-to-city/compressor";
 import { discoverAdminGeoJsonFiles } from "./lib/osmFiles.js";
 import { loadCountryIndex } from "./lib/countryIndex.js";
 import { buildAdminBoundaryIndex } from "./lib/adminBoundaryIndex.js";
+import type { AdminBoundaryIndex, CityCandidateMeta } from "./lib/adminBoundaryIndex.js";
 import { selectPrimaryLevels, loadPrimaryGeometries, detectGapFill, fetchFinalGeometries } from "./lib/adminLevelDetection.js";
+import type { PrimaryLevelResult } from "./lib/adminLevelDetection.js";
 import { buildRegionIndex, assignCityRegion } from "./lib/regionPolygons.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -39,9 +41,55 @@ const WORK_DIR = path.join(REPO_ROOT, "data-ingest/work-world");
 const COUNTRIES_SOURCE = path.join(REPO_ROOT, "agent-resources/ne_10m_admin_0_countries.geojson");
 
 const HIERARCHY_OUT = path.join(REPO_ROOT, "data/world-hierarchy.json");
-const CITIES_OUT = path.join(REPO_ROOT, "data/world-cities-filtered.geojson");
+const CITIES_OUT = path.join(REPO_ROOT, "data/world-cities-filtered.geojsonseq");
 const REGIONS_OUT = path.join(REPO_ROOT, "data/world-regions.geojson");
 const COUNTRIES_OUT = path.join(REPO_ROOT, "data/world-country-polygons.geojson");
+
+// 115,000 primaries measured at 8.2GB resident, so a batch is sized well
+// under that -- the cost of one extra batch is one more read of the
+// corpus, which is cheap next to being killed.
+const MAX_PRIMARIES_PER_BATCH = 60_000;
+
+interface CountryBatch {
+  countries: Set<string>;
+  primaryIds: Set<string>;
+  primaryCount: number;
+}
+
+/** Splits countries into batches of roughly equal primary-city count, so
+ * no batch blows the geometry budget while the number of corpus re-reads
+ * stays small. Largest-country-first into whichever batch is currently
+ * smallest -- crude, but it keeps a China or a Brazil from landing
+ * together. */
+function planCountryBatches(index: AdminBoundaryIndex, primary: PrimaryLevelResult): CountryBatch[] {
+  const idsByCountry = new Map<string, string[]>();
+  for (const candidate of index.cityCandidates) {
+    if (!primary.primaryIds.has(candidate.id)) continue;
+    let ids = idsByCountry.get(candidate.country);
+    if (!ids) {
+      ids = [];
+      idsByCountry.set(candidate.country, ids);
+    }
+    ids.push(candidate.id);
+  }
+
+  const total = [...idsByCountry.values()].reduce((n, ids) => n + ids.length, 0);
+  const batchCount = Math.max(1, Math.ceil(total / MAX_PRIMARIES_PER_BATCH));
+  const batches: CountryBatch[] = Array.from({ length: batchCount }, () => ({
+    countries: new Set<string>(),
+    primaryIds: new Set<string>(),
+    primaryCount: 0,
+  }));
+
+  const bySize = [...idsByCountry.entries()].sort((a, b) => b[1].length - a[1].length);
+  for (const [country, ids] of bySize) {
+    const target = batches.reduce((a, b) => (a.primaryCount <= b.primaryCount ? a : b));
+    target.countries.add(country);
+    for (const id of ids) target.primaryIds.add(id);
+    target.primaryCount += ids.length;
+  }
+  return batches.filter((b) => b.primaryCount > 0);
+}
 
 async function main(): Promise<void> {
   const files = discoverAdminGeoJsonFiles(WORK_DIR);
@@ -56,44 +104,86 @@ async function main(): Promise<void> {
   console.error("Pass 1/4: scanning merged corpus for city/region candidates...");
   const index = await buildAdminBoundaryIndex(files, countries);
 
-  console.error("Pass 2/4: selecting primary admin levels, loading primary geometry...");
+  console.error("Pass 2/4: selecting primary admin levels...");
   const primary = selectPrimaryLevels(index, countries);
-  const primaryGeom = await loadPrimaryGeometries(files, primary.primaryIds);
-
-  console.error("Pass 3/4: gap-fill detection...");
-  const gapFill = detectGapFill(index, primary, primaryGeom);
-  const gapFillIds = new Set(gapFill.map((c) => c.id));
-
-  console.error("Pass 4/4: fetching gap-fill geometry, assembling cities/regions/hierarchy...");
-  const gapFillGeomById = new Map<string, Feature<Polygon | MultiPolygon>>();
-  for await (const { id, feature } of fetchFinalGeometries(files, gapFillIds)) {
-    gapFillGeomById.set(id, feature);
-  }
-
   const regionIndex = buildRegionIndex(index.regionsByCountryName);
 
-  const survivors = [...index.cityCandidates.filter((c) => primary.primaryIds.has(c.id)), ...gapFill];
+  // Full-precision city geometry for the whole world does not fit in
+  // memory at once -- ~295k primaries measured at roughly 60KB each, so
+  // ~19GB. Countries are therefore processed in batches, which is sound
+  // because every question left to answer is country-local: a candidate's
+  // representative point can only fall inside a primary of its own
+  // country, and its region can only be one of that country's regions.
+  // Each batch costs one more read of the corpus, so batches are kept few
+  // and balanced by primary count rather than split per country.
+  const batches = planCountryBatches(index, primary);
+  console.error(
+    `processing ${batches.length} country batches (largest ${Math.max(...batches.map((b) => b.primaryCount)).toLocaleString()} primaries)`,
+  );
 
-  const cityFeatures: Feature<Polygon | MultiPolygon, CityProperties>[] = [];
+  // Cities stream straight to disk as a GeoJSON Text Sequence (one
+  // RS-delimited feature per record, the same shape osmium emits and
+  // streamGeoJSONSeq reads). A single FeatureCollection is not an option
+  // at this scale: the file runs to gigabytes, and Node cannot hold a
+  // string past 512MB, so nothing downstream could ever JSON.parse it.
+  const cityOut = createWriteStream(CITIES_OUT);
+  const write = (chunk: string): Promise<void> =>
+    cityOut.write(chunk) ? Promise.resolve() : new Promise((resolve) => cityOut.once("drain", () => resolve()));
+
   const regionsByCountry = new Map<string, Set<string>>();
+  const skippedNoRegionByCountry = new Map<string, number>();
+  let cityCount = 0;
   let skippedNoName = 0;
   let skippedNoGeometry = 0;
-  const skippedNoRegionByCountry = new Map<string, number>();
+  const gapFillByCountryBatch: CityCandidateMeta[][] = [];
 
-  for (const candidate of survivors) {
+  for (const [batchIndex, batch] of batches.entries()) {
+    console.error(
+      `  batch ${batchIndex + 1}/${batches.length}: ${batch.countries.size} countries, ${batch.primaryCount.toLocaleString()} primaries`,
+    );
+    const primaryGeom = await loadPrimaryGeometries(files, batch.primaryIds);
+    const gapFill = detectGapFill(index, primary, primaryGeom, batch.countries);
+    gapFillByCountryBatch.push(gapFill);
+
+    for (const candidate of index.cityCandidates) {
+      if (!batch.primaryIds.has(candidate.id)) continue;
+      const geometry = primaryGeom.byId.get(candidate.id);
+      if (!geometry) {
+        skippedNoGeometry++;
+        continue;
+      }
+      const emitted = await emitCity(candidate, geometry);
+      if (emitted) cityCount++;
+    }
+  }
+
+  console.error("Pass 3/4: gap-fill geometry...");
+  const gapFillById = new Map<string, CityCandidateMeta>();
+  for (const batch of gapFillByCountryBatch) {
+    for (const candidate of batch) gapFillById.set(candidate.id, candidate);
+  }
+  console.error(`  ${gapFillById.size.toLocaleString()} gap-fill cities across all batches`);
+
+  // One final corpus read covers every batch's gap-fill at once, and each
+  // feature is written and released immediately.
+  for await (const { id, feature } of fetchFinalGeometries(files, new Set(gapFillById.keys()))) {
+    const candidate = gapFillById.get(id);
+    if (!candidate) continue;
+    const emitted = await emitCity(candidate, feature);
+    if (emitted) cityCount++;
+  }
+
+  await new Promise<void>((resolve, reject) => cityOut.end((err?: Error | null) => (err ? reject(err) : resolve())));
+
+  async function emitCity(candidate: CityCandidateMeta, geometry: Feature<Polygon | MultiPolygon>): Promise<boolean> {
     if (!candidate.name) {
       skippedNoName++;
-      continue;
-    }
-    const geometry = primaryGeom.byId.get(candidate.id) ?? gapFillGeomById.get(candidate.id);
-    if (!geometry) {
-      skippedNoGeometry++;
-      continue;
+      return false;
     }
     const region = assignCityRegion(candidate.repPoint, candidate.country, regionIndex);
     if (!region) {
       skippedNoRegionByCountry.set(candidate.country, (skippedNoRegionByCountry.get(candidate.country) ?? 0) + 1);
-      continue;
+      return false;
     }
     let regions = regionsByCountry.get(candidate.country);
     if (!regions) {
@@ -102,16 +192,19 @@ async function main(): Promise<void> {
     }
     regions.add(region);
 
-    cityFeatures.push({
+    const feature: Feature<Polygon | MultiPolygon, CityProperties> = {
       type: "Feature",
       properties: { id: candidate.id, name: candidate.name, region, country: candidate.country },
       geometry: geometry.geometry,
-    });
+    };
+    await write("\x1e" + JSON.stringify(feature) + "\n");
+    return true;
   }
 
+  console.error("Pass 4/4: hierarchy, regions and country polygons...");
   const skippedNoRegion = [...skippedNoRegionByCountry.values()].reduce((a, b) => a + b, 0);
   console.error(
-    `cities: ${cityFeatures.length} kept, ${skippedNoName} skipped (no name), ${skippedNoGeometry} skipped ` +
+    `cities: ${cityCount} kept, ${skippedNoName} skipped (no name), ${skippedNoGeometry} skipped ` +
       `(no geometry found), ${skippedNoRegion} skipped (no region -- city/region resolution unavailable there)`,
   );
   if (skippedNoRegionByCountry.size > 0) {
@@ -136,9 +229,8 @@ async function main(): Promise<void> {
       regions: [...(regionsByCountry.get(code) ?? [])].sort((a, b) => a.localeCompare(b)),
     }));
   writeFileSync(HIERARCHY_OUT, JSON.stringify(hierarchy));
-  writeFileSync(CITIES_OUT, JSON.stringify({ type: "FeatureCollection", features: cityFeatures } satisfies FeatureCollection<Polygon | MultiPolygon, CityProperties>));
   console.error(
-    `wrote ${HIERARCHY_OUT} (${hierarchy.length} countries, ${hierarchy.reduce((n, c) => n + c.regions.length, 0)} regions) and ${CITIES_OUT} (${cityFeatures.length} cities)`,
+    `wrote ${HIERARCHY_OUT} (${hierarchy.length} countries, ${hierarchy.reduce((n, c) => n + c.regions.length, 0)} regions) and ${CITIES_OUT} (${cityCount} cities)`,
   );
 
   const countryCollection: FeatureCollection<Polygon | MultiPolygon, { code: string }> = {

@@ -5,6 +5,7 @@ import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
 import { loadHierarchy } from "./hierarchy.js";
 import { buildCGeoDataFileParallel } from "./buildParallel.js";
 import { parseChunkSelection } from "./chunkSelection.js";
+import { loadCities } from "./cities.js";
 import type { CityProperties } from "./placeIds.js";
 
 function parseArgs(argv: string[]): { positional: string[]; flags: Record<string, string> } {
@@ -30,7 +31,7 @@ async function main(): Promise<void> {
   const [hierarchyPath, citiesPath, outPath] = positional;
   if (!hierarchyPath || !citiesPath || !outPath) {
     console.error(
-      "usage: cgeodata-compress <hierarchy.json> <cities.geojson> <out.bin> " +
+      "usage: cgeodata-compress <hierarchy.json> <cities.geojson|.geojsonseq> <out.bin> " +
         "[--regions regions.geojson] [--countries countries.geojson] " +
         "[--width-exp N] [--height-exp N] [--max-depth N] [--keyframe-exp N] [--attribution TEXT] " +
         "[--workers N] [--only-chunks LIST]\n" +
@@ -42,10 +43,7 @@ async function main(): Promise<void> {
   }
 
   const hierarchy = loadHierarchy(hierarchyPath);
-  const cities = JSON.parse(readFileSync(citiesPath, "utf8")) as FeatureCollection<
-    Polygon | MultiPolygon,
-    CityProperties
-  >;
+  const cities = await loadCities(citiesPath);
   const regionsPath = flags["regions"];
   const regions = regionsPath
     ? (JSON.parse(readFileSync(regionsPath, "utf8")) as FeatureCollection<
