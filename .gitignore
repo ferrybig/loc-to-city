@@ -1,9 +1,11 @@
 data/*.o5m
 data/eu_cities.geojson
 data/eu-cities-filtered.geojson
+data/world-cities-filtered.geojson
 data/nl_grid_d22_naive_reference.bin
 data-ingest/work/
 data-ingest/work-eu/
+data-ingest/work-world/
 *.pbf
 *.pbf.part
 .venv/

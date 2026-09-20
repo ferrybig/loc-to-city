@@ -752,6 +752,73 @@ started at depth 8 before working up to 10. Pushing depth further, and
 replacing the remaining `touches()`/`fullyContains()` cost (see above), are
 both open follow-ups before this is production-scale.
 
+### Worldwide build (`data-ingest/scripts/build-world.sh`)
+
+Europe's pipeline only works because `data/eu_cities.geojson` already
+exists -- cities with region and country pre-resolved, produced by the
+Python prototype that has since been deleted. No such file exists for any
+other continent, so going worldwide meant building that step from scratch
+in TypeScript rather than reusing a prepared artifact.
+
+Two things had to be solved that Europe never hit:
+
+1. **Countries split across continent files.** Russia's administrative
+   relations live in `europe`, `asia` *and* `russia`; Turkey's in `europe`
+   and `asia`. Verified with `osmium` against the real extracts: these are
+   not coarse stubs in one file and full detail in another -- each
+   continent file carries a complete, full-fidelity copy of whatever part
+   of the country falls inside its own clip, with no overlap. Pulling
+   Moscow + Yekaterinburg + Novosibirsk out of `russia` yields 33,998
+   nodes; Moscow alone out of `europe` is 25,756 and Yekaterinburg alone
+   out of `asia` is 4,669, and 25,756 + 4,669 + Novosibirsk's 3,573 is
+   exactly 33,998. So the fix is not a per-country priority list, it's just
+   **deduplication by relation id across every file**, which handles any
+   transcontinental country without naming it. (`osmium export` doesn't
+   emit an id by default -- `--add-unique-id type_id` is required, and
+   gives `"a16115300"`-style area ids, deterministically derived from the
+   relation, not the `"r..."` its docs imply.)
+2. **Per-country `admin_level` detection, ported to TypeScript.** The
+   3-pass algorithm described in the "Europe scaling test" section above
+   (accumulate area by `(country, level)`, take the finest level covering
+   >=60% of the country, then gap-fill anything a primary polygon doesn't
+   already cover) was Python-only and is now gone. The port keeps its
+   behavior exactly, including the case the section above doesn't spell
+   out -- when *no* level clears 60%, fall back to whichever has the
+   largest share, recovered from `git show
+   55c4a6f:scripts/extract_boundaries_europe.py` rather than guessed at.
+
+Memory is bounded by holding only scalars (id, country, level, area,
+representative point, bbox) for every candidate during the area-
+accumulation pass, and full geometry only for the primary set that
+actually survives -- so peak RSS tracks the *output* size, not the corpus.
+An RSS guardrail aborts with an actionable message rather than repeating
+the whole-machine OOM that this project already hit once.
+
+```bash
+data-ingest/scripts/build-world.sh                    # everything in data-ingest/osm/
+data-ingest/scripts/build-world.sh australia-oceania-260918   # one continent, end to end
+```
+
+Extraction skips any file whose output is already newer than its input, so
+swapping one `.osm.pbf` and re-running only re-extracts that one. File
+discovery is by glob, not a hardcoded continent list -- dropping in a new
+`africa-*.osm.pbf` needs no code change.
+
+Run on `australia-oceania` (30,562 boundary relations): 21 countries get a
+primary level, 15,800 primary + 147 gap-filled cities, 14,887 kept after
+dropping 5 unnamed and 1,055 with no region. Australia resolves at
+`admin_level=9` (gazetted localities -- Sydney, Melbourne and their
+suburbs all present), New Zealand at 6 (its real territorial authorities:
+Wellington City, Hamilton City, Dunedin City...). The no-region drops are
+the same class of gap Europe has in Ireland/Estonia/Portugal: those places
+still resolve at country level, and the count is reported per country
+rather than silently swallowed.
+
+**Not yet done:** a full 8-file worldwide build. The data-ingest stage is
+fast (~11s for australia-oceania), but the compressor stage is the
+bottleneck at this scale -- see `--only-chunks` below for the measurement
+and why.
+
 ### Parallel compression (`--workers`)
 
 Every chunk is independent -- `buildChunkRecords` touches the shared
