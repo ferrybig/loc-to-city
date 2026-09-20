@@ -416,10 +416,51 @@ the same class of gap Europe has in Ireland/Estonia/Portugal: those places
 still resolve at country level, and the count is reported per country
 rather than silently swallowed.
 
-**Not yet done:** a full 8-file worldwide build. The data-ingest stage is
-fast (~11s for australia-oceania), but the compressor stage is the
-bottleneck at this scale -- see `--only-chunks` below for the measurement
-and why.
+**The full 8-file worldwide build is done and committed:** `data/world.bin`
+(8.3MB), built from `data/world-hierarchy.json`, `data/world-regions.geojson`
+and `data/world-country-polygons.geojson`, all also committed --
+`data/world-cities-filtered.geojsonseq` (4.0GB) is the only intermediate
+output, gitignored like its Europe equivalent.
+
+Ingest deduplicated 922,077 unique relations across all 8 files (29,781
+cross-file duplicates dropped -- Russia and Turkey's transcontinental
+split, plus every country whose relations simply span more than one
+Geofabrik extract), keeping 245,348 cities (2,860 dropped for no name,
+76,964 for no region -- Ireland/Estonia/Portugal-shaped gaps as expected,
+see the australia-oceania run above) across 239 countries and 2,389
+regions. Memory stayed bounded by the country-batching scheme in
+`prepare-world.ts`: primaries are loaded and streamed to disk in batches
+sized to a per-run RSS ceiling (largest countries first, into the smallest
+batch) rather than all at once, which is what actually made a worldwide
+run possible after an early attempt measured 115,000 primaries resident at
+8.2GB, over the 8GB guardrail described above that exists specifically to
+fail fast rather than repeat this project's whole-machine OOM.
+
+The compressor stage was the bottleneck exactly as expected: 1h14m45s
+wall clock at `--workers 2`, capped to 16GB resident via `systemd-run
+--user --scope -p MemoryMax=16G` (peak RSS 16.2GB, zero swapping). 2,116
+of 4,096 chunks produced records; total chunk work was 8,572s, so the two
+workers stayed ~96% busy throughout. The slowest individual chunks were
+~123s each (sparse, geometry-heavy coastline -- Svalbard/Norway), nowhere
+near the multi-minute-per-chunk wall that made Russia's *un*simplified
+border look intractable before the segment/rectangle classifier fix
+above.
+
+Spot-checked with the reader directly: Moscow, Yekaterinburg and
+Novosibirsk (Russia's europe+asia+russia-file split) and Istanbul
+(Turkey's europe+asia split) each resolve to their correct region exactly
+once -- the relation-id dedup working end to end, not just at the ingest
+stage. Tokyo, São Paulo, New York, Sydney, Den Haag, Paris and Nairobi all
+resolve correctly to city/region/country; mid-ocean points resolve fully
+unknown.
+
+`data/world_no_chunk.bin` (1.3MB) is the same build with
+`--only-chunks ''` -- the place table alone, no quadtree chunks -- kept
+committed alongside `world.bin` since it's a much smaller way to inspect
+or query country/region/city counts without loading 8.3MB of chunk data,
+and it's what actually caught the 73-countries-with-zero-cities/
+zero-regions shape (small island territories, plus the same admin_level=4
+gap set) before the full build finished.
 
 ### Parallel compression (`--workers`)
 
