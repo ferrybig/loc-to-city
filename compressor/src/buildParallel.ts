@@ -34,18 +34,23 @@ export async function buildCGeoDataFileParallel(
   const { candidateIndex, width, height } = prepared;
 
   const jobs = enumerateChunkJobs(candidateIndex, width, height, options.onlyChunks);
-  const results = await runChunkJobs(jobs, options.workers, options.maxDepth);
-
-  const chunkBytes: (Buffer | null)[] = new Array(width * height).fill(null);
-  let totalRecords = 0;
-  let nonEmptyChunkCount = 0;
-  for (const result of results) {
+  // Reported from inside the pool as each chunk lands rather than from the
+  // loop below, so progress is visible while the build runs instead of
+  // arriving all at once after every chunk is already done. The pool has no
+  // notion of the grid, so the chunk count is filled in here.
+  const results = await runChunkJobs(jobs, options.workers, options.maxDepth, (result) => {
     options.onChunkBuilt?.({
       chunkIndex: result.chunkIndex,
       chunkCount: width * height,
       recordCount: result.recordCount,
       elapsedMs: result.elapsedMs,
     });
+  });
+
+  const chunkBytes: (Buffer | null)[] = new Array(width * height).fill(null);
+  let totalRecords = 0;
+  let nonEmptyChunkCount = 0;
+  for (const result of results) {
     if (result.bytes === null) continue;
     chunkBytes[result.chunkIndex] = result.bytes;
     totalRecords += result.recordCount;

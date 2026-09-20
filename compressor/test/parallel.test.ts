@@ -129,6 +129,56 @@ test("per-chunk timing is reported for every chunk that did work, in both paths"
   );
 });
 
+test("the worker pool reports chunks as they finish, not in one burst at the end", async () => {
+  // Regression guard for a build that printed nothing for over an hour:
+  // results were collected into an array and only handed to the callback
+  // after every chunk was already done, so "no output yet" looked exactly
+  // like a hang. Pinning this needs an observable that distinguishes
+  // "during" from "after" -- a promise that resolves on the first callback
+  // wins the race against build completion only if reporting is streamed.
+  let firstReport: (() => void) | undefined;
+  const sawFirstReport = new Promise<void>((resolve) => {
+    firstReport = resolve;
+  });
+
+  let reportsBeforeSettle = 0;
+  let settled = false;
+  const build = buildCGeoDataFileParallel(hierarchy, cities, {
+    ...options,
+    workers: 2,
+    onChunkBuilt: () => {
+      if (!settled) reportsBeforeSettle++;
+      firstReport?.();
+    },
+  }).then((value) => {
+    settled = true;
+    return value;
+  });
+
+  const winner = await Promise.race([sawFirstReport.then(() => "report" as const), build.then(() => "build" as const)]);
+  assert.equal(winner, "report", "a chunk should be reported before the build resolves");
+
+  await build;
+  assert.ok(reportsBeforeSettle > 0, "every report arrived after the build had already resolved");
+});
+
+test("a callback that throws fails the build and tears the pool down", async () => {
+  // The callback now runs inside a worker 'message' handler, where an
+  // uncaught throw would escape the promise entirely rather than rejecting
+  // it -- so the pool has to catch it and route it through the same
+  // fail-fast path as a dead worker.
+  await assert.rejects(
+    buildCGeoDataFileParallel(hierarchy, cities, {
+      ...options,
+      workers: 2,
+      onChunkBuilt: () => {
+        throw new Error("callback exploded");
+      },
+    }),
+    /callback exploded/,
+  );
+});
+
 test("a worker pool cleans up and rejects on a malformed candidate geometry", async () => {
   const poisonCities: FeatureCollection<Polygon | MultiPolygon, CityProperties> = {
     type: "FeatureCollection",

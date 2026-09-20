@@ -32,10 +32,12 @@ export interface BuildOptions {
    * includes chunks that produced no records (`recordCount === 0`), since
    * those still cost real time and are exactly the ones worth seeing when
    * hunting for slow areas. Chunks skipped before any work (empty root
-   * bbox query, or excluded by `onlyChunks`) never fire it. The worker-pool
-   * path fires this out of order (whichever worker finishes next), not in
-   * chunk-index order. `elapsedMs` covers the same span in both paths:
-   * `buildChunkRecords` plus `encodeChunk`, excluding any queueing. */
+   * bbox query, or excluded by `onlyChunks`) never fire it. Both paths fire
+   * it as the chunk finishes, so it doubles as live progress on a long
+   * build; the worker-pool path fires out of order (whichever worker
+   * finishes next), not in chunk-index order. `elapsedMs` covers the same
+   * span in both paths: `buildChunkRecords` plus `encodeChunk`, excluding
+   * any queueing. A throwing callback fails the build. */
   onChunkBuilt?: (info: {
     chunkIndex: number;
     chunkCount: number;

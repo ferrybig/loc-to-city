@@ -21,12 +21,23 @@ export interface ChunkResult {
  * the ~1000x skew between the cheapest and most expensive chunk can't
  * strand one worker with every hard chunk while others sit idle.
  *
+ * `onResult` fires as each result lands, before the promise settles. That
+ * matters for progress reporting: a worldwide build runs for over an hour,
+ * and a caller that only sees results from the resolved array prints
+ * nothing at all until the very end -- silence indistinguishable from a
+ * hang. A callback that throws is treated like any other failure below.
+ *
  * Fails fast: the first error from any source (a thrown exception inside
- * a worker, an unexpected worker exit, or an explicit `failed` message for
- * a caught error) terminates every worker and rejects. No partial output
- * is ever produced by this function -- that's the caller's job once every
- * result is in. */
-export function runChunkJobs(jobs: ChunkJob[], workerCount: number, maxDepth: number): Promise<ChunkResult[]> {
+ * a worker, an unexpected worker exit, an explicit `failed` message for
+ * a caught error, or a throwing `onResult`) terminates every worker and
+ * rejects. No partial output is ever produced by this function -- that's
+ * the caller's job once every result is in. */
+export function runChunkJobs(
+  jobs: ChunkJob[],
+  workerCount: number,
+  maxDepth: number,
+  onResult?: (result: ChunkResult) => void,
+): Promise<ChunkResult[]> {
   return new Promise((resolve, reject) => {
     if (jobs.length === 0) {
       resolve([]);
@@ -79,12 +90,22 @@ export function runChunkJobs(jobs: ChunkJob[], workerCount: number, maxDepth: nu
           response.bytes === null
             ? null
             : Buffer.from(response.bytes.buffer, response.bytes.byteOffset, response.bytes.byteLength);
-        results.push({
+        const result: ChunkResult = {
           chunkIndex: response.chunkIndex,
           recordCount: response.recordCount,
           bytes,
           elapsedMs: response.elapsedMs,
-        });
+        };
+        results.push(result);
+
+        if (onResult) {
+          try {
+            onResult(result);
+          } catch (err) {
+            fail(err instanceof Error ? err : new Error(String(err)));
+            return;
+          }
+        }
 
         if (results.length === jobs.length) {
           settled = true;
