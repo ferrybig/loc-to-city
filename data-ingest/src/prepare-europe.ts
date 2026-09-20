@@ -47,13 +47,17 @@ const COUNTRIES_OUT = path.join(REPO_ROOT, "data/eu-country-polygons.geojson");
 // region/country polygons are fallback layers here, not the primary
 // source of precision (cities carry that), and at continent scale their
 // vertex count directly drives the compressor's per-cell classification
-// cost. Russia alone was ~14,800 vertices at the old 0.01 country
-// tolerance and is 36,756 unsimplified. See README's "How much precision
-// these tolerances cost" for what each setting is actually worth now that
-// the classification step is ~16x cheaper than it was when these
-// tolerances were chosen.
+// cost -- so regions, which are only a fallback where no city matched,
+// stay simplified (unsimplified they are 77x the vertices for a build
+// that produces slightly *fewer* records).
+//
+// Countries no longer are. That tradeoff was rewritten by the
+// segment/rectangle classifier: full precision costs ~4 minutes against
+// ~30 seconds here, and fixes ~500 of 361,201 sampled points that a
+// 5.5km outline places on the wrong side of a coastline or border. See
+// README's "How much precision these tolerances cost".
 const REGION_SIMPLIFY_TOLERANCE = 0.01; // ~1.1km
-const COUNTRY_SIMPLIFY_TOLERANCE = 0.05; // ~5.5km
+const COUNTRY_SIMPLIFY_TOLERANCE = 0; // 0 = keep every vertex
 
 interface NECountryProps {
   ISO_A2_EH?: string;
@@ -86,7 +90,8 @@ function loadCountryPolygons(): {
   const featureByCode = new Map<string, Feature<Polygon | MultiPolygon, { code: string }>>();
   const nameByCode = new Map<string, string>();
   for (const [code, feature] of byCode) {
-    const simplified = simplify(feature, { tolerance: COUNTRY_SIMPLIFY_TOLERANCE });
+    const simplified =
+      COUNTRY_SIMPLIFY_TOLERANCE <= 0 ? feature : simplify(feature, { tolerance: COUNTRY_SIMPLIFY_TOLERANCE });
     featureByCode.set(code, { ...simplified, properties: { code } });
     nameByCode.set(code, feature.properties.NAME ?? code);
   }

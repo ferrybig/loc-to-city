@@ -48,7 +48,19 @@ export interface CountryIndex {
   missingCount(): number;
 }
 
-const COUNTRY_SIMPLIFY_TOLERANCE = 0.05; // ~5.5km, matches prepare-europe.ts
+/** Country outlines are kept at Natural Earth's full 10m precision. They
+ * used to be simplified to ~5.5km because vertex count drove the
+ * compressor's dominant cost, but the segment/rectangle classifier made
+ * that affordable: on Europe, full precision costs about four minutes
+ * instead of thirty seconds and removes ~500 of 361,201 sampled points
+ * that a 5.5km outline gets wrong -- all of them on coastlines and
+ * borders, answering "unknown" where a country was meant, or the reverse.
+ * Build time is paid once per rebuild; that error would ship in every
+ * file. See README's "How much precision these tolerances cost".
+ *
+ * Regions are a different trade and stay simplified -- see
+ * adminBoundaryIndex.ts. */
+const COUNTRY_SIMPLIFY_TOLERANCE = 0; // 0 = keep every vertex
 
 export function loadCountryIndex(neCountriesPath: string): CountryIndex {
   const data = JSON.parse(readFileSync(neCountriesPath, "utf8")) as FeatureCollection<
@@ -80,7 +92,8 @@ export function loadCountryIndex(neCountriesPath: string): CountryIndex {
   for (const [code, feature] of byCode) {
     areaByCode.set(code, area(feature) / 1_000_000); // m^2 -> km^2
     nameByCode.set(code, feature.properties.NAME ?? code);
-    const simplified = simplify(feature, { tolerance: COUNTRY_SIMPLIFY_TOLERANCE });
+    const simplified =
+      COUNTRY_SIMPLIFY_TOLERANCE <= 0 ? feature : simplify(feature, { tolerance: COUNTRY_SIMPLIFY_TOLERANCE });
     simplifiedFeatureByCode.set(code, { ...simplified, properties: { code } });
 
     const [minX, minY, maxX, maxY] = bbox(feature);
