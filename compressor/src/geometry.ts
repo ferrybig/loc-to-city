@@ -94,6 +94,50 @@ function segmentContact(
   return interior ? CONTACT_INTERIOR : CONTACT_GRAZE;
 }
 
+interface IndexedRing {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  points: [number, number][];
+}
+
+/** Per-ring bounding boxes, computed once per geometry and reused for
+ * every cell that geometry is tested against. Without this, classifying a
+ * deep cell against a big multi-ring candidate walks every island of, say,
+ * Russia's coastline to answer a question about one small rectangle. The
+ * cache is keyed on the geometry object, so it lives exactly as long as
+ * the candidate does -- in a worker that means one chunk's worth of cells,
+ * which is precisely the span over which the same candidates repeat. */
+const ringCache = new WeakMap<Polygon | MultiPolygon, IndexedRing[]>();
+
+function ringsOf(geometry: Polygon | MultiPolygon): IndexedRing[] {
+  const cached = ringCache.get(geometry);
+  if (cached) return cached;
+
+  const rings: IndexedRing[] = [];
+  const polygons = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates;
+  for (const polygon of polygons) {
+    for (const ring of polygon) {
+      const points = ring as [number, number][];
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const [x, y] of points) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+      rings.push({ minX, minY, maxX, maxY, points });
+    }
+  }
+
+  ringCache.set(geometry, rings);
+  return rings;
+}
+
 /** Strongest contact any ring of the candidate -- outer or hole, every
  * part of a MultiPolygon -- makes with the cell rectangle. Returning
  * `CONTACT_INTERIOR` also covers a polygon lying entirely *inside* the
@@ -101,21 +145,21 @@ function segmentContact(
  * otherwise be missed by the corner test and wrongly reported disjoint. */
 function boundaryContact(geometry: Polygon | MultiPolygon, bounds: CellBounds): number {
   const { lonMin, lonMax, latMin, latMax } = bounds;
-  const polygons = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates;
   let strongest = CONTACT_NONE;
 
-  for (const polygon of polygons) {
-    for (const ring of polygon) {
-      const points = ring as [number, number][];
-      for (let i = 1; i < points.length; i++) {
-        const [x1, y1] = points[i - 1] as [number, number];
-        const [x2, y2] = points[i] as [number, number];
-        const contact = segmentContact(x1, y1, x2, y2, lonMin, lonMax, latMin, latMax);
-        // Interior contact is the strongest answer available, so stop as
-        // soon as one turns up.
-        if (contact === CONTACT_INTERIOR) return CONTACT_INTERIOR;
-        if (contact > strongest) strongest = contact;
-      }
+  for (const ring of ringsOf(geometry)) {
+    // Whole islands drop out here without a single segment being examined.
+    if (ring.minX > lonMax || ring.maxX < lonMin || ring.minY > latMax || ring.maxY < latMin) continue;
+
+    const points = ring.points;
+    for (let i = 1; i < points.length; i++) {
+      const [x1, y1] = points[i - 1] as [number, number];
+      const [x2, y2] = points[i] as [number, number];
+      const contact = segmentContact(x1, y1, x2, y2, lonMin, lonMax, latMin, latMax);
+      // Interior contact is the strongest answer available, so stop as
+      // soon as one turns up.
+      if (contact === CONTACT_INTERIOR) return CONTACT_INTERIOR;
+      if (contact > strongest) strongest = contact;
     }
   }
   return strongest;

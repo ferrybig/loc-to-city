@@ -911,3 +911,41 @@ edge-to-edge with no gaps, so the quadtree keeps subdividing: almost every
 cell has several adjacent full-precision candidates whose boundaries cross
 it. That is the actual shape of the worldwide build cost, and it's
 per-chunk work, not candidate count -- Europe has ~9x more cities in total.
+
+### How much precision these tolerances cost
+
+`prepare-europe.ts` simplifies region and country polygons aggressively
+(0.01 and 0.05) because, when those numbers were picked, vertex count drove
+the dominant cost and Russia at full precision made the build intractable.
+The segment/rectangle classifier changed that enough to be worth
+re-measuring rather than assuming. Europe, 16 workers, everything else
+held constant:
+
+| Country tolerance | Russia verts | All 41 countries | Wall clock | Points differing from full precision |
+|---|---|---|---|---|
+| 0.05 (~5.5km, current) | 4,491 | 12,159 | **33s** | 506 / 361,201 (0.140%) |
+| 0.01 (~1.1km, the old Python value) | 14,816 | 41,687 | 1m14s | 111 / 361,201 (0.031%) |
+| none | 36,756 | 118,583 | 4m15s | — |
+
+So full-precision country borders are now affordable where they simply
+weren't before — the same build under the old predicates would have been
+somewhere north of an hour. Every one of the 506 differences is a coastal
+or border point (Gibraltar, the Algarve, Sicily, the Turkish border)
+flipping between a country and `unknown`, which is exactly what a 5.5km
+outline gets wrong. Dropping to 0.01 buys back 78% of that for 1m14s.
+
+**Regions are a different story and should stay simplified.** Unsimplified
+they are 7,222,966 vertices against 93,205 — 77x, driven by a handful of
+enormous ones (Bretagne alone is 254,929). Measured on six French chunks
+via `--only-chunks 3039,3040,3103,3104,3167,3168`: 10.1s of chunk work
+simplified against 651.5s unsimplified, a 64x increase that extrapolates
+to roughly half an hour for the continent. The return is negative, too --
+that build produced *fewer* records (251,242 against 251,786), since the
+region layer only ever answers where no city matched, and a sharper
+fallback boundary mostly just costs more to compute.
+
+A per-candidate segment index (or clipping each candidate to its chunk
+once, the idea deliberately deferred when `--workers` landed) is what
+would change this picture; per-ring bounding boxes already skip whole
+islands, but Russia's mainland ring is a single ring that no bbox test can
+skip.

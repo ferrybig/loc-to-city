@@ -46,9 +46,12 @@ const COUNTRIES_OUT = path.join(REPO_ROOT, "data/eu-country-polygons.geojson");
 // purposes (scripts/extract_boundaries_europe.py, since removed) --
 // region/country polygons are fallback layers here, not the primary
 // source of precision (cities carry that), and at continent scale their
-// vertex count directly drives the compressor's dominant cost (exact
-// polygon algorithms in touches()/fullyContains()). Russia alone was
-// ~14,800 vertices at the old 0.01 country tolerance.
+// vertex count directly drives the compressor's per-cell classification
+// cost. Russia alone was ~14,800 vertices at the old 0.01 country
+// tolerance and is 36,756 unsimplified. See README's "How much precision
+// these tolerances cost" for what each setting is actually worth now that
+// the classification step is ~16x cheaper than it was when these
+// tolerances were chosen.
 const REGION_SIMPLIFY_TOLERANCE = 0.01; // ~1.1km
 const COUNTRY_SIMPLIFY_TOLERANCE = 0.05; // ~5.5km
 
