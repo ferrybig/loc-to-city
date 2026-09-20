@@ -1,6 +1,6 @@
 import { mortonEncode } from "@loc-to-city/reader";
 import type { IndexedCandidate } from "./candidateIndex.js";
-import { cellPolygon, fullyContains, touches, countContainedSamples, type CellBounds } from "./geometry.js";
+import { classifyCell, countContainedSamples, type CellBounds } from "./geometry.js";
 
 export interface ChunkRecord {
   code: number;
@@ -95,8 +95,19 @@ export function buildChunkRecords(
     );
     if (bboxOverlapping.length === 0) return;
 
-    const cell = cellPolygon(bounds);
-    const touching = bboxOverlapping.filter((candidate) => touches(candidate.feature, cell));
+    // One classification per candidate answers both questions this cell
+    // needs -- "does it touch" and "does it fully contain" -- so the
+    // expensive geometry is walked once instead of twice. Order is
+    // preserved exactly (see this function's doc comment on why that's
+    // load-bearing for the tie-breaks below).
+    const touching: IndexedCandidate[] = [];
+    const containsCell = new Set<number>();
+    for (const candidate of bboxOverlapping) {
+      const relation = classifyCell(candidate.feature, bounds, candidate.minX, candidate.minY, candidate.maxX, candidate.maxY);
+      if (relation === "disjoint") continue;
+      touching.push(candidate);
+      if (relation === "contains") containsCell.add(candidate.globalId);
+    }
     if (touching.length === 0) return;
 
     // Ignore any candidate that's an ancestor of a more specific candidate
@@ -107,10 +118,7 @@ export function buildChunkRecords(
     // again).
     const relevant = pruneAncestors(touching);
 
-    const bboxContaining = relevant.filter(
-      (c) => c.minX <= bounds.lonMin && c.maxX >= bounds.lonMax && c.minY <= bounds.latMin && c.maxY >= bounds.latMax,
-    );
-    const containing = bboxContaining.filter((candidate) => fullyContains(candidate.feature, cell));
+    const containing = relevant.filter((candidate) => containsCell.has(candidate.globalId));
     if (containing.length === relevant.length) {
       const winner = containing.reduce((a, b) => (a.area <= b.area ? a : b));
       emit(cellX, cellY, depth, winner.globalId);
