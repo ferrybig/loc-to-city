@@ -23,6 +23,8 @@ export function buildCGeoDataFile(
   let totalRecords = 0;
   let nonEmptyChunkCount = 0;
   for (let chunkIndex = 0; chunkIndex < width * height; chunkIndex++) {
+    if (options.onlyChunks && !options.onlyChunks.has(chunkIndex)) continue;
+
     const bounds = chunkBoundsOf(chunkIndex, width, height);
     const rootCandidates = candidateIndex.candidatesForBbox(bounds.lonMin, bounds.latMin, bounds.lonMax, bounds.latMax);
     if (rootCandidates.length === 0) continue;

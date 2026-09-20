@@ -4,6 +4,7 @@ import { availableParallelism } from "node:os";
 import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
 import { loadHierarchy } from "./hierarchy.js";
 import { buildCGeoDataFileParallel } from "./buildParallel.js";
+import { parseChunkSelection } from "./chunkSelection.js";
 import type { CityProperties } from "./placeIds.js";
 
 function parseArgs(argv: string[]): { positional: string[]; flags: Record<string, string> } {
@@ -32,7 +33,9 @@ async function main(): Promise<void> {
       "usage: cgeodata-compress <hierarchy.json> <cities.geojson> <out.bin> " +
         "[--regions regions.geojson] [--countries countries.geojson] " +
         "[--width-exp N] [--height-exp N] [--max-depth N] [--keyframe-exp N] [--attribution TEXT] " +
-        "[--workers N]",
+        "[--workers N] [--only-chunks LIST]\n" +
+        "  --only-chunks takes indices and inclusive ranges (e.g. '200' or '200,300-500'); " +
+        "every other chunk is left empty. '' builds no chunks at all, just the place table.",
     );
     process.exitCode = 1;
     return;
@@ -64,15 +67,32 @@ async function main(): Promise<void> {
     throw new Error(`--workers must be a non-negative integer, got ${JSON.stringify(workersFlag)}`);
   }
 
+  const widthExp = Number(flags["width-exp"] ?? 6);
+  const heightExp = Number(flags["height-exp"] ?? 6);
+  const chunkCount = 2 ** widthExp * 2 ** heightExp;
+
+  const onlyChunksFlag = flags["only-chunks"];
+  const onlyChunks = onlyChunksFlag === undefined ? undefined : parseChunkSelection(onlyChunksFlag);
+  if (onlyChunks) {
+    const outOfRange = [...onlyChunks].find((index) => index >= chunkCount);
+    if (outOfRange !== undefined) {
+      throw new Error(
+        `--only-chunks selects chunk ${outOfRange}, but this grid only has ${chunkCount} chunks (0-${chunkCount - 1})`,
+      );
+    }
+    console.error(`--only-chunks: building ${onlyChunks.size} of ${chunkCount} chunks, leaving the rest empty`);
+  }
+
   const options = {
     attribution: flags["attribution"] ?? "",
-    widthExp: Number(flags["width-exp"] ?? 6),
-    heightExp: Number(flags["height-exp"] ?? 6),
+    widthExp,
+    heightExp,
     maxDepth: Number(flags["max-depth"] ?? 12),
     keyframeExp: Number(flags["keyframe-exp"] ?? 13),
     regions,
     countries,
     workers,
+    onlyChunks,
     onChunkBuilt: ({ chunkIndex, chunkCount, recordCount }: { chunkIndex: number; chunkCount: number; recordCount: number }) => {
       console.error(`  chunk ${chunkIndex}/${chunkCount}: ${recordCount} records`);
     },

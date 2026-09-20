@@ -792,3 +792,35 @@ number here supersedes the rough "several minutes" estimate in the section
 above -- that one was eyeballed from file timestamps across an interleaved
 profiling session, never actually measured in isolation; this is the first
 time it was.
+
+### Selective chunk builds (`--only-chunks`)
+
+A full-grid build is all-or-nothing, which makes investigating one slow or
+wrong area painful: you either wait out the whole world or you don't get
+the chunk you care about. `--only-chunks` takes a comma-separated list of
+chunk indices and inclusive ranges (`--only-chunks 200`, `--only-chunks
+200,300-500`) and compresses only those; every other chunk is written
+empty, exactly as if it had no candidates. Nothing before the chunk stage
+changes -- the place hierarchy, name blocks and candidate index are all
+still built in full -- so a selective build is a strict subset of the real
+one, not an approximation of it (the tests assert the selected chunk's
+bytes match a full build's, and that sequential and worker-pool paths stay
+byte-identical under a selection).
+
+`--only-chunks ''` selects nothing at all, producing a **dictionary-only
+file**: every chunk empty, but a complete, readable place table. On the
+worldwide inputs that's 77KB in 1.8s, which is enough to serve
+name lookups (a search endpoint, say) without paying for the spatial index
+at all.
+
+The immediate use is measurement. Building only chunk 1274 (the one
+containing Sydney) from the worldwide inputs takes **52 seconds and
+produces 36,808 records** -- for comparison, the entire Europe build
+produces 2,531,710 records across 409 non-empty chunks, averaging ~6,200
+per chunk. One Australian chunk carries 6x the records of an average
+European one, because the level the coverage detection picks for Australia
+(`admin_level=9`, ~14,700 gazetted localities) tiles the country
+edge-to-edge with no gaps, so the quadtree keeps subdividing: almost every
+cell has several adjacent full-precision candidates whose boundaries cross
+it. That is the actual shape of the worldwide build cost, and it's
+per-chunk work, not candidate count -- Europe has ~9x more cities in total.

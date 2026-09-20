@@ -33,7 +33,7 @@ export async function buildCGeoDataFileParallel(
   const prepared = prepareBuild(hierarchy, cities, options);
   const { candidateIndex, width, height } = prepared;
 
-  const jobs = enumerateChunkJobs(candidateIndex, width, height);
+  const jobs = enumerateChunkJobs(candidateIndex, width, height, options.onlyChunks);
   const results = await runChunkJobs(jobs, options.workers, options.maxDepth);
 
   const chunkBytes: (Buffer | null)[] = new Array(width * height).fill(null);

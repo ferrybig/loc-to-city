@@ -21,6 +21,13 @@ export interface BuildOptions {
   regions?: FeatureCollection<Polygon | MultiPolygon, { name: string; country: string }> | undefined;
   /** Country polygons, matched to the hierarchy by `properties.code`. */
   countries?: FeatureCollection<Polygon | MultiPolygon, { code: string }> | undefined;
+  /** When set, only these chunk indices are compressed; every other chunk
+   * is left empty (directory length 0), exactly as if it had no candidates.
+   * Nothing before the chunk stage changes -- the place table, name blocks
+   * and candidate index are still built in full -- so this only narrows
+   * which chunks are worth spending quadtree time on. An empty set builds
+   * no chunks at all, which still yields a complete, readable place table. */
+  onlyChunks?: ReadonlySet<number> | undefined;
   /** Fires once per non-empty chunk. The worker-pool path fires this out
    * of order (whichever worker finishes next), not in chunk-index order. */
   onChunkBuilt?: (info: { chunkIndex: number; chunkCount: number; recordCount: number }) => void;

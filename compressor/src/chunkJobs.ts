@@ -40,10 +40,18 @@ function coordinateCount(candidate: IndexedCandidate): number {
  * path does inline), and returns one job per chunk whose query wasn't
  * empty, sorted by estimated cost descending. Chunks with no candidates at
  * all are skipped entirely (never became a job, never become a Buffer --
- * matches the sequential path's `continue` on an empty root query). */
-export function enumerateChunkJobs(candidateIndex: CandidateIndex, width: number, height: number): ChunkJob[] {
+ * matches the sequential path's `continue` on an empty root query), as are
+ * chunks excluded by `onlyChunks` (see `BuildOptions.onlyChunks`). */
+export function enumerateChunkJobs(
+  candidateIndex: CandidateIndex,
+  width: number,
+  height: number,
+  onlyChunks?: ReadonlySet<number> | undefined,
+): ChunkJob[] {
   const jobs: ChunkJob[] = [];
   for (let chunkIndex = 0; chunkIndex < width * height; chunkIndex++) {
+    if (onlyChunks && !onlyChunks.has(chunkIndex)) continue;
+
     const bounds = chunkBoundsOf(chunkIndex, width, height);
     const candidates = candidateIndex.candidatesForBbox(bounds.lonMin, bounds.latMin, bounds.lonMax, bounds.latMax);
     if (candidates.length === 0) continue;
