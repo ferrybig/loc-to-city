@@ -9,7 +9,7 @@
     ".": "./dist/index.js"
   },
   "bin": {
-    "cgeodata-query": "./dist/cli.js"
+    "cgeodata": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

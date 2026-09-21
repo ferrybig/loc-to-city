@@ -1,145 +1,83 @@
 #!/usr/bin/env node
-import { createInterface } from "node:readline";
-import { CGeoDataReader, type QueryResult } from "./reader.js";
+import { chunk } from "./cli/chunk.js";
+import { info } from "./cli/info.js";
+import { list } from "./cli/list.js";
+import { lookup } from "./cli/lookup.js";
+import { search } from "./cli/search.js";
+import { type Command, EXIT_ERROR, UsageError } from "./cli/shared.js";
+import { show } from "./cli/show.js";
 
-const USAGE = `usage: cgeodata-query <file.bin> <lat,lon> [<lat,lon> ...]
-       cgeodata-query <file.bin> --stdin [< points.txt]
+const COMMANDS: readonly Command[] = [info, lookup, list, search, show, chunk];
 
-Resolves each point to its country/region/city, the lat/lon cell the
-answer is valid for, and the chunk it was read from.
+const USAGE = `usage: cgeodata <command> <file.bin> [...]
+       cgeodata help [<command>]
 
-  --stdin  read one point per line instead of from the arguments.
-           A line is "lat,lon" or "lat<TAB>lon"; anything after that
-           (tab-separated) is echoed back on the output unchanged, so a
-           batch can carry an id or name through. Blank lines and lines
-           starting with # are skipped; a malformed line is reported on
-           stderr and skipped rather than aborting the batch.
-  --json   one JSON object per point (the query result plus the input
-           lat/lon and any echoed text) instead of the readable form.`;
+Reads a CGEODATA file. <file.bin> may be "-" to read the file from stdin.
 
-interface Point {
-  lat: number;
-  lon: number;
-  /** Trailing text from a --stdin line, carried through to the output. */
-  tag: string;
-}
+commands:
+${COMMANDS.map((c) => `  ${c.name.padEnd(8)} ${c.summary}`).join("\n")}
 
-function parseCoordinate(text: string, what: "latitude" | "longitude"): number {
-  const value = Number(text.trim());
-  if (!Number.isFinite(value)) throw new Error(`${what} ${JSON.stringify(text)} is not a number`);
-  return value;
-}
+Exit status is 0 on success, 1 when a search matched nothing, 2 on a
+usage or runtime error.`;
 
-/** Accepts "lat,lon" as one field or lat and lon as two; anything after
- * the coordinates is the tag. */
-function parsePoint(line: string): Point {
-  const fields = line.split("\t");
-  const first = fields[0] ?? "";
-  if (first.includes(",")) {
-    const [lat = "", lon = ""] = first.split(",", 2);
-    return { lat: parseCoordinate(lat, "latitude"), lon: parseCoordinate(lon, "longitude"), tag: fields.slice(1).join("\t") };
-  }
-  if (fields.length < 2) throw new Error(`expected "lat,lon" or "lat<TAB>lon", got ${JSON.stringify(line)}`);
-  return {
-    lat: parseCoordinate(first, "latitude"),
-    lon: parseCoordinate(fields[1] ?? "", "longitude"),
-    tag: fields.slice(2).join("\t"),
-  };
-}
-
-function names(list: string[] | null): string {
-  return list === null ? "-" : list.join(" | ");
-}
-
-function formatReadable(point: Point, result: QueryResult, reader: CGeoDataReader): string {
-  const { boundingBox: box, chunkIndex } = result;
-  const col = chunkIndex % reader.header.width;
-  const row = Math.floor(chunkIndex / reader.header.width);
-  const head = point.tag ? `${point.lat},${point.lon}\t${point.tag}` : `${point.lat},${point.lon}`;
-  return [
-    head,
-    `  country  ${names(result.country)}`,
-    `  region   ${names(result.region)}`,
-    `  city     ${names(result.city)}`,
-    `  cell     lat ${box.minLat}..${box.maxLat}  lon ${box.minLon}..${box.maxLon}`,
-    `  chunk    ${chunkIndex}  (col ${col}, row ${row} of ${reader.header.width}x${reader.header.height})`,
-  ].join("\n");
-}
-
-function formatJson(point: Point, result: QueryResult): string {
-  return JSON.stringify({
-    lat: point.lat,
-    lon: point.lon,
-    ...(point.tag ? { tag: point.tag } : {}),
-    country: result.country,
-    region: result.region,
-    city: result.city,
-    boundingBox: result.boundingBox,
-    chunkIndex: result.chunkIndex,
-  });
+function findCommand(name: string): Command | undefined {
+	return COMMANDS.find((c) => c.name === name);
 }
 
 async function main(argv: string[]): Promise<number> {
-  const flags = new Set<string>();
-  const positional: string[] = [];
-  for (const arg of argv) {
-    if (arg.startsWith("--")) flags.add(arg);
-    else positional.push(arg);
-  }
-  const unknownFlag = [...flags].find((flag) => flag !== "--stdin" && flag !== "--json");
-  if (unknownFlag) {
-    process.stderr.write(`unknown flag ${unknownFlag}\n${USAGE}\n`);
-    return 2;
-  }
-
-  const [file, ...pointArgs] = positional;
-  const fromStdin = flags.has("--stdin");
-  if (!file || (fromStdin ? pointArgs.length > 0 : pointArgs.length === 0)) {
-    process.stderr.write(`${USAGE}\n`);
-    return 2;
-  }
-
-  const reader = CGeoDataReader.open(file);
-  const json = flags.has("--json");
-  const emit = (point: Point): void => {
-    const result = reader.query(point.lat, point.lon);
-    process.stdout.write((json ? formatJson(point, result) : formatReadable(point, result, reader)) + "\n");
-  };
-
-  try {
-    if (!fromStdin) {
-      for (const arg of pointArgs) emit(parsePoint(arg));
-      return 0;
-    }
-
-    // Batch mode: a bad line is somebody's data problem, not a reason to
-    // throw away the rest of a long run, so report it and keep going.
-    let lineNumber = 0;
-    let skipped = 0;
-    for await (const raw of createInterface({ input: process.stdin, crlfDelay: Infinity })) {
-      lineNumber++;
-      const line = raw.trim();
-      if (line === "" || line.startsWith("#")) continue;
-      try {
-        emit(parsePoint(line));
-      } catch (err) {
-        skipped++;
-        process.stderr.write(`line ${lineNumber}: ${err instanceof Error ? err.message : String(err)}\n`);
-      }
-    }
-    if (skipped > 0) process.stderr.write(`skipped ${skipped} malformed line${skipped === 1 ? "" : "s"}\n`);
-    return 0;
-  } finally {
-    reader.close();
-  }
+	const [name, ...rest] = argv;
+	if (
+		name === undefined ||
+		name === "help" ||
+		name === "--help" ||
+		name === "-h"
+	) {
+		const topic = rest[0] === undefined ? undefined : findCommand(rest[0]);
+		if (rest[0] !== undefined && !topic) {
+			process.stderr.write(
+				`unknown command ${JSON.stringify(rest[0])}\n${USAGE}\n`,
+			);
+			return EXIT_ERROR;
+		}
+		const text = topic ? topic.usage : USAGE;
+		if (name === undefined) {
+			process.stderr.write(`${text}\n`);
+			return EXIT_ERROR;
+		}
+		process.stdout.write(`${text}\n`);
+		return 0;
+	}
+	const command = findCommand(name);
+	if (!command) {
+		process.stderr.write(`unknown command ${JSON.stringify(name)}\n${USAGE}\n`);
+		return EXIT_ERROR;
+	}
+	try {
+		return await command.run(rest);
+	} catch (err) {
+		if (err instanceof UsageError) {
+			process.stderr.write(`${err.message}\n${command.usage}\n`);
+			return EXIT_ERROR;
+		}
+		throw err;
+	}
 }
 
+// `cgeodata list world.bin | head` closes our stdout early; that's the
+// reader's business, not an error worth a stack trace.
+process.stdout.on("error", (err: NodeJS.ErrnoException) => {
+	if (err.code === "EPIPE") process.exit(0);
+	throw err;
+});
+
 main(process.argv.slice(2)).then(
-  (code) => {
-    process.exitCode = code;
-  },
-  (err: unknown) => {
-    process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
-    process.exitCode = 1;
-  },
+	(code) => {
+		process.exitCode = code;
+	},
+	(err: unknown) => {
+		process.stderr.write(
+			`${err instanceof Error ? err.message : String(err)}\n`,
+		);
+		process.exitCode = EXIT_ERROR;
+	},
 );

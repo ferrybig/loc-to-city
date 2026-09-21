@@ -67,6 +67,28 @@ Demo e2e (spins up its own server against `data/zuid-holland.bin` on
 cd demo && npx playwright install chromium && npx playwright test
 ```
 
+### Reading a `.bin` file
+
+`reader/src/cli.ts` (installed as `cgeodata`) is a thin layer over
+`CGeoDataReader`'s public API -- anything the CLI can do, a library
+consumer (Immich, the demo) can do through the same methods
+(`query`, `place`, `places`, `search`, `chunkRecords`, ...). Add
+capability to the reader first, then expose it as a subcommand:
+
+```bash
+npx tsx reader/src/cli.ts help                              # or help <command>
+npx tsx reader/src/cli.ts info   data/world.bin             # header, counts, byte split, largest chunks
+npx tsx reader/src/cli.ts lookup data/world.bin 52.37,4.9   # no points -> read them from stdin
+npx tsx reader/src/cli.ts list   data/world.bin --level city --country nl --tree
+npx tsx reader/src/cli.ts search data/world.bin amst        # exit 1 when nothing matched (grep-style)
+npx tsx reader/src/cli.ts show   data/world.bin 192858      # a place id from any other command
+npx tsx reader/src/cli.ts chunk  data/world.bin 3232        # the chunk index lookup printed
+```
+
+`<file.bin>` may be `-` for stdin. `search` is deliberately an
+unindexed linear scan: it's the baseline any future search index gets
+measured against.
+
 ### Building a `.bin` file
 
 `compressor/src/cli.ts` (installed as `cgeodata-compress`) takes a

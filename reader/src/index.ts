@@ -1,4 +1,14 @@
-export { CGeoDataReader, type QueryResult } from "./reader.js";
+export {
+  CGeoDataReader,
+  type QueryResult,
+  type Place,
+  type PlaceRef,
+  type PlaceLevel,
+  type PlaceFilter,
+  type SearchOptions,
+  type PlaceCounts,
+  type ChunkRecord,
+} from "./reader.js";
 export {
   chunkBoundingBox,
   cellBoundingBox,
@@ -14,6 +24,7 @@ export {
   parsePlaceTable,
   resolveIdentifier,
   readNameEntry,
+  readNameBlock,
   type PlaceTableInfo,
   type ResolvedPlace,
 } from "./placeTable.js";
