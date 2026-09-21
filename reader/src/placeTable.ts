@@ -110,7 +110,7 @@ function parsePrefix(
 
 /** Largest index c such that prefix[c] <= value, per Section 7.5. `prefix`
  * is non-decreasing with prefix[0] = 0. */
-function largestIndexWithPrefixAtMost(prefix: number[], value: number): number {
+export function largestIndexWithPrefixAtMost(prefix: number[], value: number): number {
   let lo = 0;
   let hi = prefix.length - 2;
   let answer = 0;
@@ -152,6 +152,29 @@ export function resolveIdentifier(info: PlaceTableInfo, id: number): ResolvedPla
   const regionId = largestIndexWithPrefixAtMost(cityRegionPrefix, cityId);
   const countryId = largestIndexWithPrefixAtMost(regionCountryPrefix, regionId);
   return { level: "city", countryId, regionId, cityId };
+}
+
+/** Inflates one whole name block (Section 7.3) and splits it into its
+ * entries, each split on `|` (Section 7.4). For walking many consecutive
+ * ids this is one inflate per block instead of one per id. */
+export function readNameBlock(source: RandomAccessSource, info: PlaceTableInfo, blockIndex: number): string[][] {
+  const { blockOffsets, blockLengths } = info;
+  if (blockIndex < 0 || blockIndex >= blockOffsets.length) {
+    throw new RangeError(`name block ${blockIndex} is out of range for this file (0 <= block < ${blockOffsets.length})`);
+  }
+  const inflated = safeInflate(source.readSync(blockOffsets[blockIndex]!, blockLengths[blockIndex]!));
+  const entries: string[][] = [];
+  let start = 0;
+  for (;;) {
+    const end = inflated.indexOf(0, start);
+    if (end === -1) break;
+    entries.push(inflated.toString("utf8", start, end).split("|"));
+    start = end + 1;
+  }
+  if (start !== inflated.length) {
+    throw new Error(`name block ${blockIndex} has ${inflated.length - start} trailing bytes after its last NUL terminator`);
+  }
+  return entries;
 }
 
 /** Recovers a place's name entry (Section 7.4, split on `|`) by inflating
