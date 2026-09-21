@@ -1,8 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Feature, Polygon, MultiPolygon } from "geojson";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import type { Feature, FeatureCollection, Polygon, MultiPolygon } from "geojson";
+import bbox from "@turf/bbox";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
-import { classifyCell, type CellBounds, type CellRelation } from "../src/geometry.js";
+import { classifyCell, containsPoint, type CellBounds, type CellRelation } from "../src/geometry.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const CELL: CellBounds = { lonMin: 0, lonMax: 10, latMin: 0, latMax: 10 };
 
@@ -138,4 +144,46 @@ test("classifyCell is unaffected by which cell of the grid it is asked about", (
     const expected: CellRelation = truth === "all" ? "contains" : truth === "some" ? "crosses" : "disjoint";
     assert.equal(classify(candidate, bounds), expected);
   }
+});
+
+// A deterministic LCG so a failure is reproducible without recording the
+// exact random point that triggered it.
+function makeRng(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state * 1103515245 + 12345) % 2147483648;
+    return state / 2147483648;
+  };
+}
+
+test("containsPoint agrees with turf on real, complex province geometry", () => {
+  // nl-provinces.geojson is real OSM/BAG-derived data with exactly the
+  // shapes that made this worth replacing turf for in the first place:
+  // holes (a province with a city carved out), MultiPolygons (islands),
+  // and enough vertices per ring to exercise the banded ray cast, not
+  // just the plain one.
+  const provinces = JSON.parse(readFileSync(path.resolve(__dirname, "../../data/nl-provinces.geojson"), "utf8")) as FeatureCollection<
+    Polygon | MultiPolygon
+  >;
+  assert.ok(provinces.features.length > 0, "fixture must actually have provinces to test against");
+
+  const rng = makeRng(42);
+  let checked = 0;
+  let onLand = 0;
+  for (const feature of provinces.features) {
+    const [minX, minY, maxX, maxY] = bbox(feature) as [number, number, number, number];
+    for (let i = 0; i < 500; i++) {
+      const x = minX + rng() * (maxX - minX);
+      const y = minY + rng() * (maxY - minY);
+      const expected = booleanPointInPolygon([x, y], feature);
+      const actual = containsPoint(feature.geometry, x, y);
+      checked++;
+      if (expected) onLand++;
+      assert.equal(actual, expected, `${feature.properties?.name ?? "?"} at ${x},${y}: turf said ${expected}, containsPoint said ${actual}`);
+    }
+  }
+  // A province's bbox is mostly not the province (coastline concavity,
+  // neighbouring provinces sharing the bbox) -- confirm the sample actually
+  // exercised both the inside and outside path, not just one of them.
+  assert.ok(onLand > 0 && onLand < checked, `sample should mix inside/outside points, got ${onLand}/${checked} inside`);
 });

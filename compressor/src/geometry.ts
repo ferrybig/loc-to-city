@@ -1,5 +1,4 @@
 import type { Feature, Polygon, MultiPolygon } from "geojson";
-import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 
 export interface CellBounds {
   lonMin: number;
@@ -100,15 +99,28 @@ interface IndexedRing {
   maxX: number;
   maxY: number;
   points: [number, number][];
+  /** Edge indices bucketed by horizontal band, or null for rings too small
+   * for it to be worth it. `points` is GeoJSON-closed (first === last), so
+   * edge i is (points[i-1], points[i]) for i in [1, points.length) -- a
+   * ring with `bands` still walks every edge once, just only the edges
+   * near the query's y instead of all of them. See countContainedSamples
+   * and classifyCell's corner check for why a ring's edge count matters at
+   * all: a country the size of Russia has tens of thousands of them. */
+  bands: number[][] | null;
+  bandHeight: number;
 }
 
-/** Per-ring bounding boxes, computed once per geometry and reused for
- * every cell that geometry is tested against. Without this, classifying a
- * deep cell against a big multi-ring candidate walks every island of, say,
- * Russia's coastline to answer a question about one small rectangle. The
- * cache is keyed on the geometry object, so it lives exactly as long as
- * the candidate does -- in a worker that means one chunk's worth of cells,
- * which is precisely the span over which the same candidates repeat. */
+const BAND_MIN_VERTICES = 256;
+const VERTICES_PER_BAND = 32;
+
+/** Per-ring bounding boxes (and, for large rings, a banded edge index),
+ * computed once per geometry and reused for every cell that geometry is
+ * tested against. Without this, classifying a deep cell against a big
+ * multi-ring candidate walks every island of, say, Russia's coastline to
+ * answer a question about one small rectangle. The cache is keyed on the
+ * geometry object, so it lives exactly as long as the candidate does -- in
+ * a worker that means one chunk's worth of cells, which is precisely the
+ * span over which the same candidates repeat. */
 const ringCache = new WeakMap<Polygon | MultiPolygon, IndexedRing[]>();
 
 function ringsOf(geometry: Polygon | MultiPolygon): IndexedRing[] {
@@ -120,6 +132,15 @@ function ringsOf(geometry: Polygon | MultiPolygon): IndexedRing[] {
   for (const polygon of polygons) {
     for (const ring of polygon) {
       const points = ring as [number, number][];
+      // A closed linear ring needs at least 3 distinct vertices plus the
+      // repeated closing point. Turf used to reject anything short of
+      // that for us, as a side effect of calling into it for every cell;
+      // now that classifyCell never does, this is the one place left that
+      // would ever notice malformed input, so it has to check explicitly
+      // rather than let a 2-point "ring" silently produce a wrong answer.
+      if (points.length < 4) {
+        throw new Error(`malformed ring: expected >= 4 points (a closed ring), got ${points.length}`);
+      }
       let minX = Infinity;
       let minY = Infinity;
       let maxX = -Infinity;
@@ -130,12 +151,82 @@ function ringsOf(geometry: Polygon | MultiPolygon): IndexedRing[] {
         if (y < minY) minY = y;
         if (y > maxY) maxY = y;
       }
-      rings.push({ minX, minY, maxX, maxY, points });
+
+      let bands: number[][] | null = null;
+      let bandHeight = maxY - minY;
+      if (points.length >= BAND_MIN_VERTICES && bandHeight > 0) {
+        const bandCount = Math.ceil(points.length / VERTICES_PER_BAND);
+        bandHeight /= bandCount;
+        bands = Array.from({ length: bandCount }, () => []);
+        for (let i = 1; i < points.length; i++) {
+          const yi = points[i]![1];
+          const yj = points[i - 1]![1];
+          const lo = Math.floor((Math.min(yi, yj) - minY) / bandHeight);
+          const hi = Math.min(bandCount - 1, Math.floor((Math.max(yi, yj) - minY) / bandHeight));
+          for (let b = lo; b <= hi; b++) bands[b]!.push(i);
+        }
+      }
+
+      rings.push({ minX, minY, maxX, maxY, points, bands, bandHeight });
     }
   }
 
   ringCache.set(geometry, rings);
   return rings;
+}
+
+/** Even-odd ray cast for one ring, ignoring hole/outer status -- see
+ * `containsPoint` for why testing every ring this way and XORing the
+ * results is the correct full answer for a candidate with holes or
+ * multiple parts, not just an approximation. Bbox-rejects first (a
+ * point outside a ring's bbox can never be inside it), then either walks
+ * every edge or, for a ring large enough to have been banded, only the
+ * edges in the query's own band. */
+function ringToggle(ring: IndexedRing, x: number, y: number): boolean {
+  if (x < ring.minX || x > ring.maxX || y < ring.minY || y > ring.maxY) return false;
+  const { points, bands } = ring;
+  let inside = false;
+  const crosses = (i: number): void => {
+    const [xi, yi] = points[i]!;
+    const [xj, yj] = points[i - 1]!;
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  };
+  if (bands) {
+    const band = bands[Math.min(bands.length - 1, Math.floor((y - ring.minY) / ring.bandHeight))]!;
+    for (const i of band) crosses(i);
+  } else {
+    for (let i = 1; i < points.length; i++) crosses(i);
+  }
+  return inside;
+}
+
+/**
+ * Plain even-odd point-in-polygon, replacing `@turf/boolean-point-in-
+ * polygon` at the two call sites below. Turf v7 delegates to
+ * `point-in-polygon-hao`, which uses exact/robust arithmetic to be correct
+ * on degenerate input -- profiled as ~80% of a real worldwide build's
+ * chunk-compression time, almost all of it in `countContainedSamples`
+ * below (up to 25 calls per candidate per still-ambiguous max-depth cell).
+ * Plain floating point is enough here for the same reason it already was
+ * in `segmentContact`: these aren't adversarial inputs, just ordinary OSM/
+ * Natural Earth coordinates, and a wrong answer on a literal knife-edge
+ * case costs at most one grid cell's precision, not correctness.
+ *
+ * XORing every ring's own even-odd result (outer rings and holes alike,
+ * across every part of a MultiPolygon) gives the same answer as tracking
+ * hole/outer status explicitly: a point inside an outer ring and inside
+ * one of its holes toggles twice (even, i.e. outside the polygon with the
+ * hole punched out); a point inside exactly one part of a valid (non-
+ * overlapping) MultiPolygon toggles once from that part's outer ring and
+ * zero times from every other ring. Verified against turf on real
+ * candidate geometry, not just this reasoning -- see geometry.test.ts.
+ */
+export function containsPoint(geometry: Polygon | MultiPolygon, x: number, y: number): boolean {
+  let inside = false;
+  for (const ring of ringsOf(geometry)) {
+    if (ringToggle(ring, x, y)) inside = !inside;
+  }
+  return inside;
 }
 
 /** Strongest contact any ring of the candidate -- outer or hole, every
@@ -200,7 +291,7 @@ export function classifyCell(
   // correctly reads as outside -- hole rings are scanned like any other.)
   // Boundary points count as inside, which is what makes a candidate whose
   // edge runs exactly along this cell still contain it.
-  if (booleanPointInPolygon([bounds.lonMin, bounds.latMin], candidate)) return "contains";
+  if (containsPoint(candidate.geometry, bounds.lonMin, bounds.latMin)) return "contains";
 
   // Corner is outside and nothing cuts the interior, but the boundary
   // still grazes the cell: the two meet along an edge or at a point. That
@@ -215,11 +306,13 @@ const AREA_SHARE_SAMPLE_GRID = 5; // 5x5 = 25 sample points per ambiguous max-de
  * Approximates a candidate's share of a cell's area by counting how many of
  * a small grid of sample points inside the cell it contains. This stands in
  * for Section 10's "largest area share" tie-break at max_depth without
- * calling an exact polygon-clipping routine: Turf v7's `intersect()` uses
- * BigNumber arithmetic for robustness, which measured as the dominant cost
- * of a real build (profiled at ~45% of samples) precisely because this is
- * the one place it was called for every still-ambiguous leaf cell. A cell
- * this small only needs an approximate winner, not an exact area.
+ * calling an exact polygon-clipping routine -- originally to avoid Turf
+ * v7's `intersect()` (BigNumber arithmetic, profiled at ~45% of a real
+ * build), and later `containsPoint` above replaced `booleanPointInPolygon`
+ * itself for the same reason: 25 of those calls per candidate per still-
+ * ambiguous leaf cell, at world scale, profiled as ~80% of total chunk
+ * time. A cell this small only needs an approximate winner, not an exact
+ * area.
  */
 export function countContainedSamples(candidate: Feature<Polygon | MultiPolygon>, bounds: CellBounds): number {
   let count = 0;
@@ -227,7 +320,7 @@ export function countContainedSamples(candidate: Feature<Polygon | MultiPolygon>
     const lat = bounds.latMin + ((iy + 0.5) / AREA_SHARE_SAMPLE_GRID) * (bounds.latMax - bounds.latMin);
     for (let ix = 0; ix < AREA_SHARE_SAMPLE_GRID; ix++) {
       const lon = bounds.lonMin + ((ix + 0.5) / AREA_SHARE_SAMPLE_GRID) * (bounds.lonMax - bounds.lonMin);
-      if (booleanPointInPolygon([lon, lat], candidate)) count++;
+      if (containsPoint(candidate.geometry, lon, lat)) count++;
     }
   }
   return count;
