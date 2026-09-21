@@ -8,6 +8,9 @@
   "exports": {
     ".": "./dist/index.js"
   },
+  "bin": {
+    "cgeodata-query": "./dist/cli.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "tsx --test test/*.test.ts",

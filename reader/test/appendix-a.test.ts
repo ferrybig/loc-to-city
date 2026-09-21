@@ -20,6 +20,7 @@ test("lookup 1: (lat 20, lon 100) resolves to Zaandam, Noord-Holland, Nederland"
   // Record (code 4, depth 2): x=2, y=0 at depth 2 -> lon [90, 135), lat [0, 22.5).
   assert.deepEqual(result.boundingBox, { minLon: 90, maxLon: 135, minLat: 0, maxLat: 22.5 });
   assert.ok(boundingBoxContains(result.boundingBox, 20, 100));
+  assert.equal(result.chunkIndex, 3);
 });
 
 test("lookup 2: (lat 40, lon 30) resolves to a region-level result (Noord-Holland), city null", () => {
@@ -69,6 +70,8 @@ test("lookup 5: (lat -10, lon 10) is unknown (chunk 1 is empty, no decompression
   // chunk: lon [0, 180), lat [-90, 0).
   assert.deepEqual(result.boundingBox, { minLon: 0, maxLon: 180, minLat: -90, maxLat: 0 });
   assert.ok(boundingBoxContains(result.boundingBox, -10, 10));
+  // The chunk index is reported even when the chunk was never decompressed.
+  assert.equal(result.chunkIndex, 1);
 });
 
 test("header fields match the worked example", () => {

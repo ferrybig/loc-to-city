@@ -30,6 +30,11 @@ export interface QueryResult {
    * plain rectangle, so this doesn't try to find its full extent).
    */
   boundingBox: BoundingBox;
+  /** Index of the chunk the query point falls in (Section 6.1's
+   * `r * W + c`), whether or not that chunk holds any records. Useful for
+   * narrowing a rebuild to one chunk with the compressor's `--only-chunks`
+   * when a query resolves unexpectedly. */
+  chunkIndex: number;
 }
 
 export class CGeoDataReader {
@@ -86,7 +91,7 @@ export class CGeoDataReader {
     const chunkBox = chunkBoundingBox(c, r, W, H);
 
     const chunk = this.getChunk(chunkIndex);
-    if (!chunk) return unknownResult(chunkBox); // whole chunk is empty
+    if (!chunk) return unknownResult(chunkBox, chunkIndex); // whole chunk is empty
 
     const q = mortonEncode(x, y, D);
     const j = bisectRightMinusOne(chunk.codes, q);
@@ -94,13 +99,13 @@ export class CGeoDataReader {
     // gap's true extent without redoing the encoder's own subdivision
     // work, so fall back to the single finest cell around the query point.
     const finestCellBox = () => cellBoundingBox(chunkBox, x, y, D);
-    if (j < 0) return unknownResult(finestCellBox());
+    if (j < 0) return unknownResult(finestCellBox(), chunkIndex);
 
     const depth = chunk.depths[j]!;
     const shift = 2 * (D - depth);
     const code = chunk.codes[j]!;
     if (shiftRight(q, shift) !== shiftRight(code, shift)) {
-      return unknownResult(finestCellBox()); // gap between records
+      return unknownResult(finestCellBox(), chunkIndex); // gap between records
     }
 
     // A real record matched: recover its exact cell (Section 8.1) for a
@@ -111,10 +116,10 @@ export class CGeoDataReader {
     const matchedCellBox = cellBoundingBox(chunkBox, cellX, cellY, depth);
 
     const k = chunk.paletteIndices[j]!;
-    if (k === 0) return unknownResult(matchedCellBox);
+    if (k === 0) return unknownResult(matchedCellBox, chunkIndex);
 
     const placeId = chunk.palette[k - 1]!;
-    return this.resolveNames(placeId, matchedCellBox);
+    return this.resolveNames(placeId, matchedCellBox, chunkIndex);
   }
 
   private getChunk(index: number): ChunkRecords | undefined {
@@ -137,7 +142,7 @@ export class CGeoDataReader {
     return names;
   }
 
-  private resolveNames(placeId: number, boundingBox: BoundingBox): QueryResult {
+  private resolveNames(placeId: number, boundingBox: BoundingBox, chunkIndex: number): QueryResult {
     const resolved = resolveIdentifier(this.placeTable, placeId);
     const C = this.placeTable.countryCount;
     const R = this.placeTable.totalRegions;
@@ -146,12 +151,12 @@ export class CGeoDataReader {
     const region = "regionId" in resolved ? this.getName(C + resolved.regionId) : null;
     const city = resolved.level === "city" ? this.getName(C + R + resolved.cityId) : null;
 
-    return { country, region, city, boundingBox };
+    return { country, region, city, boundingBox, chunkIndex };
   }
 }
 
-function unknownResult(boundingBox: BoundingBox): QueryResult {
-  return { country: null, region: null, city: null, boundingBox };
+function unknownResult(boundingBox: BoundingBox, chunkIndex: number): QueryResult {
+  return { country: null, region: null, city: null, boundingBox, chunkIndex };
 }
 
 /** bisect_right(sorted, value) - 1, per Section 9 step 6. */
