@@ -184,6 +184,22 @@ test("search: matches any name at any level, exit 0 on a match and 1 on none", (
   assert.equal(miss.stderr, "");
 });
 
+test("search: --sort ranks by relevance -- same match quality, city outranks region", () => {
+  // Unsorted: id order puts the region (3) before the city (6). Both have
+  // the exact same name entry ("Antwerpen | Antwerp"), so it's an exact
+  // match either way -- --sort should still flip the order because a
+  // city outranks a region on the level bonus.
+  const unsorted = run(["search", fixturePath, "ANTWERP"]).stdout;
+  assert.equal(unsorted, `3\tregion\tAntwerpen | Antwerp\t-\t${BE}\n6\tcity\tAntwerpen | Antwerp\tAntwerpen | Antwerp\t${BE}\n`);
+
+  const sorted = run(["search", fixturePath, "ANTWERP", "--sort"]).stdout;
+  assert.equal(sorted, `6\tcity\tAntwerpen | Antwerp\tAntwerpen | Antwerp\t${BE}\n3\tregion\tAntwerpen | Antwerp\t-\t${BE}\n`);
+
+  // --limit applies to the ranked list, not to scan order: the top match
+  // (the city, found second while scanning) still wins with limit 1.
+  assert.equal(run(["search", fixturePath, "ANTWERP", "--sort", "--limit", "1"]).stdout, `${sorted.split("\n")[0]}\n`);
+});
+
 test("search: --level, --country and --limit narrow the scan", () => {
   assert.equal(run(["search", fixturePath, "antwerp", "--level", "city"]).stdout.split("\t")[0], "6");
   assert.equal(run(["search", fixturePath, "a", "--country", "nederland", "--level", "city"]).stdout, `4\tcity\tAmsterdam\tNoord-Holland\t${NL}\n5\tcity\tZaandam\tNoord-Holland\t${NL}\n`);

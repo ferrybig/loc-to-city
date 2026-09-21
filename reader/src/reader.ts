@@ -71,6 +71,17 @@ export interface PlaceFilter {
 export interface SearchOptions extends PlaceFilter {
   /** Stop after this many matches. */
   limit?: number;
+  /**
+   * Rank matches by relevance instead of id order: an exact name match
+   * outranks a match on a whole word of the name, which outranks a
+   * plain substring match; among equal name-match quality, a city
+   * outranks a region, which outranks a country. `limit` still applies,
+   * but to the top of the ranked list rather than the first N found in
+   * id order -- so with `sort` the whole match set has to be scored
+   * before anything is yielded, since the best match isn't necessarily
+   * the first one found.
+   */
+  sort?: boolean;
 }
 
 /** One record of a chunk (Section 8.2) with its cell and place resolved. */
@@ -218,6 +229,10 @@ export class CGeoDataReader {
    * blocks -- the baseline any later search index is measured against.
    */
   *search(text: string, options: SearchOptions = {}): IterableIterator<Place> {
+    if (options.sort) {
+      yield* this.searchRanked(text, options);
+      return;
+    }
     const needle = text.toLowerCase();
     let remaining = options.limit ?? Infinity;
     if (remaining <= 0) return;
@@ -231,6 +246,32 @@ export class CGeoDataReader {
         yield this.place(id);
         if (--remaining <= 0) return;
       }
+    }
+  }
+
+  /** The `sort: true` path of `search()`: scores every match (see
+   * `nameMatchQuality`/`LEVEL_BONUS`), then yields highest-scored first,
+   * ties broken by id. `limit` is applied after sorting, not during the
+   * scan -- the top match can turn up anywhere in id order. */
+  private *searchRanked(text: string, options: SearchOptions): IterableIterator<Place> {
+    const needle = text.toLowerCase();
+    const needleTokens = tokenize(needle);
+    const scored: Array<{ id: number; score: number }> = [];
+    for (const level of LEVELS) {
+      if (options.level !== undefined && options.level !== level) continue;
+      const [start, end] = this.idRange(level, options);
+      for (let id = start; id < end; id++) {
+        const quality = Math.max(0, ...this.names(id).map((name) => nameMatchQuality(name, needle, needleTokens)));
+        if (quality === 0) continue;
+        scored.push({ id, score: quality + LEVEL_BONUS[level] });
+      }
+    }
+    scored.sort((a, b) => b.score - a.score || a.id - b.id);
+
+    let remaining = options.limit ?? Infinity;
+    for (const { id } of scored) {
+      if (remaining-- <= 0) return;
+      yield this.place(id);
     }
   }
 
@@ -330,6 +371,48 @@ export class CGeoDataReader {
 }
 
 const LEVELS: readonly PlaceLevel[] = ["country", "region", "city"];
+
+/** `search({ sort: true })`'s per-level bonus: a city is what most
+ * queries are actually after, so it outranks a region, which outranks a
+ * country, all else being equal. */
+const LEVEL_BONUS: Record<PlaceLevel, number> = { city: 4, region: 2, country: 1 };
+
+/** Lowercases and splits on any run of non-letter/non-digit characters,
+ * so "Nieuw-Amsterdam" and "Nieuw Amsterdam" tokenize identically
+ * regardless of which separator the data used. Unicode-aware (`\p{L}`),
+ * so accented letters count as letters rather than splitting a word in
+ * two. */
+function tokenize(text: string): string[] {
+  return text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((token) => token.length > 0);
+}
+
+/** True if `needleTokens` occurs as a contiguous run within `tokens` --
+ * i.e. the query matches one or more *whole* words of the name, not
+ * just a substring that happens to straddle a word boundary. */
+function containsTokenRun(tokens: string[], needleTokens: readonly string[]): boolean {
+  if (needleTokens.length === 0 || needleTokens.length > tokens.length) return false;
+  search: for (let i = 0; i + needleTokens.length <= tokens.length; i++) {
+    for (let j = 0; j < needleTokens.length; j++) {
+      if (tokens[i + j] !== needleTokens[j]) continue search;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * `search({ sort: true })`'s name-match component: an exact match (4)
+ * beats a whole-word match (2) beats a plain substring match (1); no
+ * match at all is 0. `needle` and `needleTokens` are precomputed once
+ * per search, not once per name -- `needle` must already be lowercase.
+ */
+function nameMatchQuality(name: string, needle: string, needleTokens: readonly string[]): number {
+  const lower = name.toLowerCase();
+  if (lower === needle) return 4;
+  if (containsTokenRun(tokenize(name), needleTokens)) return 2;
+  if (lower.includes(needle)) return 1;
+  return 0;
+}
 
 function checkId(id: number, lo: number, hi: number, what: string): void {
   if (!Number.isInteger(id) || id < lo || id >= hi) {

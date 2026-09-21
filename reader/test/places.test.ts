@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { CGeoDataReader, type Place } from "../src/index.js";
 import { APPENDIX_A_BYTES } from "./fixtures/appendixA.js";
 
@@ -56,6 +57,48 @@ test("search() matches any name of any level, case-insensitively, with limit", (
   assert.deepEqual(ids(reader.search("e", { country: 1 })), [1, 3, 6]);
   assert.deepEqual(ids(reader.search("e", { region: 3 })), [1, 3, 6], "a region filter still yields its country");
   assert.deepEqual(ids(reader.search("nothing here")), []);
+});
+
+test("search({ sort: true }): equal name-match quality is broken by level, then id", () => {
+  // Region 3 and city 6 have the exact same name entry ("Antwerpen |
+  // Antwerp"), so "antwerp" is an equally exact match for both -- sort
+  // should still put the city first on the level bonus alone, reversing
+  // id order (unsorted: [3, 6]).
+  assert.deepEqual(ids(reader.search("antwerp", { sort: true })), [6, 3]);
+  // sort doesn't filter, just reorders and re-slices `limit`.
+  assert.deepEqual(ids(reader.search("antwerp", { sort: true, limit: 1 })), [6]);
+  assert.deepEqual(ids(reader.search("antwerp", { sort: true, limit: 0 })), []);
+  assert.deepEqual(ids(reader.search("nothing here", { sort: true })), []);
+});
+
+test("search({ sort: true }) on the real worldwide dataset: an exact name match outranks a fuzzier one", () => {
+  // Unlike Appendix A, the real dataset has several places whose name
+  // merely contains "amsterdam" (Nieuw Amsterdam, Amsterdam-Duivendrecht,
+  // ...) alongside the one actually named "Amsterdam" -- the case that
+  // motivated --sort in the first place. Assertions are shaped around
+  // that invariant rather than specific ids, since a later data rebuild
+  // can renumber places.
+  const path = new URL("../../data/world_no_chunk.bin", import.meta.url);
+  const worldReader = CGeoDataReader.open(fileURLToPath(path));
+  try {
+    const unsorted = [...worldReader.search("amsterdam")];
+    const sorted = [...worldReader.search("amsterdam", { sort: true })];
+    assert.ok(unsorted.length >= 2, "sanity: the real dataset has more than one Amsterdam-ish place");
+    assert.deepEqual(
+      new Set(sorted.map((p) => p.id)),
+      new Set(unsorted.map((p) => p.id)),
+      "sort reorders the same match set, it doesn't filter it",
+    );
+
+    const isExactMatch = (p: Place) => p.names.some((n) => n.toLowerCase() === "amsterdam");
+    assert.equal(sorted[0]?.level, "city");
+    assert.ok(isExactMatch(sorted[0]!), "the top match is a place actually named \"Amsterdam\"");
+    for (const place of sorted.slice(1)) {
+      assert.ok(!isExactMatch(place), `runner-up ${place.id} (${place.names.join(" | ")}) should not also be an exact match`);
+    }
+  } finally {
+    worldReader.close();
+  }
 });
 
 test("chunk()/chunkRecords() expose Appendix A.4's records with cells and places resolved", () => {

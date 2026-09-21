@@ -81,13 +81,19 @@ npx tsx reader/src/cli.ts info   data/world.bin             # header, counts, by
 npx tsx reader/src/cli.ts lookup data/world.bin 52.37,4.9   # no points -> read them from stdin
 npx tsx reader/src/cli.ts list   data/world.bin --level city --country nl --tree
 npx tsx reader/src/cli.ts search data/world.bin amst        # exit 1 when nothing matched (grep-style)
+npx tsx reader/src/cli.ts search data/world.bin amsterdam --sort  # rank by relevance, not id order
 npx tsx reader/src/cli.ts show   data/world.bin 192858      # a place id from any other command
 npx tsx reader/src/cli.ts chunk  data/world.bin 3232        # the chunk index lookup printed
 ```
 
 `<file.bin>` may be `-` for stdin. `search` is deliberately an
 unindexed linear scan: it's the baseline any future search index gets
-measured against.
+measured against. `--sort` scores each match -- exact name match beats
+whole-word match beats plain substring, city beats region beats country
+(`nameMatchQuality`/`LEVEL_BONUS` in `reader/src/reader.ts`) -- and has
+to score every match before yielding any, since the best one isn't
+necessarily the first found; plain `search` keeps the cheaper early-exit
+scan when `--limit` is given without `--sort`.
 
 ### Building a `.bin` file
 

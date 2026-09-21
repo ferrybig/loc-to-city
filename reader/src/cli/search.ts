@@ -3,7 +3,7 @@ import { parse, openReader, parseLevel, resolveCountry, formatPlaceLine, writeLi
 export const search: Command = {
   name: "search",
   summary: "find places whose name contains a text",
-  usage: `usage: cgeodata search <file.bin> <text> [--level country|region|city] [--country <id|name>] [--limit N] [--json]
+  usage: `usage: cgeodata search <file.bin> <text> [--level country|region|city] [--country <id|name>] [--limit N] [--sort] [--json]
 
 Prints every place (country, region or city) with a name containing
 <text>, case-insensitively, in the same tab-separated form as \`list\`.
@@ -16,12 +16,20 @@ grep's convention.
   --level L    only places of this level
   --country C  only places inside this country (id or unambiguous name)
   --limit N    stop after N matches
+  --sort       rank matches by relevance instead of id order: an exact
+               name match beats a match on a whole word of the name,
+               which beats a plain substring match; ties go to a city
+               over a region over a country. Without --sort, --limit
+               stops the scan as soon as it has enough matches; with
+               --sort, the whole file has to be scored first, since the
+               best match isn't necessarily the first one found.
   --json       one JSON object per match instead of the text form`,
   run(argv) {
     const { values, positionals } = parse(argv, {
       level: { type: "string" },
       country: { type: "string" },
       limit: { type: "string" },
+      sort: { type: "boolean", default: false },
       json: { type: "boolean", default: false },
     });
     const [file, text, ...extra] = positionals;
@@ -41,6 +49,7 @@ grep's convention.
         ...(level !== undefined ? { level } : {}),
         ...(country !== undefined ? { country } : {}),
         ...(limit !== undefined ? { limit } : {}),
+        sort: values.sort,
       })) {
         matched++;
         writeLine(values.json ? JSON.stringify(place) : formatPlaceLine(place));
