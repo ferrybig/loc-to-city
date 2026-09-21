@@ -6,6 +6,7 @@ import type { BBox, Feature, MultiPolygon, Polygon } from "geojson";
 import type { CountryIndex } from "./countryIndex.js";
 import type { LonLat } from "./geo.js";
 import { streamMergedAdminBoundaries } from "./mergeAdminBoundaries.js";
+import { resolvePolygonCountry } from "./polygonCountry.js";
 
 // Matches prepare-europe.ts's REGION_SIMPLIFY_TOLERANCE: regions are a
 // fallback layer, not precision-critical the way cities are, and holding
@@ -65,7 +66,7 @@ export interface AdminBoundaryIndex {
    * larger bbox on a genuine duplicate/fragmentary match, same rule
    * `prepare-europe.ts`'s `extractRegionPolygons` already uses. Unlike
    * that function, country is resolved directly per relation (via
-   * `countries.lookup`), not reverse-engineered from a pre-resolved
+   * `resolvePolygonCountry`), not reverse-engineered from a pre-resolved
    * cities list -- there is no such list at world scale. */
   regionsByCountryName: Map<string, RegionCandidate>;
   diagnostics: AdminBoundaryIndexDiagnostics;
@@ -108,14 +109,17 @@ export async function buildAdminBoundaryIndex(files: string[], countries: Countr
     if (!isCity && !isRegion) continue;
 
     const geometry = feature as Feature<Polygon | MultiPolygon>;
+    // Still needed as a point known to lie on the feature (gap-fill and
+    // region assignment test it for containment), but no longer trusted
+    // to say which country the feature is in -- see polygonCountry.ts.
     const [repX, repY] = pointOnFeature(geometry).geometry.coordinates;
     const repPoint: LonLat = [repX ?? 0, repY ?? 0];
-    const country = countries.lookup(repPoint);
+    const featureBbox = bbox(geometry);
+    const country = resolvePolygonCountry(geometry, featureBbox, repPoint, countries, { alwaysSample: isRegion });
     if (!country) {
       diagnostics.noCountry++;
       continue;
     }
-    const featureBbox = bbox(geometry);
 
     if (isCity) {
       const featureArea = area(geometry) / 1_000_000; // m^2 -> km^2

@@ -251,7 +251,7 @@ async function main(): Promise<void> {
   writeFileSync(REGIONS_OUT, JSON.stringify(regionCollection));
   console.error(`wrote ${REGIONS_OUT} (${regionCollection.features.length} regions)`);
 
-  console.error(`country lookups with no match: ${countries.missingCount()}`);
+  console.error(`admin relations resolving to no country: ${index.diagnostics.noCountry}`);
 }
 
 main().catch((err: unknown) => {
