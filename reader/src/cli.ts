@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { buildSearchIndexCmd } from "./cli/buildSearchIndex.js";
 import { chunk } from "./cli/chunk.js";
 import { info } from "./cli/info.js";
 import { list } from "./cli/list.js";
@@ -7,7 +8,15 @@ import { search } from "./cli/search.js";
 import { type Command, EXIT_ERROR, UsageError } from "./cli/shared.js";
 import { show } from "./cli/show.js";
 
-const COMMANDS: readonly Command[] = [info, lookup, list, search, show, chunk];
+const COMMANDS: readonly Command[] = [
+	info,
+	lookup,
+	list,
+	search,
+	buildSearchIndexCmd,
+	show,
+	chunk,
+];
 
 const USAGE = `usage: cgeodata <command> <file.bin> [...]
        cgeodata help [<command>]

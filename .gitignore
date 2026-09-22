@@ -2,6 +2,7 @@ data/*.o5m
 data/eu_cities.geojson
 data/eu-cities-filtered.geojson
 data/world-cities-filtered.geojsonseq
+data/search-index/
 data-ingest/work/
 data-ingest/work-eu/
 data-ingest/work-world/
