@@ -62,9 +62,9 @@ function linearToSrgb(c: number): number {
 }
 
 /** oklch(0.7463 0.1213 hue) -> [r, g, b] in 0..255. */
-export function oklchToRgb(hue: number): [number, number, number] {
+export function oklchToRgb(hue: number, chroma: number = 0.1213): [number, number, number] {
   const L = 0.7463;
-  const C = 0.1213;
+  const C = chroma;
   const hRad = (hue * Math.PI) / 180;
   const a = C * Math.cos(hRad);
   const b = C * Math.sin(hRad);
@@ -78,5 +78,6 @@ export function oklchToRgb(hue: number): [number, number, number] {
 
 export function colorKeyToRgb(colorKey: string, colorSpace: ColorSpace = "oklch"): [number, number, number] {
   const hue = colorKeyHue(colorKey);
-  return colorSpace === "hsl" ? hslToRgb(hue) : oklchToRgb(hue);
+  const chroma = colorKey[0] === '2' ? 0.1213 : colorKey[1] === '1' ? 0.07 : 0.04;
+  return colorSpace === "hsl" ? hslToRgb(hue) : oklchToRgb(hue, chroma);
 }

@@ -16,8 +16,8 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CGeoDataReader } from "@loc-to-city/reader";
+import { Piscina } from "piscina";
 import type { ColorSpace } from "./colors.js";
-import { renderTilePng } from "./tiles.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -35,6 +35,13 @@ function main(): void {
 	console.error(`Loading ${datasetPath}...`);
 	const reader = CGeoDataReader.open(datasetPath);
 	console.error("Loaded.");
+	const piscina = new Piscina({
+		filename: path.resolve(__dirname, "tile-worker.js"),
+    idleTimeout: 1000,
+		workerData: {
+			datasetPath,
+		},
+	});
 
 	const server = createServer((req, res) => {
 		const url = new URL(req.url ?? "/", "http://localhost");
@@ -127,13 +134,22 @@ function main(): void {
 			const resolution = Number(url.searchParams.get("res") ?? "8");
 			const colorSpace: ColorSpace =
 				url.searchParams.get("cs") === "hsl" ? "hsl" : "oklch";
-			const png = renderTilePng(reader, z, x, y, resolution, colorSpace);
-			res.writeHead(200, {
-				"Content-Type": "image/png",
-				"Cache-Control": "public, max-age=3600",
+			// const png = renderTilePng(reader, z, x, y, resolution, colorSpace);
+			const promise = piscina.run({
+				x,
+				y,
+				z,
+				resolution,
+				colorSpace,
 			});
-			res.end(png);
-			return;
+			return promise.then((png) => {
+				res.writeHead(200, {
+					"Content-Type": "image/png",
+					"Cache-Control": "public, max-age=3600",
+				});
+				res.end(png);
+			});
+      // return;
 		}
 
 		res.writeHead(404, { "Content-Type": "application/json" });

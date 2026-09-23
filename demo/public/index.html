@@ -68,10 +68,10 @@
 
   <label>Resolution (px per query)
     <select id="res-select">
-      <option value="1">1 (sharpest, slowest)</option>
+      <option value="1" selected>1 (sharpest, slowest)</option>
       <option value="2">2</option>
       <option value="4">4</option>
-      <option value="8" selected>8</option>
+      <option value="8">8</option>
       <option value="16">16</option>
       <option value="32">32</option>
       <option value="64">64 (blockiest, fastest)</option>
@@ -111,7 +111,7 @@ window.map = map; // exposed for e2e tests, which drive the map via setView + a 
 L.control.zoom({
     position: 'bottomright'
 }).addTo(map);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19,
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 }).addTo(map);
@@ -143,6 +143,7 @@ function wrapLongitude(lon) {
 async function queryAndPopup(lat, lon) {
   const wrappedLon = wrapLongitude(lon);
   if (marker) map.removeLayer(marker);
+  searchResultsEl.innerHTML = '';
   marker = L.marker([lat, wrappedLon]).addTo(map);
   const popup = L.popup({ minWidth: 240 })
     .setLatLng([lat, wrappedLon])
@@ -184,7 +185,7 @@ function rebuildTileLayer() {
 
   const res = resSelect.value;
   const cs = csSelect.value;
-  const url = `/tiles/{z}/{x}/{y}.png?res=${res}&cs=${cs}`;
+  const url = `/tiles/{z}/{x}/{y}.png?res=${res}&cs=${cs}&v=1`;
   tileLayer = L.tileLayer(url, {
     tileSize: 256,
     minZoom: 4,
