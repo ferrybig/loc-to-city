@@ -351,6 +351,46 @@ export class CGeoDataReader {
 		);
 	}
 
+	/**
+	 * Finds a representative lat/lon for a place id by scanning all chunks,
+	 * using each chunk's palette to skip chunks that don't reference the id.
+	 * Returns the centre of the largest bounding box assigned to this place,
+	 * or null if the id has no geometry in the file.
+	 */
+	locate(id: number): { lat: number; lon: number; boundingBox: BoundingBox } | null {
+		if (!Number.isInteger(id) || id < 0 || id >= this.placeTable.totalPlaces) {
+			throw new RangeError(
+				`${id} is not a place id for this file (0 <= id < ${this.placeTable.totalPlaces})`,
+			);
+		}
+		let largestArea = -1;
+		let bestBox: BoundingBox | null = null;
+		const chunkCount = this.directory.chunkLengths.length;
+		for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
+			const chunk = this.getChunk(chunkIndex);
+			if (!chunk) continue;
+			const palettePos = chunk.palette.indexOf(id);
+			if (palettePos === -1) continue;
+			const targetIndex = palettePos + 1; // 1-based; 0 = "no place"
+			const chunkBox = this.chunkBoundingBox(chunkIndex);
+			for (let j = 0; j < chunk.codes.length; j++) {
+				if (chunk.paletteIndices[j] !== targetIndex) continue;
+				const box = this.recordBoundingBox(chunkBox, chunk.codes[j]!, chunk.depths[j]!);
+				const area = (box.maxLat - box.minLat) * (box.maxLon - box.minLon);
+				if (area > largestArea) {
+					largestArea = area;
+					bestBox = box;
+				}
+			}
+		}
+		if (!bestBox) return null;
+		return {
+			lat: (bestBox.minLat + bestBox.maxLat) / 2,
+			lon: (bestBox.minLon + bestBox.maxLon) / 2,
+			boundingBox: bestBox,
+		};
+	}
+
 	/** One chunk's records with their cells and places resolved -- what a
 	 * lookup in that chunk can answer with, laid out for inspection. */
 	*chunkRecords(index: number): IterableIterator<ChunkRecord> {

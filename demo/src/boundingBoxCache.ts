@@ -1,4 +1,8 @@
-import { boundingBoxContains, type BoundingBox, type QueryResult } from "@loc-to-city/reader";
+import {
+	type BoundingBox,
+	boundingBoxContains,
+	type QueryResult,
+} from "@loc-to-city/reader";
 
 /**
  * A small most-recently-used cache of {boundingBox, result} pairs.
@@ -12,26 +16,27 @@ import { boundingBoxContains, type BoundingBox, type QueryResult } from "@loc-to
  * size.
  */
 export class BoundingBoxCache {
-  private readonly entries: Array<{ box: BoundingBox; result: QueryResult }> = [];
+	private readonly entries: Array<{ box: BoundingBox; result: QueryResult }> =
+		[];
 
-  constructor(private readonly capacity = 16) {}
+	constructor(private readonly capacity = 64) {}
 
-  lookup(lat: number, lon: number): QueryResult | undefined {
-    for (let i = 0; i < this.entries.length; i++) {
-      const entry = this.entries[i]!;
-      if (boundingBoxContains(entry.box, lat, lon)) {
-        if (i > 0) {
-          this.entries.splice(i, 1);
-          this.entries.unshift(entry);
-        }
-        return entry.result;
-      }
-    }
-    return undefined;
-  }
+	lookup(lat: number, lon: number): QueryResult | undefined {
+		for (let i = 0; i < this.entries.length; i++) {
+			const entry = this.entries[i]!;
+			if (boundingBoxContains(entry.box, lat, lon)) {
+				if (i > 0) {
+					this.entries.splice(i, 1);
+					this.entries.unshift(entry);
+				}
+				return entry.result;
+			}
+		}
+		return undefined;
+	}
 
-  insert(result: QueryResult): void {
-    this.entries.unshift({ box: result.boundingBox, result });
-    if (this.entries.length > this.capacity) this.entries.pop();
-  }
+	insert(result: QueryResult): void {
+		this.entries.unshift({ box: result.boundingBox, result });
+		if (this.entries.length > this.capacity) this.entries.pop();
+	}
 }

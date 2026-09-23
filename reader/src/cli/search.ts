@@ -16,7 +16,7 @@ import {
 export const search: Command = {
 	name: "search",
 	summary: "find places whose name contains a text",
-	usage: `usage: cgeodata search <file.bin> <text> [--level country|region|city] [--country <id|name>] [--limit N] [--sort] [--index <index.bin>] [--json]
+	usage: `usage: cgeodata search <file.bin> <text> [--level country|region|city] [--country <id|name>] [--limit N] [--sort] [--locate] [--index <index.bin>] [--json]
 
 Prints every place (country, region or city) with a name containing
 <text>, case-insensitively, in the same tab-separated form as \`list\`.
@@ -34,6 +34,8 @@ grep's convention.
                  stops the scan as soon as it has enough matches; with
                  --sort, the whole file has to be scored first, since the
                  best match isn't necessarily the first one found.
+  --locate       append a lat,lon coordinate to each result (sequential
+                 chunk scan per match -- use --limit to keep it fast)
   --index F      use a pre-built bitmap search index (built with
                  build-search-index) to skip most of the city table;
                  falls back to a linear scan for queries shorter than 2
@@ -45,6 +47,7 @@ grep's convention.
 			country: { type: "string" },
 			limit: { type: "string" },
 			sort: { type: "boolean", default: false },
+			locate: { type: "boolean", default: false },
 			index: { type: "string" },
 			json: { type: "boolean", default: false },
 		});
@@ -90,7 +93,28 @@ grep's convention.
 			let matched = 0;
 			for (const place of results) {
 				matched++;
-				writeLine(values.json ? JSON.stringify(place) : formatPlaceLine(place));
+				if (values.json) {
+					if (values.locate) {
+						const pos = reader.locate(place.id);
+						writeLine(JSON.stringify(pos ? { ...place, lat: pos.lat, lon: pos.lon } : place));
+					} else {
+						writeLine(JSON.stringify(place));
+					}
+				} else if (values.locate) {
+					const pos = reader.locate(place.id);
+					if (pos) {
+						const cellSize = Math.min(
+							pos.boundingBox.maxLat - pos.boundingBox.minLat,
+							pos.boundingBox.maxLon - pos.boundingBox.minLon,
+						);
+						const p = Math.max(0, Math.round(-Math.log10(cellSize) + 1));
+						writeLine(`${formatPlaceLine(place)}\t${pos.lat.toFixed(p)},${pos.lon.toFixed(p)}`);
+					} else {
+						writeLine(`${formatPlaceLine(place)}\t-`);
+					}
+				} else {
+					writeLine(formatPlaceLine(place));
+				}
 			}
 			return matched > 0 ? EXIT_OK : EXIT_NO_MATCH;
 		} finally {

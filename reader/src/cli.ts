@@ -3,6 +3,7 @@ import { buildSearchIndexCmd } from "./cli/buildSearchIndex.js";
 import { chunk } from "./cli/chunk.js";
 import { info } from "./cli/info.js";
 import { list } from "./cli/list.js";
+import { locate } from "./cli/locate.js";
 import { lookup } from "./cli/lookup.js";
 import { search } from "./cli/search.js";
 import { type Command, EXIT_ERROR, UsageError } from "./cli/shared.js";
@@ -16,6 +17,7 @@ const COMMANDS: readonly Command[] = [
 	buildSearchIndexCmd,
 	show,
 	chunk,
+	locate,
 ];
 
 const USAGE = `usage: cgeodata <command> <file.bin> [...]
