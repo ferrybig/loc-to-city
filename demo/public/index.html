@@ -97,22 +97,30 @@ function buildTable(data, lat, lon) {
   return `${header}<table class="result-table">${rows}</table>`;
 }
 
+function wrapLongitude(lon) {
+  // Leaflet lets the map pan across multiple world copies, so a click far
+  // from the seam can report a raw lng outside [-180, 180) -- wrap it back
+  // onto the one copy the backend understands.
+  return ((((lon + 180) % 360) + 360) % 360) - 180;
+}
+
 async function queryAndPopup(lat, lon) {
+  const wrappedLon = wrapLongitude(lon);
   if (marker) map.removeLayer(marker);
-  marker = L.marker([lat, lon]).addTo(map);
+  marker = L.marker([lat, wrappedLon]).addTo(map);
   const popup = L.popup({ minWidth: 240 })
-    .setLatLng([lat, lon])
+    .setLatLng([lat, wrappedLon])
     .setContent('<div class="loading">Querying&hellip;</div>')
     .openOn(map);
 
   try {
-    const resp = await fetch(`/api/query?lat=${lat}&lon=${lon}`);
+    const resp = await fetch(`/api/query?lat=${lat}&lon=${wrappedLon}`);
     const data = await resp.json();
     if (data.error) {
       popup.setContent(`<div class="loading">Error: ${data.error}</div>`);
       return;
     }
-    popup.setContent(buildTable(data, lat, lon));
+    popup.setContent(buildTable(data, lat, wrappedLon));
   } catch (e) {
     popup.setContent(`<div class="loading">Request failed: ${e}</div>`);
   }

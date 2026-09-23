@@ -3,14 +3,53 @@ import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import RBush from "rbush";
 import type { Feature, MultiPolygon, Polygon } from "geojson";
 import type { AdminBoundaryIndex, CityCandidateMeta } from "./adminBoundaryIndex.js";
-import { CITY_CANDIDATE_LEVELS } from "./adminBoundaryIndex.js";
+import { COUNTRY_ADMIN_LEVELS } from "./countryAdminLevels.js";
 import type { CountryIndex } from "./countryIndex.js";
 import { streamMergedAdminBoundaries } from "./mergeAdminBoundaries.js";
 
-const CITY_LEVELS_FINEST_FIRST = [...CITY_CANDIDATE_LEVELS].sort((a, b) => b - a);
 const DEFAULT_COVERAGE_THRESHOLD = 0.6;
 const DEFAULT_MEMORY_CEILING_BYTES = 8 * 1024 ** 3;
 const RSS_CHECK_INTERVAL = 5000;
+
+export interface RegionLevelResult {
+  regionLevelByCountry: Map<string, number>;
+}
+
+/** Pass 1.5: picks each country's region (top subdivision) level from
+ * `regionAreaByCountryLevel`, scanning only the levels that country's own
+ * `COUNTRY_ADMIN_LEVELS` entry lists as region candidates (coarsest wins a
+ * tie, since a region layer is meant to be the coarser of the two
+ * subdivision tiers -- most entries list exactly one level anyway, so this
+ * only matters for the handful that list more). No minimum-coverage
+ * threshold: the old hardcoded-to-4 code unconditionally accepted every
+ * admin_level=4 feature as a region regardless of how much of the country
+ * it covered, so requiring a floor here would be a *stricter* rule than
+ * what already shipped, not a generalization of it. */
+export function selectRegionLevels(index: AdminBoundaryIndex, countries: CountryIndex): RegionLevelResult {
+  const regionLevelByCountry = new Map<string, number>();
+
+  for (const [country, byLevel] of index.regionAreaByCountryLevel) {
+    const countryArea = countries.areaByCode.get(country);
+    if (!countryArea) continue;
+    const candidateLevels = COUNTRY_ADMIN_LEVELS[country]?.region ?? [];
+
+    let bestLevel: number | undefined;
+    let bestRatio = -Infinity;
+    for (const level of [...candidateLevels].sort((a, b) => a - b)) {
+      const levelArea = byLevel.get(level);
+      if (levelArea === undefined) continue;
+      const ratio = levelArea / countryArea;
+      if (ratio > bestRatio) {
+        bestRatio = ratio;
+        bestLevel = level;
+      }
+    }
+    if (bestLevel !== undefined) regionLevelByCountry.set(country, bestLevel);
+  }
+
+  console.error(`selectRegionLevels: ${regionLevelByCountry.size} countries assigned a region level`);
+  return { regionLevelByCountry };
+}
 
 export interface PrimaryLevelResult {
   primaryLevelByCountry: Map<string, number>;
@@ -18,13 +57,21 @@ export interface PrimaryLevelResult {
 }
 
 /** Pass 2 of the 3-pass algorithm: pure computation over Pass 1's area
- * maps, no I/O. Per country, picks the finest admin_level whose own area
- * already covers >= `threshold` of the country's Natural Earth area. If no
- * level clears the threshold, falls back to whichever level has the
- * single largest share -- confirmed to match the deleted Python
- * pipeline's exact behavior (`chosen = max(ratios, key=ratios.get)`,
- * recovered via `git show 55c4a6f:scripts/extract_boundaries_europe.py`),
- * not a newly invented rule. */
+ * maps, no I/O. Per country, scanning only the levels that country's own
+ * `COUNTRY_ADMIN_LEVELS` entry lists as city candidates, picks the finest
+ * admin_level whose own area already covers >= `threshold` of the
+ * country's Natural Earth area. If no level clears the threshold, falls
+ * back to whichever level has the single largest share -- confirmed to
+ * match the deleted Python pipeline's exact behavior (`chosen =
+ * max(ratios, key=ratios.get)`, recovered via `git show
+ * 55c4a6f:scripts/extract_boundaries_europe.py`), not a newly invented
+ * rule.
+ *
+ * A country's `region` and `city` lists in `COUNTRY_ADMIN_LEVELS` are
+ * already disjoint by construction (a hand-reviewable, per-country data
+ * table, not a shared worldwide range), so unlike an earlier version of
+ * this function there is no exclusion parameter to thread through -- the
+ * same polygons can never accidentally end up eligible for both roles. */
 export function selectPrimaryLevels(
   index: AdminBoundaryIndex,
   countries: CountryIndex,
@@ -35,9 +82,10 @@ export function selectPrimaryLevels(
   for (const [country, byLevel] of index.areaByCountryLevel) {
     const countryArea = countries.areaByCode.get(country);
     if (!countryArea) continue;
+    const candidateLevels = [...(COUNTRY_ADMIN_LEVELS[country]?.city ?? [])].sort((a, b) => b - a);
 
     let chosen: number | undefined;
-    for (const level of CITY_LEVELS_FINEST_FIRST) {
+    for (const level of candidateLevels) {
       const levelArea = byLevel.get(level);
       if (levelArea !== undefined && levelArea / countryArea >= threshold) {
         chosen = level;
@@ -47,7 +95,9 @@ export function selectPrimaryLevels(
     if (chosen === undefined) {
       let bestLevel: number | undefined;
       let bestRatio = -Infinity;
-      for (const [level, levelArea] of byLevel) {
+      for (const level of candidateLevels) {
+        const levelArea = byLevel.get(level);
+        if (levelArea === undefined) continue;
         const ratio = levelArea / countryArea;
         if (ratio > bestRatio) {
           bestRatio = ratio;
@@ -139,7 +189,13 @@ export async function loadPrimaryGeometries(
  * kreisfreie Stadt's point falls inside nothing at all -> added"). Runs
  * entirely over Pass 1's already-collected `cityCandidates` metadata (no
  * additional file I/O) plus Pass 2's in-memory primary geometry index --
- * both are already exactly the data this test needs. */
+ * both are already exactly the data this test needs.
+ *
+ * `cityCandidates` only ever contains levels a country's own
+ * `COUNTRY_ADMIN_LEVELS` entry lists under `city` (see
+ * `adminBoundaryIndex.ts`), so a level that instead won that country's
+ * region vote was never added here in the first place -- no separate
+ * exclusion is needed to keep it out of gap-fill. */
 export function detectGapFill(
   index: AdminBoundaryIndex,
   primary: PrimaryLevelResult,
