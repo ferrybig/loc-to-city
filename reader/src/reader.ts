@@ -218,6 +218,13 @@ export class CGeoDataReader {
 		return this.names(id);
 	}
 
+	/** FNV-1a 64-bit hash of the place table bytes, as defined by
+	 * binary-format.md Section B.6. Used to bind a search index to its source. */
+	placeTableChecksum(): bigint {
+		const { placeTableStart, placeTableLength } = this.directory;
+		return fnv1a64(this.source.readSync(placeTableStart, placeTableLength));
+	}
+
 	/** Resolves one place id (Section 7.5) to its names and ancestors. */
 	place(id: number): Place {
 		const resolved = resolveIdentifier(this.placeTable, id);
@@ -545,4 +552,14 @@ function bisectRightMinusOne(sorted: number[], value: number): number {
 		else hi = mid;
 	}
 	return lo - 1;
+}
+
+/** FNV-1a 64-bit hash per binary-format.md Section B.6.
+ * offset_basis = 0xcbf29ce484222325, prime = 0x100000001b3. */
+function fnv1a64(data: Uint8Array): bigint {
+	const PRIME = 0x100000001b3n;
+	const MASK = 0xffffffffffffffffn;
+	let h = 0xcbf29ce484222325n;
+	for (let i = 0; i < data.length; i++) h = ((h ^ BigInt(data[i]!)) * PRIME) & MASK;
+	return h;
 }

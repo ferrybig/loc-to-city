@@ -76,12 +76,15 @@ grep's convention.
 
 			const results =
 				values.index !== undefined
-					? searchWithIndex(
-							reader,
-							loadSearchIndex(readFileSync(values.index)),
-							text,
-							searchOptions,
-						)
+					? (() => {
+							const index = loadSearchIndex(readFileSync(values.index));
+							if (index.sourceChecksum !== reader.placeTableChecksum()) {
+								throw new Error(
+									`--index ${values.index} was built from a different .bin file (checksum mismatch); rebuild with build-search-index`,
+								);
+							}
+							return searchWithIndex(reader, index, text, searchOptions);
+						})()
 					: reader.search(text, searchOptions);
 
 			let matched = 0;
