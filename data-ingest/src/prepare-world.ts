@@ -13,8 +13,10 @@
 // auto-detection (area-accumulate by (country,level) -> pick the finest
 // level covering >=60% of the country as primary -> gap-fill by
 // representative-point containment) to assemble the city layer, plus a
-// region layer (admin_level=4) and a country layer (Natural Earth,
-// already worldwide).
+// region layer and a country layer (Natural Earth, already worldwide).
+// The region layer's own admin_level is auto-detected per country too
+// (selectRegionLevels), not assumed to always be 4 -- see
+// adminLevelDetection.ts's doc comment for why that matters.
 //
 // See data-ingest/src/lib/{osmFiles,countryIndex,mergeAdminBoundaries,
 // adminBoundaryIndex,adminLevelDetection,regionPolygons}.ts for the
@@ -30,7 +32,13 @@ import { discoverAdminGeoJsonFiles } from "./lib/osmFiles.js";
 import { loadCountryIndex } from "./lib/countryIndex.js";
 import { buildAdminBoundaryIndex } from "./lib/adminBoundaryIndex.js";
 import type { AdminBoundaryIndex, CityCandidateMeta } from "./lib/adminBoundaryIndex.js";
-import { selectPrimaryLevels, loadPrimaryGeometries, detectGapFill, fetchFinalGeometries } from "./lib/adminLevelDetection.js";
+import {
+  selectRegionLevels,
+  selectPrimaryLevels,
+  loadPrimaryGeometries,
+  detectGapFill,
+  fetchFinalGeometries,
+} from "./lib/adminLevelDetection.js";
 import type { PrimaryLevelResult } from "./lib/adminLevelDetection.js";
 import { buildRegionIndex, assignCityRegion } from "./lib/regionPolygons.js";
 
@@ -104,9 +112,21 @@ async function main(): Promise<void> {
   console.error("Pass 1/4: scanning merged corpus for city/region candidates...");
   const index = await buildAdminBoundaryIndex(files, countries);
 
+  console.error("Pass 1.5/4: selecting each country's region level...");
+  const region = selectRegionLevels(index, countries);
+  // Only the level that won each country's vote becomes its actual region
+  // layer -- a country's own COUNTRY_ADMIN_LEVELS.region entry can list
+  // more than one candidate level for selectRegionLevels to compare, so a
+  // losing level's candidates must not leak into region assignment or
+  // output. (In practice almost every entry lists exactly one level, so
+  // this filter is close to a no-op for most countries.)
+  const finalRegions = new Map(
+    [...index.regionsByCountryName].filter(([, r]) => region.regionLevelByCountry.get(r.country) === r.level),
+  );
+
   console.error("Pass 2/4: selecting primary admin levels...");
   const primary = selectPrimaryLevels(index, countries);
-  const regionIndex = buildRegionIndex(index.regionsByCountryName);
+  const regionIndex = buildRegionIndex(finalRegions);
 
   // Full-precision city geometry for the whole world does not fit in
   // memory at once -- ~295k primaries measured at roughly 60KB each, so
@@ -242,7 +262,7 @@ async function main(): Promise<void> {
 
   const regionCollection: FeatureCollection<Polygon | MultiPolygon, { name: string; country: string }> = {
     type: "FeatureCollection",
-    features: [...index.regionsByCountryName.values()].map((r) => ({
+    features: [...finalRegions.values()].map((r) => ({
       type: "Feature",
       properties: { name: r.name, country: r.country },
       geometry: r.feature.geometry,

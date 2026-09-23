@@ -3,6 +3,7 @@ import bbox from "@turf/bbox";
 import pointOnFeature from "@turf/point-on-feature";
 import simplify from "@turf/simplify";
 import type { BBox, Feature, MultiPolygon, Polygon } from "geojson";
+import { COUNTRY_ADMIN_LEVELS } from "./countryAdminLevels.js";
 import type { CountryIndex } from "./countryIndex.js";
 import type { LonLat } from "./geo.js";
 import { streamMergedAdminBoundaries } from "./mergeAdminBoundaries.js";
@@ -14,20 +15,19 @@ import { resolvePolygonCountry } from "./polygonCountry.js";
 // wasted memory for geometry that's simplified before output anyway.
 const REGION_SIMPLIFY_TOLERANCE = 0.01; // ~1.1km
 
-/** admin_level range the 3-pass algorithm ever considers as a candidate
- * "city" level (README.md's "Europe scaling test": Germany's kreisfreie
- * Städte at 6, Latvia at 7, most of Europe at 8, Poland's real level at 7,
- * the UK sometimes needing 10). */
-export const CITY_CANDIDATE_LEVELS = [5, 6, 7, 8, 9, 10, 11] as const;
-/** The admin_level treated as "region" (OSM's dominant convention for a
- * country's first-level subdivision) -- kept as a single fixed level
- * worldwide, same simplifying assumption `prepare-europe.ts` already made
- * for Europe. Countries with 0 matches here just get 0 regions and their
- * cities fall back to country-level resolution, the same graceful
- * degradation already exercised by Ireland/Estonia/Portugal in the Europe
- * build -- not attempting per-country region-level detection is a
- * deliberate scope decision, not an oversight. */
-export const REGION_LEVEL = 4;
+// A cheap, purely worldwide (not per-country) prefilter, applied before
+// the country is even known: any admin_level outside this range is never
+// used as a region or city candidate by *any* country's entry in
+// COUNTRY_ADMIN_LEVELS, so there's no reason to pay for country
+// resolution on it. This is not itself a source of per-country coupling
+// -- it only decides whether a feature is worth resolving at all, never
+// which role it plays once resolved (that's COUNTRY_ADMIN_LEVELS, purely
+// per-country, see there for why that separation matters).
+const PLAUSIBLE_ADMIN_LEVELS = new Set([4, 5, 6, 7, 8, 9, 10, 11]);
+// Levels any country ever uses as a *region* candidate -- used only to
+// decide `resolvePolygonCountry`'s sampling care (regions matter more to
+// get right than an ordinary city), not to decide role or acceptance.
+const REGION_SAMPLE_LEVELS = new Set([4, 5, 6]);
 
 export interface CityCandidateMeta {
   id: string;
@@ -47,6 +47,11 @@ export interface RegionCandidate {
   id: string;
   name: string;
   country: string;
+  /** The admin_level this candidate was tagged at. A country's own
+   * COUNTRY_ADMIN_LEVELS entry keeps its region and city level lists
+   * disjoint, so unlike before this never needs cross-checking against
+   * what a *different* country does with the same level number. */
+  level: number;
   bbox: BBox;
   feature: Feature<Polygon | MultiPolygon, { name?: string }>;
 }
@@ -60,14 +65,22 @@ export interface AdminBoundaryIndexDiagnostics {
 
 export interface AdminBoundaryIndex {
   cityCandidates: CityCandidateMeta[];
-  /** Pass 1's area accumulation: country -> admin_level -> total area (km^2). */
+  /** Pass 1's area accumulation: country -> admin_level -> total area (km^2),
+   * for whichever levels that country's own COUNTRY_ADMIN_LEVELS.city
+   * lists. `selectPrimaryLevels` picks the best of just those levels. */
   areaByCountryLevel: Map<string, Map<number, number>>;
-  /** Final region polygons, deduped by (country, name) -- prefers the
-   * larger bbox on a genuine duplicate/fragmentary match, same rule
+  /** Same accumulation, for each country's own COUNTRY_ADMIN_LEVELS.region
+   * list -- `selectRegionLevels` picks the best of just those levels. */
+  regionAreaByCountryLevel: Map<string, Map<number, number>>;
+  /** Final region polygons, deduped by (country, level, name) -- prefers
+   * the larger bbox on a genuine duplicate/fragmentary match, same rule
    * `prepare-europe.ts`'s `extractRegionPolygons` already uses. Unlike
    * that function, country is resolved directly per relation (via
    * `resolvePolygonCountry`), not reverse-engineered from a pre-resolved
-   * cities list -- there is no such list at world scale. */
+   * cities list -- there is no such list at world scale. Includes every
+   * level in a country's own `region` list, not just the level that ends
+   * up winning; callers filter by `selectRegionLevels`'s result before
+   * using these as the final region layer. */
   regionsByCountryName: Map<string, RegionCandidate>;
   diagnostics: AdminBoundaryIndexDiagnostics;
 }
@@ -82,12 +95,19 @@ interface AdminBoundaryProps {
  * corpus, computing just enough per candidate relation (area,
  * representative point, bbox, resolved country) to run Pass 2/3's
  * selection logic without holding any full polygon geometry -- memory
- * bounded by candidate *count*, not corpus size. City candidates
- * (admin_level 5-11) and region candidates (admin_level 4) are collected
- * in the same pass since both need the same per-feature work. */
+ * bounded by candidate *count*, not corpus size.
+ *
+ * Which role a feature plays (region candidate, city candidate, neither,
+ * or -- at a level a country lists for both roles independently -- both)
+ * is decided per country from `COUNTRY_ADMIN_LEVELS`, looked up only
+ * after the country itself is resolved; `PLAUSIBLE_ADMIN_LEVELS` is just
+ * a cheap, country-agnostic prefilter so country resolution -- the
+ * expensive part -- is never attempted on a level nothing anywhere
+ * uses. */
 export async function buildAdminBoundaryIndex(files: string[], countries: CountryIndex): Promise<AdminBoundaryIndex> {
   const cityCandidates: CityCandidateMeta[] = [];
   const areaByCountryLevel = new Map<string, Map<number, number>>();
+  const regionAreaByCountryLevel = new Map<string, Map<number, number>>();
   const regionsByCountryName = new Map<string, RegionCandidate>();
   const diagnostics: AdminBoundaryIndexDiagnostics = { scanned: 0, keptCity: 0, keptRegion: 0, noCountry: 0 };
 
@@ -104,9 +124,7 @@ export async function buildAdminBoundaryIndex(files: string[], countries: Countr
     const levelRaw = props?.admin_level;
     if (!levelRaw) continue;
     const level = Number(levelRaw);
-    const isCity = (CITY_CANDIDATE_LEVELS as readonly number[]).includes(level);
-    const isRegion = level === REGION_LEVEL;
-    if (!isCity && !isRegion) continue;
+    if (!PLAUSIBLE_ADMIN_LEVELS.has(level)) continue;
 
     const geometry = feature as Feature<Polygon | MultiPolygon>;
     // Still needed as a point known to lie on the feature (gap-fill and
@@ -115,11 +133,18 @@ export async function buildAdminBoundaryIndex(files: string[], countries: Countr
     const [repX, repY] = pointOnFeature(geometry).geometry.coordinates;
     const repPoint: LonLat = [repX ?? 0, repY ?? 0];
     const featureBbox = bbox(geometry);
-    const country = resolvePolygonCountry(geometry, featureBbox, repPoint, countries, { alwaysSample: isRegion });
+    const country = resolvePolygonCountry(geometry, featureBbox, repPoint, countries, {
+      alwaysSample: REGION_SAMPLE_LEVELS.has(level),
+    });
     if (!country) {
       diagnostics.noCountry++;
       continue;
     }
+
+    const levels = COUNTRY_ADMIN_LEVELS[country];
+    const isCity = levels?.city.includes(level) ?? false;
+    const isRegionLevel = levels?.region.includes(level) ?? false;
+    if (!isCity && !isRegionLevel) continue;
 
     if (isCity) {
       const featureArea = area(geometry) / 1_000_000; // m^2 -> km^2
@@ -131,13 +156,20 @@ export async function buildAdminBoundaryIndex(files: string[], countries: Countr
       }
       byLevel.set(level, (byLevel.get(level) ?? 0) + featureArea);
       diagnostics.keptCity++;
-      continue;
     }
 
-    // isRegion
+    if (!isRegionLevel) continue;
     const name = props?.name;
     if (!name) continue;
-    const key = `${country} ${name}`;
+    const featureArea = area(geometry) / 1_000_000; // m^2 -> km^2
+    let regionByLevel = regionAreaByCountryLevel.get(country);
+    if (!regionByLevel) {
+      regionByLevel = new Map();
+      regionAreaByCountryLevel.set(country, regionByLevel);
+    }
+    regionByLevel.set(level, (regionByLevel.get(level) ?? 0) + featureArea);
+
+    const key = `${country} ${level} ${name}`;
     const existing = regionsByCountryName.get(key);
     if (!existing || bboxArea(featureBbox) > bboxArea(existing.bbox)) {
       const simplified = simplify(geometry, { tolerance: REGION_SIMPLIFY_TOLERANCE });
@@ -145,6 +177,7 @@ export async function buildAdminBoundaryIndex(files: string[], countries: Countr
         id,
         name,
         country,
+        level,
         bbox: featureBbox,
         feature: { ...simplified, properties: { name } },
       });
@@ -157,7 +190,7 @@ export async function buildAdminBoundaryIndex(files: string[], countries: Countr
       `${diagnostics.keptRegion} region matches (${regionsByCountryName.size} unique), ${diagnostics.noCountry} no-country`,
   );
 
-  return { cityCandidates, areaByCountryLevel, regionsByCountryName, diagnostics };
+  return { cityCandidates, areaByCountryLevel, regionAreaByCountryLevel, regionsByCountryName, diagnostics };
 }
 
 function bboxArea(b: BBox): number {

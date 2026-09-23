@@ -95,8 +95,9 @@ async function main(): Promise<void> {
     onlyChunks,
     onChunkBuilt: (info: { chunkIndex: number; chunkCount: number; recordCount: number; elapsedMs: number }) => {
       timings.push({ chunkIndex: info.chunkIndex, recordCount: info.recordCount, elapsedMs: info.elapsedMs });
+      const percentage = ((timings.length) / info.chunkCount) * 100;
       console.error(
-        `  chunk ${info.chunkIndex}/${info.chunkCount}: ${info.recordCount} records, ${info.elapsedMs.toFixed(0)}ms`,
+        `  ${percentage.toFixed(0)}% chunk ${info.chunkIndex}/${info.chunkCount}: ${info.recordCount} records, ${info.elapsedMs.toFixed(0)}ms`,
       );
     },
   };

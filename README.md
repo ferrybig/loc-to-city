@@ -462,6 +462,128 @@ and it's what actually caught the 73-countries-with-zero-cities/
 zero-regions shape (small island territories, plus the same admin_level=4
 gap set) before the full build finished.
 
+### Known issues in the current worldwide build
+
+Found by spot-checking `data/world.bin` and a higher-resolution experimental
+build (`data/world_high_res.bin`, built on a separate, more powerful
+machine in 58,278s -- currently **not committed**, kept out until the bugs
+below are understood, since it regresses on real points that the regular
+build gets right):
+
+- **Natural Earth's country outlines are too coarse for small
+  territories.** Jersey (9km across) is a 47-vertex ring in
+  `agent-resources/ne_10m_admin_0_countries.geojson`; Guernsey is 59 --
+  confirmed by direct inspection, unmodified by anything in this pipeline
+  (`COUNTRY_SIMPLIFY_TOLERANCE` is `0`, so these vertex counts come
+  straight from the source file). At `--max-depth 8`
+  (`data/world.bin`) this mostly doesn't show: the max-depth tie-break in
+  `quadtree.ts` picks *some* winner for an ambiguous leaf cell even when
+  its sample score is `0`, as long as one candidate is the sole one still
+  touching that branch, which papers over gaps between the crude outline
+  and the real coastline. At `--max-depth 11`
+  (`data/world_high_res.bin`, not committed) subdivision goes fine enough
+  to reach cells the real boundary never touches at all, and those
+  correctly resolve to nothing -- which is what makes the *same* underlying
+  coarse-polygon problem look like data loss ("too small in the south",
+  missing cities) instead of getting silently smoothed over. Baarle-Hertog/
+  Baarle-Nassau likely shares this root cause, compounded by its enclave/
+  exclave topology (see below). Fix would mean sourcing small-territory
+  outlines from OSM's own admin_level=2 boundary relations (already
+  extracted for the admin pipeline) instead of, or as an override on top
+  of, Natural Earth for territories under some area threshold -- not a
+  `quadtree.ts`/`geometry.ts` bug, since both builds are classifying the
+  exact same (coarse) polygon correctly.
+- **International/local name pairs aren't populated.** Section 7.4 of
+  `binary-format.md` and the reader (`placeTable.ts`'s `.split("|")`)
+  already support `local|international|alt...` name entries, but nothing
+  in `data-ingest` captures a second name to join in -- every entry the
+  pipeline currently produces is a single name. Confirmed the source data
+  actually has it: the raw admin boundary export
+  (`data-ingest/work-world/*-admin.geojson`) carries a plain `name:en`
+  property already, on 81,279 of 357,825 admin_level features (~23% --
+  the rest genuinely have no English name tagged in OSM). Adding it for
+  regions/cities is real but not free: `placeIds.ts` currently uses the
+  *same* `name`/`region` string both as the hierarchy's display name and
+  as the exact-match join key between a hierarchy region and its cities
+  (`` `${country} ${name}` ``, `data-ingest/src/lib/adminBoundaryIndex.ts`
+  and `compressor/src/placeIds.ts`). Naively joining `name:en` into that
+  same field would break every match whose two sides pick up the
+  international name inconsistently -- the join key needs to stay the
+  plain local `name` throughout ingest/matching, with the `local|intl`
+  string only assembled once, at the very end, when `nameEntries` is
+  built for the name blocks. Countries are a separate problem: Natural
+  Earth's `ne_10m_admin_0_countries.geojson` (the current country source)
+  has no local-name field at all -- its `NAME`/`NAME_EN` properties are
+  both already the English name (confirmed for `NL`: `NAME` = `NAME_EN` =
+  `"Netherlands"`, not `"Nederland"`), so a genuine `Nederland|The
+  Netherlands` pair would need country geometry/names to come from OSM's
+  own `admin_level=2` relations instead of (or alongside) Natural Earth --
+  a bigger change than regions/cities, which already have both tags
+  sitting unused in the existing extract.
+- **US/Canada resolve at county/regional-district grain, not city --
+  confirmed working as designed, not a bug.** Seattle (47.602922,
+  -122.331390) resolves to `country: United States of America, region:
+  Washington, city: King County`; Terrace, BC similarly resolves to
+  `Regional District of Kitimat-Stikine`. Swept 1,856 random points across
+  the continental US bounding box looking for the literal symptom
+  reported (a country's own name appearing in the city slot) and found
+  zero occurrences. This is the intended behavior of the
+  one-primary-admin-level-per-country algorithm (see "Europe scaling
+  test" below): county/regional-district is genuinely the finest OSM
+  level that fully tessellates those countries, and incorporated-city
+  polygons don't cover 100% of the state/province, so they lose the
+  >=60%-coverage vote to the coarser level that does.
+- **Ireland/Estonia/Portugal-shaped region gaps -- FIXED, pending a
+  rebuild.** This was previously documented (and, before that, in
+  `prepare-europe.ts`/the deleted Python prototype) as an accepted OSM
+  data-tagging quirk. It turned out to be a real bug: `REGION_LEVEL` was
+  hardcoded to `admin_level=4`, and `prepare-world.ts`'s `emitCity` drops
+  a city *entirely* (not just its region) when no region polygon covers
+  it. A worldwide audit found **45 countries with zero `admin_level=4`
+  candidates at all**, silently losing 100% of their cities to this --
+  Ireland alone lost 54,361 city candidates (Limerick, 52.660975,
+  -8.634567, among them), because OSM tags Ireland's counties at
+  `admin_level=6`, not 4.
+  
+  The first fix picked each country's region level algorithmically from a
+  single shared range (`REGION_CANDIDATE_LEVELS = [4, 5, 6]` worldwide,
+  largest-area-share wins). That approach itself had a real bug -- level 3
+  briefly in that range broke France, since OSM tags a "France
+  métropolitaine" + 5-overseas-territory grouping at `admin_level=3` (6
+  near-country blobs, one ~96% of the mainland, outvoting France's real
+  18-région level-4 layer) -- and a hard limitation: North Macedonia's real
+  municipality tier sits at `admin_level=7`, and widening the shared range
+  to reach it risked colliding with countries like Latvia whose *city*
+  tier is genuinely at 7. A shared range meant every country was
+  implicitly voting on the same candidate pool.
+  
+  Replaced with `data-ingest/src/lib/countryAdminLevels.ts`: a per-country
+  `Record<code, { region: number[]; city: number[] }>`, generated from the
+  same real-corpus area data the algorithm used, then hand-reviewed.
+  Selection logic (`selectRegionLevels`/`selectPrimaryLevels` in
+  `adminLevelDetection.ts`) now only ever scans the levels a country's own
+  table row lists -- correcting one country's row can never again change
+  another's result, since they're independent dictionary entries, not
+  shared range membership. `data-ingest/test/adminLevelDetection.test.ts`
+  asserts every entry's `region`/`city` lists are disjoint, across the
+  whole real table, not just hand-picked fixtures. One hand-reviewed
+  override on top of the generated defaults so far: North Macedonia's only
+  level-4/5/6 candidate is "Град Скопје" (City of Skopje, 2.3% coverage,
+  not a real region tier) -- set to `region: []`; its city tier (level 8,
+  98.8% coverage) already resolved correctly and needed no change.
+  
+  Validated against the real worldwide corpus (Pass 1/1.5/2 only, no
+  rebuild yet): Iceland resolves 8 regions + 61 cities (previously 0 and
+  0), Ireland 26 regions + 50,599 primary cities, Estonia 15 regions +
+  4,685 cities; France/Netherlands/Germany/Angola/Egypt/Russia/US/Canada
+  all confirmed unchanged. As a side effect, Pass 1 also collects far less
+  now -- 301,103 city candidates and 6,081 region matches worldwide,
+  versus 760,866 and 56,805 under the shared-range version -- since a
+  level is only ever stored as a candidate for a country whose own table
+  row actually lists it, not for every country in a shared range. Needs
+  `data-ingest/scripts/build-world.sh` rerun and a new
+  `world.bin`/`world_no_chunk.bin` to actually land in the shipped data.
+
 ### Parallel compression (`--workers`)
 
 Every chunk is independent -- `buildChunkRecords` touches the shared
