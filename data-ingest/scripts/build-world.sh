@@ -12,7 +12,13 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."   # repo root
 
 data-ingest/scripts/extract-boundaries.sh "$@"
-npx tsx data-ingest/src/prepare-world.ts
+# --max-old-space-size raises V8's heap above its ~4GB default so RSS can
+# actually reach adminLevelDetection.ts's 8GB guardrail and fail fast with
+# an actionable message, instead of V8 OOM-killing the process first (as
+# happened before this flag was added -- the guardrail's ceiling was above
+# what the heap could ever grow to). Scoped to this one command via
+# NODE_OPTIONS prefix so it doesn't leak into the compressor CLI step below.
+NODE_OPTIONS="--max-old-space-size=9216" npx tsx data-ingest/src/prepare-world.ts
 npx tsx compressor/src/cli.ts data/world-hierarchy.json data/world-cities-filtered.geojsonseq \
   data/world.bin --regions data/world-regions.geojson --countries data/world-country-polygons.geojson \
   --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 13 \
