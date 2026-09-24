@@ -150,7 +150,20 @@ async function main(): Promise<void> {
   const write = (chunk: string): Promise<void> =>
     cityOut.write(chunk) ? Promise.resolve() : new Promise((resolve) => cityOut.once("drain", () => resolve()));
 
+  // Every region polygon enters the hierarchy, not just those that end up
+  // holding a city: the compressor only builds regions the hierarchy
+  // lists, so a region with no cities (all of Libya/Egypt, whose OSM data
+  // has no city tier, or Khartoum State) would otherwise vanish and its
+  // points resolve at country level only.
   const regionsByCountry = new Map<string, Set<string>>();
+  for (const r of finalRegions.values()) {
+    let names = regionsByCountry.get(r.country);
+    if (!names) {
+      names = new Set();
+      regionsByCountry.set(r.country, names);
+    }
+    names.add(r.name);
+  }
   const skippedNoRegionByCountry = new Map<string, number>();
   let cityCount = 0;
   let skippedNoName = 0;
@@ -205,12 +218,6 @@ async function main(): Promise<void> {
       skippedNoRegionByCountry.set(candidate.country, (skippedNoRegionByCountry.get(candidate.country) ?? 0) + 1);
       return false;
     }
-    let regions = regionsByCountry.get(candidate.country);
-    if (!regions) {
-      regions = new Set();
-      regionsByCountry.set(candidate.country, regions);
-    }
-    regions.add(region);
 
     const feature: Feature<Polygon | MultiPolygon, CityProperties> = {
       type: "Feature",

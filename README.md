@@ -707,35 +707,23 @@ section, since those are spec decisions rather than pipeline work.
   17.6% coverage -- not a full tessellation, so it wouldn't cleanly fix
   this the way e.g. Ireland's `admin_level=6` counties did. Not fixed
   here; flagged so it doesn't need rediscovering.
-- **Chad, Libya and Egypt: zero regions built despite
-  `COUNTRY_ADMIN_LEVELS` claiming ~100%+ region coverage.** This is a
-  different, more severe failure than the "low city coverage" entries
-  below (Mauritania/Niger/Sudan/Laos), which do still resolve at region
-  grain -- these three don't resolve at region grain *at all*: Tripoli,
-  N'Djamena and Cairo (each countries' own capital) all return
-  `region: -, city: -`, and a `list --level region` scan of the built
-  `data/world.bin` finds exactly **zero** entries for Libya or Egypt, and
-  just **one** for Chad (`Ouaddaï`, nowhere near the country's full
-  extent). Since `countryAdminLevels.ts`'s own comment records these at
-  100-107% region coverage from the same Pass 1 area-accumulation the
-  rest of the table trusts, something between that measurement and the
-  final emitted region set is dropping them -- not yet root-caused (unlike
-  Slovenia above, where the cause is a confirmed, simple "no candidate
-  exists" gap). Worth a closer look with the same `resolvePolygonCountry`
-  spot-check approach used for the US/Canada/Slovenia cases above before
-  assuming it's the same class of bug.
-- **Sudan, Mauritania, Niger, Laos: confirmed low city coverage, not
-  necessarily a bug.** These already have a `countryAdminLevels.ts` code
-  comment calling out near-zero city coverage as "a genuine, confirmed
-  absence of sub-region administrative polygon data in OSM," but that
-  claim was only verified for Egypt/Mauritania/Niger at the time it was
-  written. Spot-checked here: Niamey (Niger) and Nouakchott (Mauritania)
-  actually resolve correctly, city included -- so the low national
-  percentage in the table undersells those two capitals specifically, OSM
-  coverage is just patchy elsewhere in-country. Khartoum (Sudan) resolves
-  to neither region nor city despite Sudan's region entry claiming 100.5%
-  coverage, the same unexplained pattern as the Chad/Libya/Egypt entry
-  above, not yet distinguished from it.
+- **Libya, Egypt, Chad, Sudan (and similar) have no city tier.** Even
+  with regions fixed (see "Resolved" below), Tripoli, Cairo, N'Djamena
+  and Khartoum resolve to `city: -`: `countryAdminLevels.ts` records city
+  coverage at 0-0.7% for Libya/Egypt/Chad -- a genuine absence of
+  sub-region administrative polygons in OSM there, not a wrong level
+  pick. Coverage is patchy rather than uniformly zero elsewhere: Niamey
+  (Niger) and Nouakchott (Mauritania) resolve all the way to city despite
+  their countries' low national percentages.
+- **Some region tiers look finer than a province.** Fixing the region
+  drop below surfaced regions that were previously hidden, and a few
+  countries' `COUNTRY_ADMIN_LEVELS` region level turns out to be a
+  district tier: Afghanistan (`region: [5]`, 384 regions recovered --
+  it has 34 provinces), Uzbekistan (`[6]`, 195) and Laos (`[6]`, 147 --
+  it has 18 provinces). Points there now resolve to a district-sized
+  region instead of no region at all, strictly better than before, but
+  those entries likely want the province level instead. Not yet
+  investigated.
 - **Brazil: major cities missing despite 66.6% city coverage.** Neither
   São Paulo nor Rio de Janeiro (the city, not the state) resolve --
   `lookup` at each city's own coordinates returns `city: -`. 66.6%
@@ -743,6 +731,23 @@ section, since those are spec decisions rather than pipeline work.
   among the covered candidates; not yet investigated further.
 
 ### Resolved
+
+- **Regions with no cities were dropped from the build (Libya, Egypt,
+  Chad, Sudan, and 110 other countries).** Tripoli, Cairo, N'Djamena and
+  Khartoum all resolved to `region: -` even though
+  `data/world-regions.geojson` had their region polygons (Libya 23, Egypt
+  27, Chad 23, Sudan 18). Root cause: `prepare-world.ts` built each
+  country's hierarchy region list *only* from regions that received at
+  least one emitted city, and the compressor only builds regions the
+  hierarchy lists -- so a country with no city tier (Libya, Egypt) lost
+  every region, Chad kept only `Ouaddaï` (the one region holding its 5
+  cities), and Sudan lost Khartoum State plus five eastern states.
+  Worldwide, 2,142 of 6,041 region polygons across 114 countries were
+  missing, 22 of those countries ending up with zero regions (Eswatini,
+  Fiji, Seychelles, Vanuatu, ...). Fixed by seeding the hierarchy from
+  every region polygon; `binary-format.md` Section 7.2 already allows a
+  region with zero cities. Verified on an Africa-only scoped build: all
+  four capitals now resolve to their correct region.
 
 - **Canada resolved at regional-district grain, not city.** Terrace, BC
   used to resolve to `Regional District of Kitimat-Stikine` instead of
