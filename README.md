@@ -677,24 +677,12 @@ section, since those are spec decisions rather than pipeline work.
   at region grain, not city.** See the US entry under "Resolved" below --
   New York's real municipal tier is OSM `admin_level=7`, not the
   nationally-correct 8, and the current one-level-per-*country* model in
-  `countryAdminLevels.ts` can't express a per-state exception.
-- **Scotland resolves at region grain, not city -- the same one-level-
-  per-country limitation as New York, inside the UK.** `GB: { region: [4],
-  city: [10] }` -- confirmed: a point near Kinross (56.128332, -3.306370)
-  returns `region: Alba / Scotland, city: -`. Spatially confirmed the
-  point sits inside "Fife" at `admin_level=6` (a real Scottish council
-  area), but GB's `city` config only looks at level 10 (England's civil-
-  parish/ward grain -- correct for England, since GB's national level-10
-  coverage is 65.3%). Scoped the check to just Scotland's own polygon:
-  Scotland has exactly **32 level-6 features** (its real council areas --
-  Midlothian, City of Edinburgh, Inverclyde, Renfrewshire, Moray...,
-  47.5% of Scotland's area by rep-point count, likely undercounted by
-  multi-part relations rather than genuinely missing), while level 10
-  only reaches **1.7%** of Scotland (small ward/neighbourhood fragments,
-  e.g. "West Pilton/West Granton" -- not full council-area coverage).
-  Same fix shape as New York: needs a per-*country-subdivision*, not
-  per-country, city level, which `countryAdminLevels.ts` can't express
-  today.
+  `countryAdminLevels.ts` can't express a per-state exception. Candidate
+  fix, untested: `US: { city: [7, 8] }`. Level 8 stays primary (largest
+  share), and level-7 towns whose representative point no incorporated
+  place covers get gap-filled -- the same pattern that fixed London and
+  Scotland (see GB under "Resolved"). The catch: it would also add every
+  uncovered Midwest civil township, so it needs its own cities500 run.
 - **Slovenia has zero cities: another Ireland/Estonia/Portugal-shaped
   region gap.** `SI: { region: [], city: [8] }` -- city coverage is fine
   (101.9%, real municipalities: Bled, Solčava, Mežica confirmed present in
@@ -712,18 +700,42 @@ section, since those are spec decisions rather than pipeline work.
   and Khartoum resolve to `city: -`: `countryAdminLevels.ts` records city
   coverage at 0-0.7% for Libya/Egypt/Chad -- a genuine absence of
   sub-region administrative polygons in OSM there, not a wrong level
-  pick. Coverage is patchy rather than uniformly zero elsewhere: Niamey
+  pick. Eritrea is the same: OSM has only its six level-4 zobas
+  (13.009241, 42.744713 now resolves to `region: Southern Red Sea`, no
+  city). Coverage is patchy rather than uniformly zero elsewhere: Niamey
   (Niger) and Nouakchott (Mauritania) resolve all the way to city despite
   their countries' low national percentages.
 - **Some region tiers look finer than a province.** Fixing the region
   drop below surfaced regions that were previously hidden, and a few
   countries' `COUNTRY_ADMIN_LEVELS` region level turns out to be a
-  district tier: Afghanistan (`region: [5]`, 384 regions recovered --
-  it has 34 provinces), Uzbekistan (`[6]`, 195) and Laos (`[6]`, 147 --
-  it has 18 provinces). Points there now resolve to a district-sized
+  district tier: Uzbekistan (`region: [6]`, 195 regions recovered) and
+  Laos (`[6]`, 147 -- it has 18 provinces). Afghanistan had the same
+  problem and is fixed (see "Resolved"). Points there now resolve to a district-sized
   region instead of no region at all, strictly better than before, but
   those entries likely want the province level instead. Not yet
   investigated.
+- **Capitals that are themselves a region resolve to a city district.**
+  Astana (51.142310, 71.433792) returns `region: Астана, city: Алматы
+  ауданы`, and Sana'a returns `region: أمانة العاصمة, city: مديرية
+  الثورة`. Kazakhstan's three republican cities and Yemen's capital are
+  level-4 regions in OSM, so the only thing below them is the city's own
+  districts. No config level fixes that: there's no tier where the city
+  appears as a city. Aden is the same pattern one level down (its
+  city boundary is the only level-5 feature in Yemen). Yemen more
+  broadly: level 6 (districts, 99.5%) splits the larger cities while being
+  about right for rural areas, and no single level fits both.
+- **Towns mapped only as place points can't be returned.** Shire (14.083301,
+  38.281860) and Yebokile (10.447974, 37.896309) in Ethiopia have no
+  boundary relation in OSM -- the whole of Ethiopia has two polygons
+  finer than level 6 -- so the best a polygon lookup can give there is the
+  zone (`Semien Mi'irabawi Zone`, `East Gojjam`). A fix would mean adding
+  `place=*` nodes as a nearest-point fallback, which is a design change
+  rather than a level pick.
+- **Wales and Northern Ireland resolve to sub-town units.** With GB's
+  level-10 primary, central Cardiff returns `city: Castle` (a Welsh
+  community) and central Belfast returns `Town Parks` (a townland) --
+  both finer than the town. Found while verifying the GB fix below, not
+  yet investigated.
 - **Brazil: major cities missing despite 66.6% city coverage.** Neither
   São Paulo nor Rio de Janeiro (the city, not the state) resolve --
   `lookup` at each city's own coordinates returns `city: -`. 66.6%
@@ -731,6 +743,35 @@ section, since those are spec decisions rather than pipeline work.
   among the covered candidates; not yet investigated further.
 
 ### Resolved
+
+- **Ethiopia, Afghanistan, Saudi Arabia, Taiwan and the UK used the wrong
+  city (and in some cases region) level.** Verified on a scoped Africa+
+  Asia+Europe build, before -> after:
+  - Ethiopia: region was the zone tier and city the woreda tier (12.6%
+    coverage), so most of the country had no city. Now region 4 / city 5:
+    Shire -> `Tigray / Semien Mi'irabawi Zone`, Yebokile -> `Amhara /
+    East Gojjam`, Addis Ababa -> `Addis Ababa / Addis Ababa`.
+  - Afghanistan: region was districts (384 of them) and city the Kabul-
+    only nahia tier (0.6%). Now region 4 / city 5: Kunduz ->
+    `Kunduz Province / Kunduz District`, Kabul -> `Kabul Province /
+    Kabul Municipality`.
+  - Saudi Arabia: city was level 10, splitting Riyadh into hundreds of
+    neighbourhoods (Thulaim). Now region 4 / city 6: Riyadh ->
+    `Riyadh Region / Riyadh Governorate`, Jeddah -> `Makkah Region /
+    Jeddah Governorate`.
+  - Taiwan: city was level 9 (7,545 villages). Now `[7, 8]`: townships
+    primary, districts gap-filled -- Taipei -> `Taipei City / Xinyi
+    District`, Kaohsiung -> `Kaohsiung City / Xinxing District`.
+  - UK: city was level 10 (civil parishes) only, leaving London (51.507674,
+    -0.130119), unitary towns and nearly all of Scotland without a city.
+    Now `[6, 8, 10]`: parishes primary, districts/boroughs and unitary
+    authorities/Scottish council areas gap-filled -- London -> `City of
+    Westminster`, Reading -> `Reading`, Brighton -> `Brighton and Hove`,
+    Kinross (56.128332, -3.306370) -> `Fife`, Edinburgh -> `City of
+    Edinburgh`. Parished towns are unchanged (Guildford, Cambridge,
+    Malvern). Spot-checked that no two-tier county leaks into the city
+    slot: Worcestershire gets added but loses to the smaller district or
+    parish wherever one exists (Worcester, Redditch, Kidderminster).
 
 - **Regions with no cities were dropped from the build (Libya, Egypt,
   Chad, Sudan, and 110 other countries).** Tripoli, Cairo, N'Djamena and

@@ -48,6 +48,28 @@ export interface CountryAdminLevels {
  *   over level 8 (municipalities, 31.4%), resolving Terrace, BC as
  *   "Regional District of Kitimat-Stikine". Overridden to level 8: against
  *   cities500's 3,298 Canadian entries it name-matches 31.3% vs 14.8%.
+ * - ET, AF: the generated pick put regions one tier too fine (zones /
+ *   districts, since their share edged out the real top tier by <0.5%)
+ *   and cities on a sparse tier (ET woredas 12.6%, AF city nahias 0.6%).
+ *   Both now use level 4 (Ethiopian regional states, Afghan provinces) and
+ *   level 5 (zones / districts, ~100% coverage).
+ * - SA: region was level 6 (governorates) and city level 10 (1.5%, urban
+ *   neighbourhoods -- Riyadh split into hundreds). Now region 4 (the 13
+ *   provinces), city 6 (governorates, 99.8%: Riyadh, Jeddah, ...).
+ * - TW: level 9 is villages (里, 7,545 of them). The real municipal tier is
+ *   split across two levels: districts (區, level 7) inside special
+ *   municipalities, townships (鄉/鎮/市, level 8) inside counties. City
+ *   [7, 8] makes 8 primary and gap-fills the level-7 districts it doesn't
+ *   cover.
+ * - GB: level 10 (civil parishes) leaves unparished areas -- all of
+ *   London, unitary towns like Reading and Brighton, nearly all of
+ *   Scotland -- with no city. City [6, 8, 10] keeps parishes primary and
+ *   gap-fills level-8 districts/boroughs (City of Westminster, Redditch)
+ *   and level-6 unitary authorities / Scottish council areas (Reading,
+ *   City of Edinburgh, Fife) wherever no parish covers them. A two-tier
+ *   county whose representative point is unparished (Worcestershire)
+ *   also gets added, but it's the largest candidate, so it only surfaces
+ *   where no parish or district covers a cell.
  *
  * Entries whose comment shows a coverage figure far over 100% (e.g. small
  * multi-island nations like the Maldives or Cook Islands) reflect
@@ -61,7 +83,7 @@ export interface CountryAdminLevels {
 export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   AD: { region: [], city: [7] }, // region 0.0%, city 103.5%
   AE: { region: [4], city: [8] }, // region 147.9%, city 93.1%
-  AF: { region: [5], city: [7] }, // region 99.9%, city 0.4%
+  AF: { region: [4], city: [5] }, // region 99.9%, city 99.9% -- see override note above
   AG: { region: [4], city: [6] }, // region 1947.0%, city 92.9%
   AL: { region: [6], city: [8] }, // region 100.8%, city 100.8%
   AM: { region: [4], city: [5] }, // region 100.4%, city 96.3%
@@ -120,7 +142,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   EH: { region: [6], city: [8] }, // region 102.3%, city 87.1%
   ER: { region: [4], city: [] }, // region 130.6%, city 0.0%
   ES: { region: [4], city: [8] }, // region 99.8%, city 100.0%
-  ET: { region: [5], city: [6] }, // region 100.3%, city 12.6%
+  ET: { region: [4], city: [5] }, // region 100.0%, city 100.3% -- see override note above
   FI: { region: [4], city: [8] }, // region 113.4%, city 113.2%
   FJ: { region: [6], city: [] }, // region 516.8%, city 0.0%
   FK: { region: [], city: [10] }, // region 0.0%, city 100.8%
@@ -128,7 +150,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   FO: { region: [6], city: [9] }, // region 105.3%, city 101.1%
   FR: { region: [4], city: [8] }, // region 100.2%, city 100.1%
   GA: { region: [4], city: [6] }, // region 109.1%, city 101.2%
-  GB: { region: [4], city: [10] }, // region 166.0%, city 65.4%
+  GB: { region: [4], city: [6, 8, 10] }, // region 166.0%, city 64.7% (10) + gap-fill 8/6 -- see override note above
   GD: { region: [6], city: [] }, // region 101.8%, city 0.0%
   GE: { region: [6], city: [8] }, // region 102.9%, city 4.3%
   GG: { region: [4], city: [8] }, // region 107.6%, city 88.2%
@@ -235,7 +257,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   RS: { region: [4], city: [9] }, // region 100.0%, city 99.5%
   RU: { region: [4], city: [6] }, // region 108.2%, city 104.0%
   RW: { region: [6], city: [8] }, // region 99.9%, city 93.3%
-  SA: { region: [6], city: [10] }, // region 100.2%, city 1.5%
+  SA: { region: [4], city: [6] }, // region 100.2%, city 99.8% -- see override note above
   SB: { region: [4], city: [5] }, // region 768.5%, city 28.5%
   SC: { region: [6], city: [] }, // region 56.8%, city 0.0%
   SD: { region: [4], city: [6] }, // region 100.5%, city 72.2%
@@ -268,7 +290,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   TR: { region: [4], city: [6] }, // region 109.8%, city 100.0%
   TT: { region: [4], city: [9] }, // region 100.2%, city 0.1%
   TV: { region: [], city: [8] }, // region 0.0%, city 8089.5%
-  TW: { region: [4], city: [9] }, // region 113.9%, city 101.1%
+  TW: { region: [4], city: [7, 8] }, // region 82.3%, city 69.8% (8) + 30.9% (7) -- see override note above
   TZ: { region: [4], city: [5] }, // region 94.0%, city 94.0%
   UA: { region: [4], city: [7] }, // region 104.1%, city 99.7%
   UG: { region: [4], city: [6] }, // region 99.8%, city 6.4%
