@@ -82,6 +82,7 @@ echo "== syncing repo to $REMOTE_HOST:$REMOTE_DIR_WIN =="
 rsync -avz --delete \
   --rsync-path="$REMOTE_RSYNC_PATH" \
   --exclude='.git/' \
+  --exclude='cgeodata-demo.tar.gz' \
   --exclude='node_modules/' \
   --exclude='*/node_modules/' \
   --exclude='*/dist/' \
