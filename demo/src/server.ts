@@ -156,9 +156,10 @@ function main(): void {
 		res.end(JSON.stringify({ error: "not found" }));
 	});
 
-	server.listen(port, "127.0.0.1", () => {
+	const host = process.env.HOST ?? "127.0.0.1";
+	server.listen(port, host, () => {
 		console.error(
-			`Serving on http://127.0.0.1:${port} (dataset=${datasetPath})`,
+			`Serving on http://${host}:${port} (dataset=${datasetPath})`,
 		);
 	});
 }
