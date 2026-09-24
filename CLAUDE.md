@@ -95,6 +95,21 @@ to score every match before yielding any, since the best one isn't
 necessarily the first found; plain `search` keeps the cheaper early-exit
 scan when `--limit` is given without `--sort`.
 
+Also runnable as `npm run reader -- <subcommand> ...` (the `--` is
+required so npm forwards args instead of eating them).
+
+**Use `lookup`/`show`/`search` against `data/world.bin` to spot-check
+`COUNTRY_ADMIN_LEVELS` changes** (`data-ingest/src/lib/countryAdminLevels.ts`)
+before trusting a coverage-percentage comment: the auto-detected level
+that best tessellates a country by area isn't always the level whose
+*names* are the ones a lookup should return (see the US county-vs-
+incorporated-place and Canada regional-district-vs-city entries in
+README.md's "Known issues and open work" section). A quick loop —
+`npm run reader -- lookup data/world.bin <lat,lon>` against a handful of
+well-known cities in the country just changed — catches a wrong city name
+(or a `city` that's empty because gap-fill couldn't cover it) far faster
+than rebuilding and diffing the full cities500-style match-rate script.
+
 ### Building a `.bin` file
 
 `compressor/src/cli.ts` (installed as `cgeodata-compress`) takes a

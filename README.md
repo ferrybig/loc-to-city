@@ -673,20 +673,95 @@ section, since those are spec decisions rather than pipeline work.
   sitting unused in the existing extract. This and the item above both
   need the same new OSM `admin_level=2` country source, so they're
   natural to tackle together.
+- **New York (and likely other New England-convention US states) resolve
+  at region grain, not city.** See the US entry under "Resolved" below --
+  New York's real municipal tier is OSM `admin_level=7`, not the
+  nationally-correct 8, and the current one-level-per-*country* model in
+  `countryAdminLevels.ts` can't express a per-state exception.
+- **Scotland resolves at region grain, not city -- the same one-level-
+  per-country limitation as New York, inside the UK.** `GB: { region: [4],
+  city: [10] }` -- confirmed: a point near Kinross (56.128332, -3.306370)
+  returns `region: Alba / Scotland, city: -`. Spatially confirmed the
+  point sits inside "Fife" at `admin_level=6` (a real Scottish council
+  area), but GB's `city` config only looks at level 10 (England's civil-
+  parish/ward grain -- correct for England, since GB's national level-10
+  coverage is 65.3%). Scoped the check to just Scotland's own polygon:
+  Scotland has exactly **32 level-6 features** (its real council areas --
+  Midlothian, City of Edinburgh, Inverclyde, Renfrewshire, Moray...,
+  47.5% of Scotland's area by rep-point count, likely undercounted by
+  multi-part relations rather than genuinely missing), while level 10
+  only reaches **1.7%** of Scotland (small ward/neighbourhood fragments,
+  e.g. "West Pilton/West Granton" -- not full council-area coverage).
+  Same fix shape as New York: needs a per-*country-subdivision*, not
+  per-country, city level, which `countryAdminLevels.ts` can't express
+  today.
+- **Slovenia has zero cities: another Ireland/Estonia/Portugal-shaped
+  region gap.** `SI: { region: [], city: [8] }` -- city coverage is fine
+  (101.9%, real municipalities: Bled, Solčava, Mežica confirmed present in
+  the source extract), but there is no usable region candidate at all, so
+  every Slovenian city is dropped by the same `emitCity` "no region ->
+  drop the city too" rule documented below (confirmed: Bled and Maribor,
+  Slovenia's 2nd-largest city, are both entirely absent from
+  `data/world.bin`). Slovenia's nearest thing to a regional tier is OSM
+  `admin_level=7` ("Upravna Enota" / administrative unit), but that's only
+  17.6% coverage -- not a full tessellation, so it wouldn't cleanly fix
+  this the way e.g. Ireland's `admin_level=6` counties did. Not fixed
+  here; flagged so it doesn't need rediscovering.
+- **Chad, Libya and Egypt: zero regions built despite
+  `COUNTRY_ADMIN_LEVELS` claiming ~100%+ region coverage.** This is a
+  different, more severe failure than the "low city coverage" entries
+  below (Mauritania/Niger/Sudan/Laos), which do still resolve at region
+  grain -- these three don't resolve at region grain *at all*: Tripoli,
+  N'Djamena and Cairo (each countries' own capital) all return
+  `region: -, city: -`, and a `list --level region` scan of the built
+  `data/world.bin` finds exactly **zero** entries for Libya or Egypt, and
+  just **one** for Chad (`Ouaddaï`, nowhere near the country's full
+  extent). Since `countryAdminLevels.ts`'s own comment records these at
+  100-107% region coverage from the same Pass 1 area-accumulation the
+  rest of the table trusts, something between that measurement and the
+  final emitted region set is dropping them -- not yet root-caused (unlike
+  Slovenia above, where the cause is a confirmed, simple "no candidate
+  exists" gap). Worth a closer look with the same `resolvePolygonCountry`
+  spot-check approach used for the US/Canada/Slovenia cases above before
+  assuming it's the same class of bug.
+- **Sudan, Mauritania, Niger, Laos: confirmed low city coverage, not
+  necessarily a bug.** These already have a `countryAdminLevels.ts` code
+  comment calling out near-zero city coverage as "a genuine, confirmed
+  absence of sub-region administrative polygon data in OSM," but that
+  claim was only verified for Egypt/Mauritania/Niger at the time it was
+  written. Spot-checked here: Niamey (Niger) and Nouakchott (Mauritania)
+  actually resolve correctly, city included -- so the low national
+  percentage in the table undersells those two capitals specifically, OSM
+  coverage is just patchy elsewhere in-country. Khartoum (Sudan) resolves
+  to neither region nor city despite Sudan's region entry claiming 100.5%
+  coverage, the same unexplained pattern as the Chad/Libya/Egypt entry
+  above, not yet distinguished from it.
+- **Brazil: major cities missing despite 66.6% city coverage.** Neither
+  São Paulo nor Rio de Janeiro (the city, not the state) resolve --
+  `lookup` at each city's own coordinates returns `city: -`. 66.6%
+  coverage nationally apparently doesn't guarantee the largest metros are
+  among the covered candidates; not yet investigated further.
 
-### Investigated, confirmed not a bug
+### Investigated, fix identified but not yet applied
 
 - **Canada resolves at regional-district grain, not city.** Terrace, BC
-  resolves to `Regional District of Kitimat-Stikine`. This is the intended
-  behavior of the one-primary-admin-level-per-country algorithm (see
-  "Europe scaling test" below): regional-district is genuinely the finest
-  OSM level that fully tessellates the country, and incorporated-city
-  polygons don't cover 100% of the province, so they lose the
-  >=60%-coverage vote to the coarser level that does. Not scheduled as a
-  fix, but worth noting `countryAdminLevels.ts` (see below) makes it
-  straightforward if ever wanted, same as the US case below -- a
-  contained, per-country edit rather than the shared-range risk it would
-  have been before that refactor.
+  resolves to `Regional District of Kitimat-Stikine` instead of `Terrace`;
+  same root cause as the US county case below -- level 6 (regional
+  district, 66.2% coverage) auto-wins the area vote over level 8 (real
+  municipality names -- Terrace, Toronto, Vancouver, Montreal, Winnipeg
+  all confirmed at level 8, only 31.4% national coverage). Measured
+  against GeoNames' cities500 Canadian entries (3,298 places) with a
+  scoped North-America-only test build: level 8 fuzzy-name-matches 31.3%
+  (1,032/3,298) vs. level 6's 14.8% (487/3,298) -- roughly 2.1x better,
+  though both numbers are far lower than the US's equivalent fix (64.0%),
+  since Canada's incorporated-place coverage is thinner nationally than
+  the US's. Most of the level-8 "misses" inspected are not really wrong --
+  GeoNames lists neighborhoods (Abbottsfield, Aberdeen, Agincourt North)
+  that correctly resolve to their containing city (Beverly, Kamloops,
+  Scarborough), a finer grain than this format targets, not a bug. Not
+  yet applied to `COUNTRY_ADMIN_LEVELS`/`data/world.bin` -- same
+  `city: [8]`-style override as the US fix below, pending a decision to
+  ship it.
 
 ### Resolved
 
