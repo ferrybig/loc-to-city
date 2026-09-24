@@ -454,13 +454,18 @@ stage. Tokyo, São Paulo, New York, Sydney, Den Haag, Paris and Nairobi all
 resolve correctly to city/region/country; mid-ocean points resolve fully
 unknown.
 
-`data/world_no_chunk.bin` (1.3MB) is the same build with
-`--only-chunks ''` -- the place table alone, no quadtree chunks -- kept
-committed alongside `world.bin` since it's a much smaller way to inspect
-or query country/region/city counts without loading 8.3MB of chunk data,
-and it's what actually caught the 73-countries-with-zero-cities/
-zero-regions shape (small island territories, plus the same admin_level=4
-gap set) before the full build finished.
+`data/world_no_chunk.bin` is the same build with `--only-chunks ''` -- the
+place table alone, no quadtree chunks -- a much smaller way to inspect or
+query country/region/city counts without loading the full chunk data. It
+used to be committed alongside `world.bin`, and is what actually caught
+the 73-countries-with-zero-cities/zero-regions shape (small island
+territories, plus the admin_level=4 gap later fixed by
+`countryAdminLevels.ts`) before the full build finished -- but it's now
+gitignored rather than committed: it goes stale the instant
+`world-hierarchy.json`/cities/regions change, and rebuilding it locally
+takes seconds (see CLAUDE.md's `--only-chunks` notes), so there's no
+reason to carry it as a tracked artifact that can silently drift out of
+sync with `world.bin`.
 
 ### Known issues in the current worldwide build
 

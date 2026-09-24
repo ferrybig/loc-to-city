@@ -112,8 +112,11 @@ npx tsx compressor/src/cli.ts <hierarchy.json> <cities.geojson|.geojsonseq> <out
   every other chunk empty — doesn't touch country/region/city resolution,
   just skips the (expensive) chunk-compression stage. `--only-chunks ''`
   builds just the place table, useful for inspecting record counts on a
-  huge dataset without paying for chunk compression at all (see
-  `data/world_no_chunk.bin`).
+  huge dataset without paying for chunk compression at all (a ~2s local
+  build against the worldwide inputs — `data/world_no_chunk.bin` is a
+  gitignored, regenerate-on-demand artifact, not committed, since it goes
+  stale the moment `world-hierarchy.json`/cities/regions change and costs
+  nothing to rebuild).
 - `--workers N` spreads chunk work across `node:worker_threads` (`0` = the
   original sequential path, kept as the byte-identity oracle parallel
   output is checked against; `1` still spawns a real worker, isolating
