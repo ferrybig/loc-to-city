@@ -17,8 +17,9 @@
     "dev": "tsx src/index.ts"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
+    "@biomejs/biome": "2.5.13",
+    "@types/node": "^24.0.0",
     "tsx": "^4.19.0",
-    "@types/node": "^24.0.0"
+    "typescript": "^5.7.0"
   }
 }

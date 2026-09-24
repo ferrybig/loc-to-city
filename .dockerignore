@@ -1,0 +1,27 @@
+.git/
+.vscode/
+node_modules/
+*/dist/
+
+# Large data files - only world.bin is needed at runtime
+data/
+!data/world.bin
+
+# OSM extracts and intermediate working files
+data-ingest/osm/
+data-ingest/work/
+data-ingest/work-eu/
+data-ingest/work-world/
+*.pbf
+*.pbf.part
+
+# Test and e2e artifacts
+playwright-report/
+test-results/
+demo/e2e/
+
+# Python artifacts from old prototype
+.venv/
+__pycache__/
+*.pyc
+agent-resources/
