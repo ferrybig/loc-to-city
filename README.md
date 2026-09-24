@@ -705,6 +705,24 @@ section, since those are spec decisions rather than pipeline work.
   is a strict improvement over the old behavior (100% of those points
   used to show a technically-correct-but-misleading county name).
 
+  **Known residual gap: New York (and likely other New England-convention
+  states) still resolve at region grain, not city.** Manhattan, Brooklyn,
+  the Bronx and Albany all still return `city: null` after the level-8
+  fix above. New York State's real municipal tier in OSM is tagged
+  `admin_level=7` (civil towns/cities/villages), not 8 -- confirmed by
+  scoping the same area-coverage check to just NY State's own polygon:
+  level 7 covers 92.8% of the state (1,000 features) vs. level 8's 2.1%
+  (567 small fragments, not full municipalities). Nationally, though,
+  level 8 is the right choice (10.7% US-wide coverage vs. level 7's 5.5%,
+  since most other states use the standard incorporated-place convention
+  at 8) -- so `COUNTRY_ADMIN_LEVELS`'s one-level-per-*country* model can't
+  express both correctly at once. Fixing this needs the city tier to vary
+  by *state*, not just by country, which is a real pipeline change
+  (multi-level-with-local-fallback in `selectPrimaryLevels`/gap-fill), not
+  a config edit -- not attempted here, left as a known gap: NY-area points
+  gap-fill to `region: New York` instead of showing a wrong city name,
+  which is still no worse than the pre-fix county-grain behavior.
+
 - **Ireland/Estonia/Portugal-shaped region gaps.** Previously documented
   (and, before that, in `prepare-europe.ts`/the deleted Python prototype)
   as an accepted OSM data-tagging quirk -- see "Europe scaling test"
