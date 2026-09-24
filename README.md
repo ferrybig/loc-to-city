@@ -742,12 +742,12 @@ section, since those are spec decisions rather than pipeline work.
   coverage nationally apparently doesn't guarantee the largest metros are
   among the covered candidates; not yet investigated further.
 
-### Investigated, fix identified but not yet applied
+### Resolved
 
-- **Canada resolves at regional-district grain, not city.** Terrace, BC
-  resolves to `Regional District of Kitimat-Stikine` instead of `Terrace`;
-  same root cause as the US county case below -- level 6 (regional
-  district, 66.2% coverage) auto-wins the area vote over level 8 (real
+- **Canada resolved at regional-district grain, not city.** Terrace, BC
+  used to resolve to `Regional District of Kitimat-Stikine` instead of
+  `Terrace`; same root cause as the US county case below -- level 6 (regional
+  district, 66.2% coverage) auto-won the area vote over level 8 (real
   municipality names -- Terrace, Toronto, Vancouver, Montreal, Winnipeg
   all confirmed at level 8, only 31.4% national coverage). Measured
   against GeoNames' cities500 Canadian entries (3,298 places) with a
@@ -758,12 +758,9 @@ section, since those are spec decisions rather than pipeline work.
   the US's. Most of the level-8 "misses" inspected are not really wrong --
   GeoNames lists neighborhoods (Abbottsfield, Aberdeen, Agincourt North)
   that correctly resolve to their containing city (Beverly, Kamloops,
-  Scarborough), a finer grain than this format targets, not a bug. Not
-  yet applied to `COUNTRY_ADMIN_LEVELS`/`data/world.bin` -- same
-  `city: [8]`-style override as the US fix below, pending a decision to
-  ship it.
-
-### Resolved
+  Scarborough), a finer grain than this format targets, not a bug.
+  `COUNTRY_ADMIN_LEVELS['CA']` now overrides to level 8, same as the US
+  fix below.
 
 - **US resolved at county grain, not city.** Seattle (47.602922,
   -122.331390) used to resolve to `country: United States of America,

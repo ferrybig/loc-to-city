@@ -43,7 +43,11 @@ export interface CountryAdminLevels {
  *   matches 64.0% of them vs. county's 4.3% (county's own name is almost
  *   never what GeoNames calls the place). Uncovered (unincorporated)
  *   points gap-fill to region instead of showing a wrong county name --
- *   see README's "US/Canada resolve at county/regional-district grain".
+ *   see README's "US resolved at county grain, not city".
+ * - CA: same shape as US -- level 6 (regional districts, 66.2%) auto-won
+ *   over level 8 (municipalities, 31.4%), resolving Terrace, BC as
+ *   "Regional District of Kitimat-Stikine". Overridden to level 8: against
+ *   cities500's 3,298 Canadian entries it name-matches 31.3% vs 14.8%.
  *
  * Entries whose comment shows a coverage figure far over 100% (e.g. small
  * multi-island nations like the Maldives or Cook Islands) reflect
@@ -88,7 +92,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   BW: { region: [4], city: [6] }, // region 99.8%, city 18.1%
   BY: { region: [4], city: [8] }, // region 100.0%, city 99.5%
   BZ: { region: [4], city: [8] }, // region 115.9%, city 5.3%
-  CA: { region: [4], city: [6] }, // region 128.2%, city 66.2%
+  CA: { region: [4], city: [8] }, // region 128.2%, city 31.4% -- see override note above
   CD: { region: [4], city: [6] }, // region 100.2%, city 42.6%
   CF: { region: [4], city: [8] }, // region 100.1%, city 0.2%
   CG: { region: [4], city: [6] }, // region 99.3%, city 81.4%
