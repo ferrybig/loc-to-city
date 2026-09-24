@@ -104,11 +104,11 @@ export interface PlaceCounts {
 }
 
 export class CGeoDataReader {
-	private readonly chunkCache = new Map<number, ChunkRecords>();
+	private readonly chunkCache = new Map<number, WeakRef<ChunkRecords>>();
 	/** Inflated name blocks (Section 7.3), split into entries. One inflate
 	 * per block ever touched, whether a lookup wants one name or a walk
 	 * wants all of them. */
-	private readonly nameBlockCache = new Map<number, string[][]>();
+	private readonly nameBlockCache = new Map<number, WeakRef<string[][]>>();
 
 	private constructor(
 		private readonly source: RandomAccessSource,
@@ -478,7 +478,7 @@ export class CGeoDataReader {
 	private getChunk(index: number): ChunkRecords | undefined {
 		const length = this.directory.chunkLengths[index]!;
 		if (length === 0) return undefined;
-		const cached = this.chunkCache.get(index);
+		const cached = this.chunkCache.get(index)?.deref();
 		if (cached) return cached;
 		const compressed = this.source.readSync(
 			this.directory.chunkOffsets[index]!,
@@ -486,7 +486,7 @@ export class CGeoDataReader {
 		);
 		const inflated = safeInflate(compressed);
 		const chunk = parseChunk(inflated, this.header.maxDepth);
-		this.chunkCache.set(index, chunk);
+		this.chunkCache.set(index, new WeakRef(chunk));
 		return chunk;
 	}
 
@@ -494,10 +494,10 @@ export class CGeoDataReader {
 		const { keyframeExp, totalPlaces } = this.placeTable;
 		const blockSize = keyframeExp === 0 ? totalPlaces : 2 ** keyframeExp;
 		const blockIndex = Math.floor(globalId / blockSize);
-		let block = this.nameBlockCache.get(blockIndex);
+		let block = this.nameBlockCache.get(blockIndex)?.deref();
 		if (!block) {
 			block = readNameBlock(this.source, this.placeTable, blockIndex);
-			this.nameBlockCache.set(blockIndex, block);
+			this.nameBlockCache.set(blockIndex, new WeakRef(block));
 		}
 		const entry = block[globalId - blockIndex * blockSize];
 		if (!entry)

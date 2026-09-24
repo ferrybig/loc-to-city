@@ -7,8 +7,6 @@
  */
 import { createHash } from "node:crypto";
 
-export type ColorSpace = "hsl" | "oklch";
-
 export function colorKeyHue(colorKey: string): number {
   const digest = createHash("md5").update(colorKey, "utf8").digest();
   const value = digest.readUInt32BE(0);
@@ -17,24 +15,6 @@ export function colorKeyHue(colorKey: string): number {
 
 function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
-}
-
-/** hsl(hue 70.2% 46.52%) -> [r, g, b] in 0..255. */
-export function hslToRgb(hue: number): [number, number, number] {
-  const h = ((hue % 360) + 360) % 360 / 360;
-  const s = 0.702;
-  const l = 0.4652;
-  const c = (1 - Math.abs(2 * l - 1)) * s;
-  const x = c * (1 - Math.abs(((h * 6) % 2) - 1));
-  const m = l - c / 2;
-  let r: number, g: number, b: number;
-  if (h < 1 / 6) [r, g, b] = [c, x, 0];
-  else if (h < 2 / 6) [r, g, b] = [x, c, 0];
-  else if (h < 3 / 6) [r, g, b] = [0, c, x];
-  else if (h < 4 / 6) [r, g, b] = [0, x, c];
-  else if (h < 5 / 6) [r, g, b] = [x, 0, c];
-  else [r, g, b] = [c, 0, x];
-  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
 }
 
 // OKLCH -> sRGB, following Bjorn Ottosson's reference formulas
@@ -76,8 +56,8 @@ export function oklchToRgb(hue: number, chroma: number = 0.1213): [number, numbe
   ];
 }
 
-export function colorKeyToRgb(colorKey: string, colorSpace: ColorSpace = "oklch"): [number, number, number] {
+export function colorKeyToRgb(colorKey: string): [number, number, number] {
   const hue = colorKeyHue(colorKey);
-  const chroma = colorKey[0] === '2' ? 0.1213 : colorKey[1] === '1' ? 0.07 : 0.04;
-  return colorSpace === "hsl" ? hslToRgb(hue) : oklchToRgb(hue, chroma);
+  const chroma = colorKey[0] === '2' ? 0.1213 : colorKey[0] === '1' ? 0.07 : 0.04;
+  return oklchToRgb(hue, chroma);
 }

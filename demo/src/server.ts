@@ -15,9 +15,8 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CGeoDataReader } from "@loc-to-city/reader";
+import { CGeoDataReader } from "@loc-to-city/read\er";
 import { Piscina } from "piscina";
-import type { ColorSpace } from "./colors.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -37,7 +36,8 @@ function main(): void {
 	console.error("Loaded.");
 	const piscina = new Piscina({
 		filename: path.resolve(__dirname, "tile-worker.js"),
-    idleTimeout: 1000,
+    	idleTimeout: 1000,
+		maxQueue: 256,
 		workerData: {
 			datasetPath,
 		},
@@ -132,24 +132,24 @@ function main(): void {
 			const x = Number(tileMatch[2]);
 			const y = Number(tileMatch[3]);
 			const resolution = Number(url.searchParams.get("res") ?? "8");
-			const colorSpace: ColorSpace =
-				url.searchParams.get("cs") === "hsl" ? "hsl" : "oklch";
-			// const png = renderTilePng(reader, z, x, y, resolution, colorSpace);
+  			const abortController = new AbortController();
 			const promise = piscina.run({
 				x,
 				y,
 				z,
 				resolution,
-				colorSpace,
-			});
+			}, { signal: abortController.signal });
+			res.on("close", () => abortController.abort());
 			return promise.then((png) => {
 				res.writeHead(200, {
 					"Content-Type": "image/png",
 					"Cache-Control": "public, max-age=3600",
 				});
 				res.end(png);
+			}, () => {
+				res.writeHead(503, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ error: "service unavailable" }));
 			});
-      // return;
 		}
 
 		res.writeHead(404, { "Content-Type": "application/json" });
