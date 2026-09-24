@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# Builds data/world.bin on the Windows machine at REMOTE_HOST, which has
+# more RAM/cores than this box but no Docker -- so this script only
+# handles the compressor stage (plain Node/tsx, no Docker needed). The
+# data-ingest stage (extract-boundaries.sh + prepare-world.ts) still has
+# to run HERE first: extraction needs the loc2city-tools Docker image, and
+# prepare-world.ts consumes its output directly. Run that locally, then
+# run this script to sync + build on the remote box.
+#
+# Usage:
+#   npx tsx data-ingest/src/prepare-world.ts   # local, produces data/world-hierarchy.json etc.
+#   ./build-world-on-remote-machine.sh                    # full worldwide build, default workers
+#   ./build-world-on-remote-machine.sh --only-chunks 1     # scoped test build (verifies the pipeline works)
+#   ./build-world-on-remote-machine.sh --only-chunks ''    # place-table-only build (seconds, no chunks)
+#
+# Any extra arguments are forwarded verbatim to the compressor CLI on the
+# remote machine, after the fixed flags below.
+#
+# Everything below was actually run and fixed against the real remote
+# machine on 2026-09-24, not guessed -- see the three Gotchas this script
+# works around, each hit and confirmed live:
+#
+#   1. cwrsync.cmd (the template dropped by the cwRsync installer) is NOT
+#      a working passthrough wrapper -- it ignores its arguments and
+#      always runs `rsync --version` / `ssh -V`, corrupting rsync's binary
+#      protocol stream ("protocol version mismatch -- is your shell
+#      clean?"). The real binary is next to it, at ...\Programs\bin\rsync.exe.
+#   2. `npm install` on Windows throws a hard, opaque error
+#      ("UNKNOWN: unknown error, lstat ... dist/cli.js", errno -4094) when
+#      creating a `.bin` shim for a workspace package whose `bin` target
+#      (compressor/reader's dist/cli.js) doesn't exist yet -- unlike
+#      POSIX, which just creates a dangling link. `--no-bin-links` skips
+#      shim creation for every package (including tsc/tsx's own), so this
+#      script invokes tsc/tsx by their real dist paths instead of relying
+#      on PATH-injected shims.
+#   3. Deeper problem, independent of (2): even with the shim issue
+#      solved, requiring `@loc-to-city/reader` from `compressor` throws
+#      "the path cannot be traversed because it contains an untrusted
+#      junction point" -- npm workspaces are *always* linked via Windows
+#      directory junctions (confirmed `--install-links` does not change
+#      this for actual workspaces, only for `file:`-style local deps), and
+#      this particular machine's junction-traversal trust setting blocks
+#      reading through them (plausibly an SSH/non-interactive logon
+#      session restriction; untested whether an interactive session would
+#      differ). Worked around by building `reader` first, then replacing
+#      its junction with a real `robocopy` of the already-built directory
+#      -- `compressor` itself never needs prebuilding since `tsx`
+#      transpiles its TypeScript source directly at import time.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+REMOTE_HOST="fernando@192.168.2.8"
+# Two spellings of the same directory: rsync's remote side needs the
+# cygwin /cygdrive form (cwRsync is a cygwin build); cmd.exe commands over
+# ssh need the native Windows form.
+REMOTE_DIR_CYGWIN="/cygdrive/c/Users/fernando/Documents/Dev/Prive/loc-to-city"
+REMOTE_DIR_WIN="C:\\Users\\fernando\\Documents\\Dev\\Prive\\loc-to-city"
+REMOTE_RSYNC_PATH="C:\\Users\\fernando\\Programs\\bin\\rsync.exe"
+# ~32GB total RAM on this machine (`node -e "os.totalmem()"`, since
+# Get-CimInstance is access-denied over this ssh session) -- generous on
+# purpose, since more headroom than needed is the entire reason to use
+# this machine instead of the local one.
+REMOTE_MAX_OLD_SPACE_MB=24576
+
+REQUIRED_DATA_FILES=(
+  data/world-hierarchy.json
+  data/world-cities-filtered.geojsonseq
+  data/world-regions.geojson
+  data/world-country-polygons.geojson
+)
+for f in "${REQUIRED_DATA_FILES[@]}"; do
+  if [ ! -f "$f" ]; then
+    echo "missing $f -- run 'npx tsx data-ingest/src/prepare-world.ts' locally first" >&2
+    echo "(that step needs data-ingest/work-world/*-admin.geojson, produced by" >&2
+    echo " scripts/extract-boundaries.sh via the loc2city-tools Docker image," >&2
+    echo " which is why it can't run on the Docker-less remote machine)" >&2
+    exit 1
+  fi
+done
+
+echo "== syncing repo to $REMOTE_HOST:$REMOTE_DIR_WIN =="
+rsync -avz --delete \
+  --rsync-path="$REMOTE_RSYNC_PATH" \
+  --exclude='.git/' \
+  --exclude='node_modules/' \
+  --exclude='*/node_modules/' \
+  --exclude='*/dist/' \
+  --exclude='data-ingest/osm/' \
+  --exclude='data-ingest/work/' \
+  --exclude='data-ingest/work-eu/' \
+  --exclude='data-ingest/work-world/' \
+  --exclude='agent-resources/' \
+  --exclude='data/search-index/' \
+  --exclude='*.pbf' \
+  --exclude='*.pbf.part' \
+  --exclude='*.cpuprofile' \
+  --exclude='.venv/' \
+  --exclude='__pycache__/' \
+  --exclude='playwright-report/' \
+  --exclude='test-results/' \
+  ./ "$REMOTE_HOST:$REMOTE_DIR_CYGWIN/"
+
+echo "== installing deps on remote (--no-bin-links: see Gotcha 2 above) =="
+# Windows OpenSSH's default shell here is cmd.exe (confirmed via `%CD%`),
+# not a POSIX shell -- '&&' chaining and native backslash paths.
+ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR_WIN && npm install --no-bin-links"
+
+echo "== building reader, then replacing its junction with a real copy (see Gotcha 3 above) =="
+ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR_WIN && node node_modules\\typescript\\bin\\tsc -p reader\\tsconfig.json"
+ssh "$REMOTE_HOST" "rd \"$REMOTE_DIR_WIN\\node_modules\\@loc-to-city\\reader\""
+ssh "$REMOTE_HOST" "robocopy \"$REMOTE_DIR_WIN\\reader\" \"$REMOTE_DIR_WIN\\node_modules\\@loc-to-city\\reader\" /E /NFL /NDL /NJH /NJS || exit 0"
+
+echo "== running compressor build on remote (default workers = os.availableParallelism()) =="
+# compressor itself is never prebuilt -- tsx transpiles its TS source
+# directly, so only reader (imported via its compiled dist/ per its
+# package.json `exports`) needs the tsc step above. --workers is
+# deliberately omitted: the CLI's own default is
+# os.availableParallelism(), which is exactly "the default amount of
+# workers" on whichever machine actually runs it.
+ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR_WIN && set NODE_OPTIONS=--max-old-space-size=$REMOTE_MAX_OLD_SPACE_MB && node node_modules\\tsx\\dist\\cli.mjs compressor\\src\\cli.ts data\\world-hierarchy.json data\\world-cities-filtered.geojsonseq data\\world.bin --regions data\\world-regions.geojson --countries data\\world-country-polygons.geojson --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 13 --attribution \"[OpenStreetMap](https://openstreetmap.org/copyright)\" $*"
+
+echo "== syncing data/world.bin back =="
+rsync -avz \
+  --rsync-path="$REMOTE_RSYNC_PATH" \
+  "$REMOTE_HOST:$REMOTE_DIR_CYGWIN/data/world.bin" ./data/world.bin
+
+echo "== done: data/world.bin updated from remote build =="
+ls -la data/world.bin
