@@ -676,25 +676,34 @@ section, since those are spec decisions rather than pipeline work.
 
 ### Investigated, confirmed not a bug
 
-- **US/Canada resolve at county/regional-district grain, not city.**
-  Seattle (47.602922, -122.331390) resolves to `country: United States of
-  America, region: Washington, city: King County`; Terrace, BC similarly
-  resolves to `Regional District of Kitimat-Stikine`. Swept 1,856 random
-  points across the continental US bounding box looking for the literal
-  symptom reported (a country's own name appearing in the city slot) and
-  found zero occurrences. This is the intended behavior of the
-  one-primary-admin-level-per-country algorithm (see "Europe scaling
-  test" below): county/regional-district is genuinely the finest OSM
-  level that fully tessellates those countries, and incorporated-city
-  polygons don't cover 100% of the state/province, so they lose the
+- **Canada resolves at regional-district grain, not city.** Terrace, BC
+  resolves to `Regional District of Kitimat-Stikine`. This is the intended
+  behavior of the one-primary-admin-level-per-country algorithm (see
+  "Europe scaling test" below): regional-district is genuinely the finest
+  OSM level that fully tessellates the country, and incorporated-city
+  polygons don't cover 100% of the province, so they lose the
   >=60%-coverage vote to the coarser level that does. Not scheduled as a
   fix, but worth noting `countryAdminLevels.ts` (see below) makes it
-  straightforward if ever wanted: setting e.g. `US: { city: [] }`, or
-  pointing it at a real settlement-level list, is a contained, per-country
-  edit rather than the shared-range risk it would have been before that
-  refactor.
+  straightforward if ever wanted, same as the US case below -- a
+  contained, per-country edit rather than the shared-range risk it would
+  have been before that refactor.
 
 ### Resolved
+
+- **US resolved at county grain, not city.** Seattle (47.602922,
+  -122.331390) used to resolve to `country: United States of America,
+  region: Washington, city: King County` -- correct in that county is
+  genuinely the finest OSM `admin_level` that fully tessellates the US
+  (>=60%-coverage auto-detection picked level 6 at 103.0% coverage over
+  level 8's 10.7%, since unincorporated land is common), but useless as a
+  "city" answer: nobody looks up a point expecting a county name.
+  `COUNTRY_ADMIN_LEVELS['US']` now overrides the auto-pick to level 8
+  (incorporated places) despite its lower coverage -- measured against
+  GeoNames' cities500 US entries (21,785 places), level 8 fuzzy-name-
+  matches 64.0% of them vs. county's 4.3%. Uncovered (unincorporated)
+  points gap-fill to region instead of showing a wrong county name, which
+  is a strict improvement over the old behavior (100% of those points
+  used to show a technically-correct-but-misleading county name).
 
 - **Ireland/Estonia/Portugal-shaped region gaps.** Previously documented
   (and, before that, in `prepare-europe.ts`/the deleted Python prototype)

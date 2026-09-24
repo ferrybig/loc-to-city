@@ -34,6 +34,16 @@ export interface CountryAdminLevels {
  *   municipality's boundary happening to also carry a lower admin_level.
  *   City (level 8, 98.8% coverage, North Macedonia's real municipalities)
  *   already resolves correctly and is untouched.
+ * - US: level 6 (counties, 103.0% coverage) auto-won the >=60% vote over
+ *   level 8 (incorporated places, only 10.7% coverage -- unincorporated
+ *   land is common in the US), but county is the wrong city tier: it
+ *   resolves e.g. Cleveland as "Cuyahoga County" instead of "Cleveland".
+ *   Overridden to level 8 despite its low coverage -- measured against
+ *   GeoNames' cities500 US entries (21,785 places), level 8 fuzzy-name-
+ *   matches 64.0% of them vs. county's 4.3% (county's own name is almost
+ *   never what GeoNames calls the place). Uncovered (unincorporated)
+ *   points gap-fill to region instead of showing a wrong county name --
+ *   see README's "US/Canada resolve at county/regional-district grain".
  *
  * Entries whose comment shows a coverage figure far over 100% (e.g. small
  * multi-island nations like the Maldives or Cook Islands) reflect
@@ -258,7 +268,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   TZ: { region: [4], city: [5] }, // region 94.0%, city 94.0%
   UA: { region: [4], city: [7] }, // region 104.1%, city 99.7%
   UG: { region: [4], city: [6] }, // region 99.8%, city 6.4%
-  US: { region: [4], city: [6] }, // region 106.6%, city 103.0%
+  US: { region: [4], city: [8] }, // region 106.6%, city 10.7% -- see override note above
   UY: { region: [4], city: [8] }, // region 99.7%, city 1.3%
   UZ: { region: [6], city: [8] }, // region 99.9%, city 1.3%
   VC: { region: [6], city: [] }, // region 106.2%, city 0.0%
