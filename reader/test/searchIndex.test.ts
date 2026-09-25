@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -9,8 +9,9 @@ import {
 	CGeoDataReader,
 	type Place,
 	type SearchOptions,
+	searchIndexPathFor,
 } from "../src/index.js";
-import { buildSearchIndex, loadSearchIndex } from "../src/searchIndex.js";
+import { buildSearchIndex, SearchIndex } from "../src/searchIndex.js";
 import { APPENDIX_A_BYTES } from "./fixtures/appendixA.js";
 
 function ids(places: Iterable<Place>): number[] {
@@ -34,30 +35,30 @@ test("buildSearchIndex: version byte encodes kind=1 version=0 (value 16)", () =>
 	assert.equal(buf[8], 0x10); // varint 16
 });
 
-test("loadSearchIndex: rejects wrong magic bytes", () => {
+test("SearchIndex.open: rejects wrong magic bytes", () => {
 	const bad = new Uint8Array(100);
-	assert.throws(() => loadSearchIndex(bad), /wrong magic bytes/);
+	assert.throws(() => SearchIndex.open(bad), /wrong magic bytes/);
 });
 
-test("loadSearchIndex: rejects too-short buffer", () => {
-	assert.throws(() => loadSearchIndex(new Uint8Array(5)), /too short/);
+test("SearchIndex.open: rejects too-short buffer", () => {
+	assert.throws(() => SearchIndex.open(new Uint8Array(5)), /too short/);
 });
 
-test("loadSearchIndex: rejects wrong kind (a plain CGEODATA file has kind=0 = version 0)", () => {
+test("SearchIndex.open: rejects wrong kind (a plain CGEODATA file has kind=0 = version 0)", () => {
 	// Build a fake header with version varint = 0 (kind 0, not kind 1).
 	const fake = new Uint8Array(30);
 	fake.set([0x43, 0x47, 0x45, 0x4f, 0x44, 0x41, 0x54, 0x41]); // signature
 	fake[8] = 0x00; // version varint = 0 → kind=0
-	assert.throws(() => loadSearchIndex(fake), /kind/);
+	assert.throws(() => SearchIndex.open(fake), /kind/);
 });
 
-test("loadSearchIndex: round-trips all header fields from the Appendix A fixture", () => {
+test("SearchIndex.open: round-trips all header fields from the Appendix A fixture", () => {
 	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
 	const { cities, countries, regions } = reader.placeCounts;
 	const buf = buildSearchIndex(reader);
 	reader.close();
 
-	const index = loadSearchIndex(buf);
+	const index = SearchIndex.open(buf);
 	assert.equal(index.placeCount, cities);
 	assert.equal(index.firstId, countries + regions);
 	assert.equal(index.groupSize, 4);
@@ -85,9 +86,28 @@ test("buildSearchIndex: embeds the correct source checksum", () => {
 	const buf = buildSearchIndex(reader);
 	reader.close();
 
-	const index = loadSearchIndex(buf);
+	const index = SearchIndex.open(buf);
 	assert.equal(index.sourceChecksum, APPENDIX_A_CHECKSUM);
 });
+
+// Fast 32-bit-halves hash vs a straightforward BigInt FNV-1a, on a real
+// place table big enough to exercise every carry path.
+function referenceFnv1a64(data: Uint8Array): bigint {
+	let h = 0xcbf29ce484222325n;
+	for (const byte of data) h = ((h ^ BigInt(byte)) * 0x100000001b3n) & 0xffffffffffffffffn;
+	return h;
+}
+
+const ZH_BIN = fileURLToPath(new URL("../../data/zuid-holland.bin", import.meta.url));
+if (existsSync(ZH_BIN)) {
+	test("placeTableChecksum: matches a BigInt reference on zuid-holland.bin", () => {
+		const reader = CGeoDataReader.open(ZH_BIN);
+		const { placeTableStart, placeTableLength } = reader.directory;
+		const table = readFileSync(ZH_BIN).subarray(placeTableStart, placeTableStart + placeTableLength);
+		assert.equal(reader.placeTableChecksum(), referenceFnv1a64(table));
+		reader.close();
+	});
+}
 
 // ── placeNames ───────────────────────────────────────────────────────────────
 
@@ -148,7 +168,58 @@ test("useSearchIndex: attaches an index built from the same file", () => {
 
 test("useSearchIndex: accepts an already-loaded index", () => {
 	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
-	reader.useSearchIndex(loadSearchIndex(buildSearchIndex(reader)));
+	reader.useSearchIndex(SearchIndex.open(buildSearchIndex(reader)));
+	assert.deepEqual(ids(reader.search("dam", { level: "city" })), [4, 5]);
+	reader.close();
+});
+
+test("useSearchIndex: accepts a path, read on demand", () => {
+	const dir = mkdtempSync(path.join(tmpdir(), "cgeodata-use-index-"));
+	const indexPath = path.join(dir, "some-index.bin");
+	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
+	writeFileSync(indexPath, buildSearchIndex(reader));
+	reader.useSearchIndex(indexPath);
+	assert.equal(reader.hasSearchIndex, true);
+	assert.deepEqual(ids(reader.search("dam", { level: "city" })), [4, 5]);
+	reader.close();
+});
+
+test("open: picks up <name>.search-index.bin next to the file", () => {
+	const dir = mkdtempSync(path.join(tmpdir(), "cgeodata-sibling-index-"));
+	const binPath = path.join(dir, "fixture.bin");
+	writeFileSync(binPath, APPENDIX_A_BYTES);
+
+	const without = CGeoDataReader.open(binPath);
+	assert.equal(without.hasSearchIndex, false);
+	without.close();
+
+	const builder = CGeoDataReader.open(APPENDIX_A_BYTES);
+	writeFileSync(searchIndexPathFor(binPath), buildSearchIndex(builder));
+	builder.close();
+	assert.equal(searchIndexPathFor(binPath), path.join(dir, "fixture.search-index.bin"));
+
+	const reader = CGeoDataReader.open(binPath);
+	assert.equal(reader.hasSearchIndex, true);
+	assert.deepEqual(ids(reader.search("dam", { level: "city" })), [4, 5]);
+	reader.useSearchIndex(undefined);
+	assert.equal(reader.hasSearchIndex, false);
+	reader.close();
+});
+
+test("open: a stale index next to the file throws on search, not silently ignored", () => {
+	const dir = mkdtempSync(path.join(tmpdir(), "cgeodata-stale-index-"));
+	const binPath = path.join(dir, "fixture.bin");
+	writeFileSync(binPath, APPENDIX_A_BYTES);
+	const builder = CGeoDataReader.open(APPENDIX_A_BYTES);
+	const bytes = buildSearchIndex(builder);
+	builder.close();
+	bytes[9]! ^= 0xff; // first checksum byte, after "CGEODATA" + version 0x10
+	writeFileSync(searchIndexPathFor(binPath), bytes);
+
+	const reader = CGeoDataReader.open(binPath); // opening alone doesn't touch it
+	assert.throws(() => [...reader.search("dam")], /fixture\.search-index\.bin: .*checksum mismatch/);
+	assert.throws(() => [...reader.search("dam")], /checksum mismatch/); // every time
+	reader.useSearchIndex(undefined); // opting out still works
 	assert.deepEqual(ids(reader.search("dam", { level: "city" })), [4, 5]);
 	reader.close();
 });
@@ -232,17 +303,7 @@ const CLI = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 const tmpDir = mkdtempSync(path.join(tmpdir(), "cgeodata-search-index-"));
 const fixtureBin = path.join(tmpDir, "fixture.bin");
 const indexBin = path.join(tmpDir, "fixture.search-index.bin");
-const otherBin = path.join(tmpDir, "other.bin"); // a different .bin for checksum mismatch test
 writeFileSync(fixtureBin, APPENDIX_A_BYTES);
-// Build a second CGEODATA file from a copy of the fixture bytes. For a checksum
-// mismatch test we need an index that was built from a different file; creating
-// one from a slightly-modified place table is tricky without the compressor, so
-// we use the index of the FIRST file against a reader of itself — but then test
-// that a stale index built from fixture is rejected when used with a reader that
-// has a different checksum. We simulate this by just testing that the CLI
-// correctly passes through with the right index, and correctly errors with
-// a binary garbage index.
-writeFileSync(otherBin, APPENDIX_A_BYTES);
 
 function run(args: string[]): { stdout: string; stderr: string; status: number } {
 	const r = spawnSync(process.execPath, ["--import", "tsx", CLI, ...args], { encoding: "utf8" });
@@ -256,11 +317,19 @@ test("CLI: build-search-index writes a valid index file", () => {
 	assert.match(r.stderr, /cities/);
 });
 
-test("CLI: search --index produces same output as search without --index", () => {
-	const withoutIndex = run(["search", fixtureBin, "dam"]);
-	const withIndex = run(["search", fixtureBin, "dam", "--index", indexBin]);
-	assert.equal(withIndex.status, withoutIndex.status);
-	assert.equal(withIndex.stdout, withoutIndex.stdout);
+test("CLI: search uses the index next to the file, same output as --no-index", () => {
+	// indexBin is fixture.bin's default search-index path, so plain `search`
+	// picks it up; --index and --no-index override that either way.
+	for (const q of ["dam", "antwerp", "a"]) {
+		const linear = run(["search", fixtureBin, q, "--no-index"]);
+		for (const indexed of [
+			run(["search", fixtureBin, q]),
+			run(["search", fixtureBin, q, "--index", indexBin]),
+		]) {
+			assert.equal(indexed.status, linear.status, indexed.stderr);
+			assert.equal(indexed.stdout, linear.stdout);
+		}
+	}
 });
 
 test("CLI: search --index exits 1 when nothing matches", () => {
@@ -268,16 +337,16 @@ test("CLI: search --index exits 1 when nothing matches", () => {
 });
 
 test("CLI: search --index exits 2 on checksum mismatch", () => {
-	// Write a garbage index with CGEODATA magic but wrong checksum (all-zero).
-	// Building a real index for 'other.bin' then using it against 'fixtureBin'
-	// would give the same effect, but synthesising a minimal bad index is simpler.
 	const badIndexBin = path.join(tmpDir, "bad.search-index.bin");
-	// Build real index for fixtureBin, then flip one checksum byte.
-	const indexBytes = Buffer.from(run(["build-search-index", fixtureBin]).stdout, "binary");
+	const indexBytes = readFileSync(indexBin);
 	// The checksum is at bytes 9–16 (after "CGEODATA" + version byte 0x10).
-	indexBytes[9] ^= 0xff;
+	indexBytes[9]! ^= 0xff;
 	writeFileSync(badIndexBin, indexBytes);
 	const r = run(["search", fixtureBin, "dam", "--index", badIndexBin]);
 	assert.equal(r.status, 2);
-	assert.match(r.stderr, /checksum mismatch/);
+	assert.match(r.stderr, /--index .*bad\.search-index\.bin: .*checksum mismatch/);
+});
+
+test("CLI: search rejects --index combined with --no-index", () => {
+	assert.equal(run(["search", fixtureBin, "dam", "--index", indexBin, "--no-index"]).status, 2);
 });

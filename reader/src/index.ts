@@ -31,8 +31,8 @@ export {
 export {
 	buildSearchIndex,
 	candidatePositions,
-	loadSearchIndex,
-	type SearchIndex,
+	SearchIndex,
+	searchIndexPathFor,
 } from "./searchIndex.js";
 export { openSource, type RandomAccessSource } from "./source.js";
 export {

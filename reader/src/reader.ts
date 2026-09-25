@@ -15,10 +15,11 @@ import {
 	readNameBlock,
 	resolveIdentifier,
 } from "./placeTable.js";
+import { existsSync } from "node:fs";
 import {
 	candidatePositions,
-	loadSearchIndex,
-	type SearchIndex,
+	SearchIndex,
+	searchIndexPathFor,
 } from "./searchIndex.js";
 import { openSource, type RandomAccessSource } from "./source.js";
 import { safeInflate } from "./zlibUtil.js";
@@ -114,8 +115,14 @@ export class CGeoDataReader {
 	 * per block ever touched, whether a lookup wants one name or a walk
 	 * wants all of them. */
 	private readonly nameBlockCache = new Map<number, WeakRef<string[][]>>();
-	/** Set by `useSearchIndex()`; narrows `search()`'s city scan. */
+	/** Narrows `search()`'s city scan; see `useSearchIndex()`. */
 	private searchIndex: SearchIndex | undefined;
+	/** Whether `searchIndex` was opened here, and so is closed here. */
+	private ownsSearchIndex = false;
+	/** A `.search-index.bin` next to the file, still to be tried on the
+	 * first search that needs it. */
+	private pendingSearchIndexPath: string | undefined;
+	private cachedPlaceTableChecksum: bigint | undefined;
 
 	private constructor(
 		private readonly source: RandomAccessSource,
@@ -133,10 +140,15 @@ export class CGeoDataReader {
 			directory.placeTableLength,
 			header.keyframeExp,
 		);
-		return new CGeoDataReader(source, header, directory, placeTable);
+		const reader = new CGeoDataReader(source, header, directory, placeTable);
+		if (typeof input === "string") {
+			reader.pendingSearchIndexPath = searchIndexPathFor(input);
+		}
+		return reader;
 	}
 
 	close(): void {
+		this.useSearchIndex(undefined);
 		this.source.close?.();
 	}
 
@@ -228,44 +240,90 @@ export class CGeoDataReader {
 	/** FNV-1a 64-bit hash of the place table bytes, as defined by
 	 * binary-format.md Section B.6. Used to bind a search index to its source. */
 	placeTableChecksum(): bigint {
-		const { placeTableStart, placeTableLength } = this.directory;
-		return fnv1a64(this.source.readSync(placeTableStart, placeTableLength));
+		if (this.cachedPlaceTableChecksum === undefined) {
+			const { placeTableStart, placeTableLength } = this.directory;
+			this.cachedPlaceTableChecksum = fnv1a64(
+				this.source.readSync(placeTableStart, placeTableLength),
+			);
+		}
+		return this.cachedPlaceTableChecksum;
 	}
 
 	/**
 	 * Attaches a text search index (Appendix B, built by `buildSearchIndex`
 	 * / `cgeodata build-search-index`) so `search()` only checks the cities
 	 * the index says could match instead of every city. Results are
-	 * identical with or without it -- only the speed differs. Takes the
-	 * index file's bytes or an already-loaded index; throws if it was built
-	 * from a different file. `undefined` detaches it again.
+	 * identical with or without it -- only the speed differs.
+	 *
+	 * A reader opened from a path already picks up `<name>.search-index.bin`
+	 * next to it (`searchIndexPathFor`) on the first search that needs it;
+	 * call this to use a different index, or with `undefined` to search
+	 * without one. Takes a path (read on demand, like the .bin itself), the
+	 * file's bytes, or an open `SearchIndex` (which the caller keeps
+	 * ownership of); throws if it was built from a different file.
 	 */
-	useSearchIndex(index: Uint8Array | SearchIndex | undefined): void {
-		if (index === undefined) {
-			this.searchIndex = undefined;
-			return;
+	useSearchIndex(index: string | Uint8Array | SearchIndex | undefined): void {
+		this.pendingSearchIndexPath = undefined;
+		if (this.ownsSearchIndex) this.searchIndex?.close();
+		this.searchIndex = undefined;
+		this.ownsSearchIndex = false;
+		if (index === undefined) return;
+
+		const owned = !(index instanceof SearchIndex);
+		const opened = index instanceof SearchIndex ? index : SearchIndex.open(index);
+		try {
+			this.checkSearchIndex(opened);
+		} catch (error) {
+			if (owned) opened.close();
+			throw error;
 		}
-		const loaded = index instanceof Uint8Array ? loadSearchIndex(index) : index;
-		if (loaded.sourceChecksum !== this.placeTableChecksum()) {
+		this.searchIndex = opened;
+		this.ownsSearchIndex = owned;
+	}
+
+	/** Whether `search()` will use an index. Opens (and validates) the
+	 * `.search-index.bin` next to the file if that hasn't happened yet. */
+	get hasSearchIndex(): boolean {
+		return this.activeSearchIndex() !== undefined;
+	}
+
+	/** The attached search index, opening the one next to the file on
+	 * first use. One that's there but unusable (stale, corrupt) throws on
+	 * every call rather than silently falling back to a linear scan. */
+	private activeSearchIndex(): SearchIndex | undefined {
+		const path = this.pendingSearchIndexPath;
+		if (path !== undefined) {
+			if (!existsSync(path)) {
+				this.pendingSearchIndexPath = undefined;
+			} else {
+				try {
+					this.useSearchIndex(path);
+				} catch (error) {
+					this.pendingSearchIndexPath = path;
+					throw new Error(
+						`${path}: ${(error as Error).message} (or delete it to search without an index)`,
+					);
+				}
+			}
+		}
+		return this.searchIndex;
+	}
+
+	private checkSearchIndex(index: SearchIndex): void {
+		if (index.sourceChecksum !== this.placeTableChecksum()) {
 			throw new Error(
 				"search index was built from a different .bin file (checksum mismatch); rebuild it with build-search-index",
 			);
 		}
 		const { countryCount, totalRegions, totalCities } = this.placeTable;
 		if (
-			loaded.firstId !== countryCount + totalRegions ||
-			loaded.placeCount !== totalCities
+			index.firstId !== countryCount + totalRegions ||
+			index.placeCount !== totalCities
 		) {
 			throw new Error(
-				`search index covers places ${loaded.firstId}..${loaded.firstId + loaded.placeCount}, but this file's cities are ${countryCount + totalRegions}..${countryCount + totalRegions + totalCities}`,
+				`search index covers places ${index.firstId}..${index.firstId + index.placeCount}, but this file's cities are ${countryCount + totalRegions}..${countryCount + totalRegions + totalCities}`,
 			);
 		}
-		this.searchIndex = loaded;
-	}
-
-	/** Whether `useSearchIndex()` has attached an index. */
-	get hasSearchIndex(): boolean {
-		return this.searchIndex !== undefined;
 	}
 
 	/** Resolves one place id (Section 7.5) to its names and ancestors. */
@@ -376,7 +434,7 @@ export class CGeoDataReader {
 		text: string,
 	): IterableIterator<number> {
 		const [start, end] = this.idRange(level, filter);
-		const index = level === "city" ? this.searchIndex : undefined;
+		const index = level === "city" ? this.activeSearchIndex() : undefined;
 		const candidates = index && candidatePositions(index, text);
 		if (!index || !candidates) {
 			for (let id = start; id < end; id++) yield id;
@@ -660,11 +718,20 @@ function bisectRightMinusOne(sorted: number[], value: number): number {
 }
 
 /** FNV-1a 64-bit hash per binary-format.md Section B.6.
- * offset_basis = 0xcbf29ce484222325, prime = 0x100000001b3. */
+ * offset_basis = 0xcbf29ce484222325, prime = 0x100000001b3.
+ *
+ * Done in two 32-bit halves rather than with BigInt, which costs ~100ms
+ * on a world-sized place table: prime = 2^40 + 0x1b3, so
+ * h * prime mod 2^64 = h * 0x1b3 + (lo << 40), and every intermediate
+ * below stays under 2^53. */
 function fnv1a64(data: Uint8Array): bigint {
-	const PRIME = 0x100000001b3n;
-	const MASK = 0xffffffffffffffffn;
-	let h = 0xcbf29ce484222325n;
-	for (let i = 0; i < data.length; i++) h = ((h ^ BigInt(data[i]!)) * PRIME) & MASK;
-	return h;
+	let hi = 0xcbf29ce4;
+	let lo = 0x84222325;
+	for (let i = 0; i < data.length; i++) {
+		lo ^= data[i]!;
+		const loProduct = (lo >>> 0) * 0x1b3;
+		hi = (hi * 0x1b3 + Math.floor(loProduct / 0x100000000) + ((lo << 8) >>> 0)) >>> 0;
+		lo = loProduct >>> 0;
+	}
+	return (BigInt(hi) << 32n) | BigInt(lo);
 }

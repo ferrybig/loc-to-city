@@ -14,9 +14,11 @@ export const buildSearchIndexCmd: Command = {
 	usage: `usage: cgeodata build-search-index <file.bin> [--output <index.bin>]
 
 Builds a bigram bitmap search index over the cities in <file.bin> and
-writes it to <index.bin> (or stdout when --output is omitted). Pass the
-result to \`cgeodata search\` via \`--index\` to speed up city searches by
-50-200x for queries of 3+ characters.
+writes it to <index.bin> (or stdout when --output is omitted). Written
+next to <file.bin> as <file>.search-index.bin, \`cgeodata search\` (and any
+CGeoDataReader opened from that path) uses it automatically; elsewhere,
+pass it with \`search --index\`. Makes city searches an order of
+magnitude or more faster for queries of 3+ characters.
 
   --output F  write to F instead of stdout`,
 	run(argv) {

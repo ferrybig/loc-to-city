@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import {
 	type Command,
 	EXIT_NO_MATCH,
@@ -15,7 +14,7 @@ import {
 export const search: Command = {
 	name: "search",
 	summary: "find places whose name contains a text",
-	usage: `usage: cgeodata search <file.bin> <text> [--level country|region|city] [--country <id|name>] [--limit N] [--sort] [--locate] [--index <index.bin>] [--json]
+	usage: `usage: cgeodata search <file.bin> <text> [--level country|region|city] [--country <id|name>] [--limit N] [--sort] [--locate] [--index <index.bin> | --no-index] [--json]
 
 Prints every place (country, region or city) with a name containing
 <text>, case-insensitively, in the same tab-separated form as \`list\`.
@@ -35,10 +34,13 @@ grep's convention.
                  best match isn't necessarily the first one found.
   --locate       append a lat,lon coordinate to each result (sequential
                  chunk scan per match -- use --limit to keep it fast)
-  --index F      use a pre-built bitmap search index (built with
-                 build-search-index) to skip most of the city table;
-                 falls back to a linear scan for queries shorter than 2
-                 characters.
+  --index F      use this bitmap search index (built with
+                 build-search-index) to skip most of the city table,
+                 instead of <file>'s default <file>.search-index.bin
+                 (used automatically when it exists). Queries too short
+                 to contain a bigram still scan every city.
+  --no-index     scan every city even if a search index exists -- the
+                 baseline an index is measured against
   --json         one JSON object per match instead of the text form`,
 	run(argv) {
 		const { values, positionals } = parse(argv, {
@@ -48,6 +50,7 @@ grep's convention.
 			sort: { type: "boolean", default: false },
 			locate: { type: "boolean", default: false },
 			index: { type: "string" },
+			"no-index": { type: "boolean", default: false },
 			json: { type: "boolean", default: false },
 		});
 		const [file, text, ...extra] = positionals;
@@ -55,6 +58,8 @@ grep's convention.
 			throw new UsageError("missing <text> to search for");
 		if (extra.length > 0)
 			throw new UsageError(`unexpected argument ${JSON.stringify(extra[0])}`);
+		if (values.index !== undefined && values["no-index"])
+			throw new UsageError("--index and --no-index can't be combined");
 		const level = parseLevel(values.level);
 		const limit = values.limit === undefined ? undefined : Number(values.limit);
 		if (limit !== undefined && !(Number.isInteger(limit) && limit >= 0)) {
@@ -76,9 +81,10 @@ grep's convention.
 				sort: values.sort,
 			};
 
+			if (values["no-index"]) reader.useSearchIndex(undefined);
 			if (values.index !== undefined) {
 				try {
-					reader.useSearchIndex(readFileSync(values.index));
+					reader.useSearchIndex(values.index);
 				} catch (error) {
 					throw new Error(`--index ${values.index}: ${(error as Error).message}`);
 				}
