@@ -78,13 +78,6 @@
     </select>
   </label>
 
-  <label>Color space
-    <select id="cs-select">
-      <option value="oklch" selected>OKLCH</option>
-      <option value="hsl">HSL</option>
-    </select>
-  </label>
-
   <label>Overlay opacity <span class="row-value" id="opacity-value">65%</span>
     <input type="range" id="opacity-range" min="10" max="100" step="5" value="65">
   </label>
@@ -172,7 +165,6 @@ let tileLayer = null;
 
 const overlayToggle = document.getElementById('overlay-toggle');
 const resSelect = document.getElementById('res-select');
-const csSelect = document.getElementById('cs-select');
 const opacityRange = document.getElementById('opacity-range');
 const opacityValue = document.getElementById('opacity-value');
 
@@ -184,8 +176,7 @@ function rebuildTileLayer() {
   if (!overlayToggle.checked) return;
 
   const res = resSelect.value;
-  const cs = csSelect.value;
-  const url = `/tiles/{z}/{x}/{y}.png?res=${res}&cs=${cs}&v=1`;
+  const url = `/tiles/{z}/{x}/{y}.png?res=${res}`;
   tileLayer = L.tileLayer(url, {
     tileSize: 256,
     minZoom: 4,
@@ -196,7 +187,6 @@ function rebuildTileLayer() {
 
 overlayToggle.addEventListener('change', rebuildTileLayer);
 resSelect.addEventListener('change', rebuildTileLayer);
-csSelect.addEventListener('change', rebuildTileLayer);
 opacityRange.addEventListener('input', () => {
   opacityValue.textContent = `${opacityRange.value}%`;
   if (tileLayer) tileLayer.setOpacity(opacityRange.value / 100);
