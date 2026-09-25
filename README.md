@@ -907,7 +907,8 @@ section, since those are spec decisions rather than pipeline work.
   polygons at country/region scale.
 - **`searchPlaces` (the secondary Immich API shape from "Goal: replacing
   Immich's reverse geocoding" above).** Addressed via a bitmap search
-  index (`build-search-index` CLI command, `--index` flag for `search`),
+  index (`build-search-index` CLI command, attached with
+  `CGeoDataReader.useSearchIndex()` / the `--index` flag for `search`),
   conforming to `binary-format.md` Appendix B.
 
 ## Historical record: the Python prototype

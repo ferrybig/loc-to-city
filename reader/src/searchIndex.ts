@@ -1,6 +1,6 @@
 /**
  * Bigram bitmap search index (Appendix B of binary-format.md): a compact
- * sidecar file that lets `cgeodata search` skip ~97-99% of the city table
+ * sidecar file that lets `CGeoDataReader.search()` skip ~97-99% of the city table
  * on typical 3+ character queries.
  *
  * The file is CGEODATA kind 1 (text search index): it shares the 8-byte
@@ -13,12 +13,7 @@
  * Only cities are indexed. Countries and regions are always scanned
  * linearly regardless of the index (they are too few to matter).
  */
-import type {
-	CGeoDataReader,
-	Place,
-	PlaceLevel,
-	SearchOptions,
-} from "./reader.js";
+import type { CGeoDataReader } from "./reader.js";
 import { readVarint, writeVarint } from "./varint.js";
 
 // ── Alphabet (Section B.2) ────────────────────────────────────────────────────
@@ -173,10 +168,9 @@ export function buildSearchIndex(reader: CGeoDataReader): Uint8Array {
 // ── Loader ────────────────────────────────────────────────────────────────────
 
 /** Parses a CGEODATA kind-1 search index file and returns a `SearchIndex`
- * ready for `searchWithIndex`. Validates signature, kind, version, ngram,
- * group_size, and file length. Does NOT verify the source checksum — callers
- * that want that guarantee should compare `index.sourceChecksum` against
- * `reader.placeTableChecksum()` before use. */
+ * ready for `CGeoDataReader.useSearchIndex()`. Validates signature, kind, version, ngram,
+ * group_size, and file length. Does NOT verify the source checksum --
+ * `useSearchIndex()` does that against the reader it's attached to. */
 export function loadSearchIndex(data: Uint8Array): SearchIndex {
 	if (data.length < SIGNATURE.length + 1) {
 		throw new Error("search index file is too short to be valid");
@@ -231,13 +225,12 @@ export function loadSearchIndex(data: Uint8Array): SearchIndex {
 	return { sourceChecksum, ngram, firstId, placeCount, groupSize, listCount, bitsPerList, bytesPerList, bits };
 }
 
-// ── Searcher ──────────────────────────────────────────────────────────────────
+// ── Candidate lookup (Section B.7) ───────────────────────────────────────────
 
 /** ANDs the named lists together into one buffer of `bytesPerList` bytes.
- * Returns undefined when there are no lists to AND. Copies list[0] before
- * ANDing to avoid mutating the source buffer (Section B.7 step 4). */
-function andLists(bits: Uint8Array, bytesPerList: number, listIds: readonly number[]): Uint8Array | undefined {
-	if (listIds.length === 0) return undefined;
+ * Copies list[0] before ANDing to avoid mutating the source buffer
+ * (Section B.7 step 4). */
+function andLists(bits: Uint8Array, bytesPerList: number, listIds: readonly number[]): Uint8Array {
 	const result = new Uint8Array(bytesPerList);
 	result.set(bits.subarray(listIds[0]! * bytesPerList, (listIds[0]! + 1) * bytesPerList));
 	for (let k = 1; k < listIds.length; k++) {
@@ -260,158 +253,26 @@ function expandCandidates(mask: Uint8Array, index: SearchIndex): number[] {
 	return positions;
 }
 
-// ── Scoring (mirrors reader.ts's searchRanked internals) ─────────────────────
-
-function tokenize(text: string): string[] {
-	return text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t.length > 0);
-}
-
-function containsTokenRun(haystack: string[], needle: readonly string[]): boolean {
-	if (needle.length === 0 || needle.length > haystack.length) return false;
-	outer: for (let i = 0; i + needle.length <= haystack.length; i++) {
-		for (let j = 0; j < needle.length; j++) {
-			if (haystack[i + j] !== needle[j]) continue outer;
-		}
-		return true;
-	}
-	return false;
-}
-
-function nameScore(names: string[], needle: string, needleTokens: readonly string[]): number {
-	let best = 0;
-	for (const name of names) {
-		const lower = name.toLowerCase();
-		if (lower === needle) return 4;
-		if (best < 2 && containsTokenRun(tokenize(name), needleTokens)) best = 2;
-		if (best < 1 && lower.includes(needle)) best = 1;
-	}
-	return best;
-}
-
-// Must stay in sync with LEVEL_BONUS in reader.ts.
-const LEVEL_BONUS: Record<PlaceLevel, number> = { city: 4, region: 2, country: 1 };
-
-// ── Public search entry point ─────────────────────────────────────────────────
-
 /**
- * Drop-in replacement for `CGeoDataReader.search()` that uses `index` to
- * skip most of the city table. Falls back to `reader.search()` when:
- *   - the query is shorter than 2 characters (no bigrams to extract), or
- *   - `--level` is `country` or `region` (the index only covers cities).
+ * The positions (ascending, relative to `index.firstId`) of every indexed
+ * place whose names could contain `text` -- a superset of the real
+ * matches, which the caller still has to check name by name. Undefined
+ * when `text` is too short to contain a single n-gram, i.e. the index
+ * can't rule anything out.
  *
- * Countries and regions are always scanned linearly and yielded before city
- * results when not sorted, matching `reader.search()`'s id-order behaviour.
- * All filters (`--level`, `--country`, `--sort`, `--limit`) work identically
- * with or without the index (Section B.7 step 7).
+ * `CGeoDataReader.search()` is what uses this once an index is attached
+ * with `useSearchIndex()`; it's exported for callers that want the raw
+ * candidate set.
  */
-export function* searchWithIndex(
-	reader: CGeoDataReader,
-	index: SearchIndex,
-	text: string,
-	options: SearchOptions = {},
-): IterableIterator<Place> {
+export function candidatePositions(index: SearchIndex, text: string): number[] | undefined {
 	const symbols = symbolSequence(text);
-	const canUseIndex =
-		symbols.length >= 2 &&
-		options.level !== "country" &&
-		options.level !== "region";
-
-	if (!canUseIndex) {
-		yield* reader.search(text, options);
-		return;
-	}
-
-	// Collect distinct bigram list ids.
+	const n = index.ngram;
 	const seen = new Set<number>();
-	for (let i = 0; i + 1 < symbols.length; i++) seen.add(symbols[i]! * ALPHABET_SIZE + symbols[i + 1]!);
-	const listIds = [...seen];
-
-	const mask = andLists(index.bits, index.bytesPerList, listIds);
-	// mask === undefined only when listIds is empty — can't happen here since
-	// symbols.length >= 2 guarantees at least one bigram. Treat as all-candidates.
-	const candidates = mask ? expandCandidates(mask, index) : range(index.placeCount);
-	const needle = text.toLowerCase();
-
-	if (!options.sort) {
-		yield* unsortedSearch(reader, index, candidates, needle, options);
-		return;
+	for (let i = 0; i + n <= symbols.length; i++) {
+		let list = 0;
+		for (let j = 0; j < n; j++) list = list * ALPHABET_SIZE + symbols[i + j]!;
+		seen.add(list);
 	}
-	yield* sortedSearch(reader, index, candidates, needle, options);
-}
-
-function* unsortedSearch(
-	reader: CGeoDataReader,
-	index: SearchIndex,
-	candidates: number[],
-	needle: string,
-	options: SearchOptions,
-): IterableIterator<Place> {
-	let remaining = options.limit ?? Infinity;
-	// Drop limit/sort — we control pacing and sorting ourselves.
-	const { limit: _l, sort: _s, ...subOpts } = options;
-
-	// Countries and regions first (mirroring reader.search()'s id order).
-	if (options.level !== "city") {
-		for (const place of reader.search(needle, { ...subOpts, level: "country" })) {
-			yield place;
-			if (--remaining <= 0) return;
-		}
-		for (const place of reader.search(needle, { ...subOpts, level: "region" })) {
-			yield place;
-			if (--remaining <= 0) return;
-		}
-	}
-
-	for (const position of candidates) {
-		const id = index.firstId + position;
-		if (!reader.placeNames(id).some((name) => name.toLowerCase().includes(needle))) continue;
-		const place = reader.place(id);
-		if (options.country !== undefined && place.country.id !== options.country) continue;
-		if (options.region !== undefined && place.region?.id !== options.region) continue;
-		yield place;
-		if (--remaining <= 0) return;
-	}
-}
-
-function* sortedSearch(
-	reader: CGeoDataReader,
-	index: SearchIndex,
-	candidates: number[],
-	needle: string,
-	options: SearchOptions,
-): IterableIterator<Place> {
-	const needleTokens = tokenize(needle);
-	const scored: { id: number; score: number }[] = [];
-	const { limit: _l, sort: _s, ...subOpts } = options;
-
-	if (options.level !== "city") {
-		for (const place of reader.search(needle, { ...subOpts, level: "country" })) {
-			scored.push({ id: place.id, score: nameScore(place.names, needle, needleTokens) + LEVEL_BONUS.country });
-		}
-		for (const place of reader.search(needle, { ...subOpts, level: "region" })) {
-			scored.push({ id: place.id, score: nameScore(place.names, needle, needleTokens) + LEVEL_BONUS.region });
-		}
-	}
-
-	for (const position of candidates) {
-		const id = index.firstId + position;
-		const names = reader.placeNames(id);
-		const quality = nameScore(names, needle, needleTokens);
-		if (quality === 0) continue;
-		const place = reader.place(id);
-		if (options.country !== undefined && place.country.id !== options.country) continue;
-		if (options.region !== undefined && place.region?.id !== options.region) continue;
-		scored.push({ id, score: quality + LEVEL_BONUS.city });
-	}
-
-	scored.sort((a, b) => b.score - a.score || a.id - b.id);
-	let remaining = options.limit ?? Infinity;
-	for (const { id } of scored) {
-		if (--remaining < 0) return;
-		yield reader.place(id);
-	}
-}
-
-function range(n: number): number[] {
-	return Array.from({ length: n }, (_, i) => i);
+	if (seen.size === 0) return undefined;
+	return expandCandidates(andLists(index.bits, index.bytesPerList, [...seen]), index);
 }

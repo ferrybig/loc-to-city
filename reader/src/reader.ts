@@ -15,6 +15,11 @@ import {
 	readNameBlock,
 	resolveIdentifier,
 } from "./placeTable.js";
+import {
+	candidatePositions,
+	loadSearchIndex,
+	type SearchIndex,
+} from "./searchIndex.js";
 import { openSource, type RandomAccessSource } from "./source.js";
 import { safeInflate } from "./zlibUtil.js";
 
@@ -109,6 +114,8 @@ export class CGeoDataReader {
 	 * per block ever touched, whether a lookup wants one name or a walk
 	 * wants all of them. */
 	private readonly nameBlockCache = new Map<number, WeakRef<string[][]>>();
+	/** Set by `useSearchIndex()`; narrows `search()`'s city scan. */
+	private searchIndex: SearchIndex | undefined;
 
 	private constructor(
 		private readonly source: RandomAccessSource,
@@ -225,6 +232,42 @@ export class CGeoDataReader {
 		return fnv1a64(this.source.readSync(placeTableStart, placeTableLength));
 	}
 
+	/**
+	 * Attaches a text search index (Appendix B, built by `buildSearchIndex`
+	 * / `cgeodata build-search-index`) so `search()` only checks the cities
+	 * the index says could match instead of every city. Results are
+	 * identical with or without it -- only the speed differs. Takes the
+	 * index file's bytes or an already-loaded index; throws if it was built
+	 * from a different file. `undefined` detaches it again.
+	 */
+	useSearchIndex(index: Uint8Array | SearchIndex | undefined): void {
+		if (index === undefined) {
+			this.searchIndex = undefined;
+			return;
+		}
+		const loaded = index instanceof Uint8Array ? loadSearchIndex(index) : index;
+		if (loaded.sourceChecksum !== this.placeTableChecksum()) {
+			throw new Error(
+				"search index was built from a different .bin file (checksum mismatch); rebuild it with build-search-index",
+			);
+		}
+		const { countryCount, totalRegions, totalCities } = this.placeTable;
+		if (
+			loaded.firstId !== countryCount + totalRegions ||
+			loaded.placeCount !== totalCities
+		) {
+			throw new Error(
+				`search index covers places ${loaded.firstId}..${loaded.firstId + loaded.placeCount}, but this file's cities are ${countryCount + totalRegions}..${countryCount + totalRegions + totalCities}`,
+			);
+		}
+		this.searchIndex = loaded;
+	}
+
+	/** Whether `useSearchIndex()` has attached an index. */
+	get hasSearchIndex(): boolean {
+		return this.searchIndex !== undefined;
+	}
+
 	/** Resolves one place id (Section 7.5) to its names and ancestors. */
 	place(id: number): Place {
 		const resolved = resolveIdentifier(this.placeTable, id);
@@ -266,8 +309,9 @@ export class CGeoDataReader {
 
 	/**
 	 * Case-insensitive substring match against every name of every place
-	 * (all levels unless filtered). A plain linear scan over the name
-	 * blocks -- the baseline any later search index is measured against.
+	 * (all levels unless filtered). Without a search index this is a plain
+	 * linear scan over the name blocks; with one (`useSearchIndex()`), the
+	 * city scan only visits the index's candidates. Same results either way.
 	 */
 	*search(text: string, options: SearchOptions = {}): IterableIterator<Place> {
 		if (options.sort) {
@@ -279,8 +323,7 @@ export class CGeoDataReader {
 		if (remaining <= 0) return;
 		for (const level of LEVELS) {
 			if (options.level !== undefined && options.level !== level) continue;
-			const [start, end] = this.idRange(level, options);
-			for (let id = start; id < end; id++) {
+			for (const id of this.searchScope(level, options, text)) {
 				// Match on the bare names first; resolving parents is only worth
 				// doing for the few that hit.
 				if (!this.names(id).some((name) => name.toLowerCase().includes(needle)))
@@ -304,8 +347,7 @@ export class CGeoDataReader {
 		const scored: Array<{ id: number; score: number }> = [];
 		for (const level of LEVELS) {
 			if (options.level !== undefined && options.level !== level) continue;
-			const [start, end] = this.idRange(level, options);
-			for (let id = start; id < end; id++) {
+			for (const id of this.searchScope(level, options, text)) {
 				const quality = Math.max(
 					0,
 					...this.names(id).map((name) =>
@@ -322,6 +364,29 @@ export class CGeoDataReader {
 		for (const { id } of scored) {
 			if (remaining-- <= 0) return;
 			yield this.place(id);
+		}
+	}
+
+	/** The ids (ascending) of `level` under the filter that `search()` has
+	 * to check for `text`: the whole `idRange`, or -- for cities, with a
+	 * search index attached -- just the index's candidates within it. */
+	private *searchScope(
+		level: PlaceLevel,
+		filter: PlaceFilter,
+		text: string,
+	): IterableIterator<number> {
+		const [start, end] = this.idRange(level, filter);
+		const index = level === "city" ? this.searchIndex : undefined;
+		const candidates = index && candidatePositions(index, text);
+		if (!index || !candidates) {
+			for (let id = start; id < end; id++) yield id;
+			return;
+		}
+		for (const position of candidates) {
+			const id = index.firstId + position;
+			if (id < start) continue;
+			if (id >= end) return;
+			yield id;
 		}
 	}
 

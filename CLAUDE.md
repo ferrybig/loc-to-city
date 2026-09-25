@@ -86,9 +86,14 @@ npx tsx reader/src/cli.ts show   data/world.bin 192858      # a place id from an
 npx tsx reader/src/cli.ts chunk  data/world.bin 3232        # the chunk index lookup printed
 ```
 
-`<file.bin>` may be `-` for stdin. `search` is deliberately an
-unindexed linear scan: it's the baseline any future search index gets
-measured against. `--sort` scores each match -- exact name match beats
+`<file.bin>` may be `-` for stdin. `search` is a linear scan over the
+name blocks unless a text search index (`binary-format.md` Appendix B,
+built by `build-search-index --output <file>`) is attached with
+`CGeoDataReader.useSearchIndex()` (the CLI's `--index`); the index only
+narrows which cities get checked, so results must stay identical with
+and without it -- `reader/test/searchIndex.test.ts` asserts that. The
+demo server picks up `<dataset>.search-index.bin` next to its `.bin`
+automatically. `--sort` scores each match -- exact name match beats
 whole-word match beats plain substring, city beats region beats country
 (`nameMatchQuality`/`LEVEL_BONUS` in `reader/src/reader.ts`) -- and has
 to score every match before yielding any, since the best one isn't

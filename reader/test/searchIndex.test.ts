@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { CGeoDataReader, type Place } from "../src/index.js";
 import {
-	buildSearchIndex,
-	loadSearchIndex,
-	searchWithIndex,
-} from "../src/searchIndex.js";
+	CGeoDataReader,
+	type Place,
+	type SearchOptions,
+} from "../src/index.js";
+import { buildSearchIndex, loadSearchIndex } from "../src/searchIndex.js";
 import { APPENDIX_A_BYTES } from "./fixtures/appendixA.js";
 
 function ids(places: Iterable<Place>): number[] {
@@ -103,91 +103,127 @@ test("placeNames: throws RangeError for out-of-range id", () => {
 	reader.close();
 });
 
-// ── searchWithIndex correctness ───────────────────────────────────────────────
+// ── search() with an attached index ───────────────────────────────────────────
 
 // The Appendix A fixture has cities: id=4 (Amsterdam), id=5 (Zaandam),
 // id=6 (Antwerpen — a city in Belgium).
 
-function makeIndexedReader() {
-	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
-	const index = loadSearchIndex(buildSearchIndex(reader));
-	return { reader, index };
+/** Two readers over the same bytes: one with an index attached, one
+ * without, so every test compares indexed against linear search. */
+function makeReaders(bytes: Uint8Array | string = APPENDIX_A_BYTES) {
+	const indexed = CGeoDataReader.open(bytes);
+	indexed.useSearchIndex(buildSearchIndex(indexed));
+	const linear = CGeoDataReader.open(bytes);
+	return {
+		indexed,
+		linear,
+		close() {
+			indexed.close();
+			linear.close();
+		},
+	};
 }
 
-test("searchWithIndex: 'dam' matches same city ids as reader.search", () => {
-	const { reader, index } = makeIndexedReader();
+function assertSameSearch(
+	readers: ReturnType<typeof makeReaders>,
+	text: string,
+	options: SearchOptions = {},
+): void {
+	// Order matters too (id order, or rank order with sort), so no sorting here.
 	assert.deepEqual(
-		ids(searchWithIndex(reader, index, "dam", { level: "city" })),
-		ids(reader.search("dam", { level: "city" })),
+		[...readers.indexed.search(text, options)].map((p) => p.id),
+		[...readers.linear.search(text, options)].map((p) => p.id),
+		`mismatch for ${JSON.stringify(text)} ${JSON.stringify(options)}`,
 	);
+}
+
+test("useSearchIndex: attaches an index built from the same file", () => {
+	const readers = makeReaders();
+	assert.equal(readers.indexed.hasSearchIndex, true);
+	assert.equal(readers.linear.hasSearchIndex, false);
+	readers.indexed.useSearchIndex(undefined);
+	assert.equal(readers.indexed.hasSearchIndex, false);
+	readers.close();
+});
+
+test("useSearchIndex: accepts an already-loaded index", () => {
+	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
+	reader.useSearchIndex(loadSearchIndex(buildSearchIndex(reader)));
+	assert.deepEqual(ids(reader.search("dam", { level: "city" })), [4, 5]);
 	reader.close();
 });
 
-test("searchWithIndex: all-levels result matches reader.search", () => {
-	const { reader, index } = makeIndexedReader();
-	assert.deepEqual(ids(searchWithIndex(reader, index, "dam")), ids(reader.search("dam")));
+test("useSearchIndex: rejects an index with the wrong checksum", () => {
+	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
+	const bytes = buildSearchIndex(reader);
+	bytes[9]! ^= 0xff; // first checksum byte, after "CGEODATA" + version 0x10
+	assert.throws(() => reader.useSearchIndex(bytes), /checksum mismatch/);
+	assert.equal(reader.hasSearchIndex, false);
 	reader.close();
 });
 
-test("searchWithIndex: 'antwerp' scans country+region linearly plus city via index", () => {
-	const { reader, index } = makeIndexedReader();
-	assert.deepEqual(ids(searchWithIndex(reader, index, "antwerp")), ids(reader.search("antwerp")));
-	reader.close();
+test("search with index: 'dam' matches the linear scan", () => {
+	const readers = makeReaders();
+	assertSameSearch(readers, "dam", { level: "city" });
+	assertSameSearch(readers, "dam");
+	readers.close();
 });
 
-test("searchWithIndex: short query (<2 chars) falls back to linear scan", () => {
-	const { reader, index } = makeIndexedReader();
-	assert.deepEqual(ids(searchWithIndex(reader, index, "a")), ids(reader.search("a")));
-	reader.close();
+test("search with index: 'antwerp' scans country+region linearly plus city via index", () => {
+	const readers = makeReaders();
+	assertSameSearch(readers, "antwerp");
+	readers.close();
 });
 
-test("searchWithIndex: --limit is respected", () => {
-	const { reader, index } = makeIndexedReader();
-	const all = ids(searchWithIndex(reader, index, "a", { level: "city" }));
-	const limited = [...searchWithIndex(reader, index, "a", { level: "city", limit: 1 })];
-	assert.equal(limited.length, Math.min(1, all.length));
-	reader.close();
+test("search with index: short query (<2 chars) falls back to linear scan", () => {
+	const readers = makeReaders();
+	assertSameSearch(readers, "a");
+	readers.close();
 });
 
-test("searchWithIndex: --sort results match reader.search sorted results", () => {
-	const { reader, index } = makeIndexedReader();
-	assert.deepEqual(
-		ids(searchWithIndex(reader, index, "dam", { sort: true })),
-		ids(reader.search("dam", { sort: true })),
-	);
-	reader.close();
+test("search with index: --limit is respected", () => {
+	const readers = makeReaders();
+	assertSameSearch(readers, "a", { level: "city", limit: 1 });
+	assertSameSearch(readers, "dam", { limit: 1 });
+	readers.close();
 });
 
-test("searchWithIndex: no match returns empty", () => {
-	const { reader, index } = makeIndexedReader();
-	assert.equal([...searchWithIndex(reader, index, "xqzqxqz")].length, 0);
-	reader.close();
+test("search with index: --sort matches the linear scan's ranking", () => {
+	const readers = makeReaders();
+	assertSameSearch(readers, "dam", { sort: true });
+	assertSameSearch(readers, "antwerpen", { sort: true, limit: 2 });
+	readers.close();
+});
+
+test("search with index: --country narrows the city candidates", () => {
+	const readers = makeReaders();
+	for (const country of [0, 1]) {
+		assertSameSearch(readers, "dam", { country });
+		assertSameSearch(readers, "antwerp", { country, level: "city" });
+	}
+	readers.close();
+});
+
+test("search with index: no match returns empty", () => {
+	const readers = makeReaders();
+	assert.equal([...readers.indexed.search("xqzqxqz")].length, 0);
+	readers.close();
 });
 
 // ── Zuid-Holland integration test (skipped when file is absent) ──────────────
 
 const ZH_PATH = fileURLToPath(new URL("../../data/zuid-holland.bin", import.meta.url));
 
-try {
-	const zhReader = CGeoDataReader.open(ZH_PATH);
-	const { cities: zhCities } = zhReader.placeCounts;
-	zhReader.close();
-
-	test(`searchWithIndex vs reader.search on zuidholland.bin (${zhCities} cities)`, () => {
-		const reader = CGeoDataReader.open(ZH_PATH);
-		const index = loadSearchIndex(buildSearchIndex(reader));
-		const QUERIES = ["amsterdam", "dam", "rotterdam", "gouda", "leiden", "nieuw"];
+if (existsSync(ZH_PATH)) {
+	test("search with index vs linear scan on zuid-holland.bin", () => {
+		const readers = makeReaders(ZH_PATH);
+		const QUERIES = ["amsterdam", "dam", "rotterdam", "gouda", "leiden", "nieuw", "den haag"];
 		for (const q of QUERIES) {
-			assert.deepEqual(
-				ids(searchWithIndex(reader, index, q, { level: "city" })),
-				ids(reader.search(q, { level: "city" })),
-				`mismatch for query ${JSON.stringify(q)}`,
-			);
+			assertSameSearch(readers, q, { level: "city" });
+			assertSameSearch(readers, q, { sort: true, limit: 5 });
 		}
-		reader.close();
+		readers.close();
 	});
-} catch {
-	// File not present; skip silently.
 }
 
 // ── CLI integration: build-search-index + search --index ─────────────────────

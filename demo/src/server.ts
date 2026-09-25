@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 /**
  * Tiny stdlib-only web server for the CGEODATA demo: serves the Leaflet
  * page, a JSON query API, and a tile overlay -- the JS/TS equivalent of
@@ -10,7 +10,8 @@ import { readFileSync } from "node:fs";
  *
  * dataset defaults to data/zuid-holland.bin (see the plan / README for how
  * that's built); pass a different .bin path to point at a later, larger
- * build without changing any code.
+ * build without changing any code. A `<dataset>.search-index.bin` next to
+ * it (from `cgeodata build-search-index`) is picked up automatically.
  */
 import { createServer } from "node:http";
 import path from "node:path";
@@ -33,6 +34,20 @@ function main(): void {
 
 	console.error(`Loading ${datasetPath}...`);
 	const reader = CGeoDataReader.open(datasetPath);
+	// Optional sidecar from `cgeodata build-search-index`: data/world.bin
+	// pairs with data/world.search-index.bin. Only speeds up /api/search;
+	// results are the same without it.
+	const indexPath = `${datasetPath.replace(/\.bin$/, "")}.search-index.bin`;
+	if (existsSync(indexPath)) {
+		try {
+			reader.useSearchIndex(readFileSync(indexPath));
+			console.error(`Using search index ${indexPath}.`);
+		} catch (error) {
+			console.error(
+				`Ignoring search index ${indexPath}: ${(error as Error).message}`,
+			);
+		}
+	}
 	console.error("Loaded.");
 	const piscina = new Piscina({
 		filename: path.resolve(__dirname, "tile-worker.js"),

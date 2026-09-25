@@ -30,9 +30,9 @@ export {
 } from "./reader.js";
 export {
 	buildSearchIndex,
+	candidatePositions,
 	loadSearchIndex,
 	type SearchIndex,
-	searchWithIndex,
 } from "./searchIndex.js";
 export { openSource, type RandomAccessSource } from "./source.js";
 export {

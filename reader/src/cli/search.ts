@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { loadSearchIndex, searchWithIndex } from "../searchIndex.js";
 import {
 	type Command,
 	EXIT_NO_MATCH,
@@ -77,21 +76,16 @@ grep's convention.
 				sort: values.sort,
 			};
 
-			const results =
-				values.index !== undefined
-					? (() => {
-							const index = loadSearchIndex(readFileSync(values.index));
-							if (index.sourceChecksum !== reader.placeTableChecksum()) {
-								throw new Error(
-									`--index ${values.index} was built from a different .bin file (checksum mismatch); rebuild with build-search-index`,
-								);
-							}
-							return searchWithIndex(reader, index, text, searchOptions);
-						})()
-					: reader.search(text, searchOptions);
+			if (values.index !== undefined) {
+				try {
+					reader.useSearchIndex(readFileSync(values.index));
+				} catch (error) {
+					throw new Error(`--index ${values.index}: ${(error as Error).message}`);
+				}
+			}
 
 			let matched = 0;
-			for (const place of results) {
+			for (const place of reader.search(text, searchOptions)) {
 				matched++;
 				if (values.json) {
 					if (values.locate) {

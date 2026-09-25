@@ -20,3 +20,4 @@ test-results/
 data/world_high_res.bin
 data/world_no_chunk.bin
 cgeodata-demo.tar.gz
+data/world.search-index.bin
