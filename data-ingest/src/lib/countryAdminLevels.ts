@@ -70,6 +70,13 @@ export interface CountryAdminLevels {
  *   county whose representative point is unparished (Worcestershire)
  *   also gets added, but it's the largest candidate, so it only surfaces
  *   where no parish or district covers a cell.
+ * - DE: Germany's 3 city-states (Berlin, Hamburg, Bremen) are OSM
+ *   admin_level=4 -- the same level as every other Land -- so they lost
+ *   the city slot entirely to the region tier. Bremen has a separate,
+ *   place=city-tagged admin_level=6 relation for the city itself
+ *   (distinct from the Land); city [8, 6] gap-fills it in. Berlin and
+ *   Hamburg have no relation below level 4 at all -- no level choice
+ *   fixes those two, see README's "Open" list.
  *
  * Entries whose comment shows a coverage figure far over 100% (e.g. small
  * multi-island nations like the Maldives or Cook Islands) reflect
@@ -130,7 +137,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   CV: { region: [6], city: [9] }, // region 103.4%, city 6.3%
   CY: { region: [6], city: [8] }, // region 107.9%, city 104.7%
   CZ: { region: [4], city: [8] }, // region 100.1%, city 99.3%
-  DE: { region: [4], city: [8] }, // region 106.6%, city 97.8%
+  DE: { region: [4], city: [8, 6] }, // region 106.6%, city 97.8% (8) + gap-fill 6 -- see override note above
   DJ: { region: [4], city: [6] }, // region 99.2%, city 79.2%
   DK: { region: [4], city: [7] }, // region 100.8%, city 100.8%
   DM: { region: [4], city: [6] }, // region 102.9%, city 0.9%

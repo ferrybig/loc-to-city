@@ -718,6 +718,13 @@ section, since those are spec decisions rather than pipeline work.
   city boundary is the only level-5 feature in Yemen). Yemen more
   broadly: level 6 (districts, 99.5%) splits the larger cities while being
   about right for rural areas, and no single level fits both.
+  Germany has two of its own: Berlin (52.520008, 13.404954) and Hamburg
+  (53.551086, 9.993682) are city-states with only one OSM admin relation,
+  at `admin_level=4` -- same level as every other German Land -- so they
+  resolve to `region: Berlin` / `region: Hamburg`, `city: -`. Unlike
+  Bremen (see "Resolved"), confirmed there is no second, lower-level
+  relation for either city anywhere in the German extract -- nothing to
+  gap-fill in.
 - **Towns mapped only as place points can't be returned.** Shire (14.083301,
   38.281860) and Yebokile (10.447974, 37.896309) in Ethiopia have no
   boundary relation in OSM -- the whole of Ethiopia has two polygons
@@ -735,6 +742,30 @@ section, since those are spec decisions rather than pipeline work.
   `lookup` at each city's own coordinates returns `city: -`. 66.6%
   coverage nationally apparently doesn't guarantee the largest metros are
   among the covered candidates; not yet investigated further.
+- **`place=city/town/village` was evaluated as an alternative to
+  `admin_level` matching, and rejected for geometry -- but is a real
+  signal worth using differently.** The idea: instead of picking one
+  `admin_level` per country, filter OSM for whatever's tagged
+  `place=city`/`town`/`village` and use those boundaries directly.
+  Tested on the Netherlands extract (`osmium tags-filter ... place=city,town,village`,
+  via `Dockerfile.tools`, same as the boundary extraction already does):
+  8,492 of 8,624 matches (98.5%) are bare nodes -- a single label point,
+  no polygon at all, i.e. exactly the nearest-labeled-point approach this
+  whole project exists to replace (see "Why nearest-point is wrong"). The
+  131 that do carry a polygon are tagged `boundary=place` with no
+  `admin_level`, and are informal settlement-extent outlines drawn
+  separately from the real administrative boundaries already in use, not
+  a richer version of the same geometry. So `place=*` can't replace
+  `admin_level` as the geometry source. What it *can* do: disambiguate
+  which existing `admin_level` relation is "the real city" when a country
+  has more than one plausible candidate at different levels for the same
+  settlement -- this is exactly how Bremen's fix was found (its
+  `admin_level=6` relation, not the `admin_level=4` Land, carries
+  `place=city`; see "Resolved"). Cross-referencing `place=city/town/village`
+  tags onto the existing boundary corpus (already extracted, no new OSM
+  pull needed) as a tie-break/confirmation signal, rather than a
+  standalone geometry source, is the version of this idea worth pursuing
+  later.
 
 ### Resolved
 
@@ -766,6 +797,17 @@ section, since those are spec decisions rather than pipeline work.
     Malvern). Spot-checked that no two-tier county leaks into the city
     slot: Worcestershire gets added but loses to the smaller district or
     parish wherever one exists (Worcester, Redditch, Kidderminster).
+
+- **Bremen (the city) resolved to `city: -`.** Germany's 3 city-states
+  are OSM `admin_level=4`, the same level as every other Land, so they
+  lost the city slot to the region tier -- Bremen (53.079296, 8.801694)
+  returned `region: Bremen, city: -`. Unlike Berlin and Hamburg (still
+  open, see above), Bremen has a second, `place=city`-tagged relation at
+  `admin_level=6` for the city itself, distinct from the Land polygon.
+  `DE: { city: [8, 6] }` gap-fills it in: Bremen now resolves to
+  `city: Bremen`. Verified the gap-fill doesn't leak a Landkreis name
+  into normal cities elsewhere (Munich, Cologne, Frankfurt, Hannover all
+  unchanged, still resolving via the level-8 primary).
 
 - **Regions with no cities were dropped from the build (Libya, Egypt,
   Chad, Sudan, and 110 other countries).** Tripoli, Cairo, N'Djamena and
