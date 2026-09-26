@@ -677,6 +677,11 @@ function containsTokenRun(
  * beats a whole-word match (2) beats a plain substring match (1); no
  * match at all is 0. `needle` and `needleTokens` are precomputed once
  * per search, not once per name -- `needle` must already be lowercase.
+ *
+ * Only a substring match counts at all, so sorting ranks the same set
+ * unsorted search finds: without that, " di " would match "Di" by its
+ * tokens alone, and a search index (which only guarantees substring
+ * candidates, Appendix B.7) would miss it.
  */
 function nameMatchQuality(
 	name: string,
@@ -684,10 +689,10 @@ function nameMatchQuality(
 	needleTokens: readonly string[],
 ): number {
 	const lower = name.toLowerCase();
+	if (!lower.includes(needle)) return 0;
 	if (lower === needle) return 4;
 	if (containsTokenRun(tokenize(name), needleTokens)) return 2;
-	if (lower.includes(needle)) return 1;
-	return 0;
+	return 1;
 }
 
 function checkId(id: number, lo: number, hi: number, what: string): void {

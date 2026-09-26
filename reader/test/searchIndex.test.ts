@@ -275,6 +275,15 @@ test("search with index: --country narrows the city candidates", () => {
 	readers.close();
 });
 
+test("search with index: sorted queries with edge spaces match the linear scan", () => {
+	const readers = makeReaders();
+	for (const q of [" amsterdam", "amsterdam ", " dam", "dam "]) {
+		assertSameSearch(readers, q, { sort: true });
+		assertSameSearch(readers, q);
+	}
+	readers.close();
+});
+
 test("search with index: no match returns empty", () => {
 	const readers = makeReaders();
 	assert.equal([...readers.indexed.search("xqzqxqz")].length, 0);

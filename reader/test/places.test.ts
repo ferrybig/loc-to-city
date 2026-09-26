@@ -71,6 +71,19 @@ test("search({ sort: true }): equal name-match quality is broken by level, then 
   assert.deepEqual(ids(reader.search("nothing here", { sort: true })), []);
 });
 
+test("search({ sort: true }) ranks the same match set as unsorted search", () => {
+  // Leading/trailing spaces keep "amsterdam"'s tokens but aren't a
+  // substring of "Amsterdam": neither search may match it.
+  for (const q of [" amsterdam", "amsterdam ", " antwerp ", "antwerp", "dam"]) {
+    assert.deepEqual(
+      new Set(ids(reader.search(q, { sort: true }))),
+      new Set(ids(reader.search(q))),
+      JSON.stringify(q),
+    );
+  }
+  assert.deepEqual(ids(reader.search(" amsterdam", { sort: true })), []);
+});
+
 test("search({ sort: true }) on the real worldwide dataset: an exact name match outranks a fuzzier one", () => {
   // Unlike Appendix A, the real dataset has several places whose name
   // merely contains "amsterdam" (Nieuw Amsterdam, Amsterdam-Duivendrecht,
