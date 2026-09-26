@@ -248,6 +248,20 @@ Australia → gazetted localities) — the algorithm is finding whatever OSM
 admin level actually tessellates each country, not applying one fixed
 level worldwide.
 
+**Per-region `city` overrides** (`CountryAdminLevels.overrides`, keyed by
+region name — see `countryAdminLevels.ts`'s doc comment): for the rare
+case where one level doesn't fit a whole country (New York's real
+municipal tier is `admin_level=7`, not the rest-of-the-US `8`). A listed
+region's own `[primary, ...gapFill]` list replaces the country's `city`
+vote entirely for candidates resolving to it — first level primary
+unconditionally, later levels gap-fill *within that region only*. Two
+flatter designs (a country-wide multi-level `city` list; a region
+override with every level primary at once) were tried and both caused
+measured regressions elsewhere — see README's "New York" entry — because
+a large candidate level can out-vote a real, smaller one it geographically
+contains at their shared boundary cells once both are eligible for the
+same cell; `[primary, ...gapFill]` order is what prevents that.
+
 **Multi-file country handling.** OSM relations for a single country (e.g.
 Russia, Turkey) can be split across multiple continent extract files with
 zero overlap — each file has a complete, non-overlapping slice. Resolved

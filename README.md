@@ -667,38 +667,6 @@ section, since those are spec decisions rather than pipeline work.
   discarded by `adminBoundaryIndex.ts`'s `PLAUSIBLE_ADMIN_LEVELS` prefilter
   (levels 4-11 only). This and the item above both want the same new OSM
   `admin_level=2` country source, so they're natural to tackle together.
-- **New York (and likely other New England-convention US states) resolve
-  at region grain, not city.** See the US entry under "Resolved" below --
-  New York's real municipal tier is OSM `admin_level=7`, not the
-  nationally-correct 8, and the current one-level-per-*country* model in
-  `countryAdminLevels.ts` can't express a per-state exception.
-  `US: { city: [7, 8] }` was tried and measured (scoped North America
-  build, full cities500 US run, 21,785 places): it does fix the target
-  cases (Manhattan, Brooklyn, the Bronx, Albany all resolve correctly),
-  but nets **399 matches worse overall** (63.95% -> 62.12%), because it's
-  not a clean gap-fill the way GB/DE's multi-level configs were. Diffed
-  the two builds directly: 253 points flip from wrong/missing to
-  correct, but 652 flip from correct to wrong -- concretely, a
-  level-7 township can out-vote a real, smaller level-8 town it overlaps
-  at a shared boundary cell, not just fill in cells no level-8 primary
-  reaches at all (confirmed on Wrightsville, AR, 5.5 km^2: a leaf cell at
-  its edge, inside both it and the 1,120 km^2 Big Rock Township it sits
-  in, resolves to the township once township is added as a candidate,
-  because `buildChunkRecords`' max-depth tie-break picks whichever
-  candidate covers the larger *share* of an ambiguous leaf cell, and nothing
-  in `pruneAncestors` treats "geographically nested inside" as an
-  ancestor relationship the way the hierarchy's own city-inside-region
-  chain is -- two same-tier city candidates (a level-8 town and a
-  level-7 gap-fill township) compete on cell coverage share alone. This
-  makes multi-level city configs risky specifically when the added level
-  is much *larger* on average than the primary (true for
-  US townships vs. incorporated places; not true for GB's parish/
-  district/unitary-authority stack, which is closer to a strict subset
-  relationship, or DE's single added level covering only 3 specific
-  cities). Not applied. A real fix would need either a genuine per-state
-  override (not per-country) or a gap-fill mode that only wins cells no
-  primary touches at all, never a share contest against one -- bigger
-  changes than a config edit, not attempted here.
 - **Slovenia has zero cities: another Ireland/Estonia/Portugal-shaped
   region gap.** `SI: { region: [], city: [8] }` -- city coverage is fine
   (101.9%, real municipalities: Bled, Solčava, Mežica confirmed present in
@@ -881,13 +849,65 @@ section, since those are spec decisions rather than pipeline work.
   is a strict improvement over the old behavior (100% of those points
   used to show a technically-correct-but-misleading county name).
 
-  **Known residual gap: New York (and likely other New England-convention
-  states) still resolve at region grain, not city.** Manhattan, Brooklyn,
-  the Bronx and Albany all still return `city: null` after the level-8
-  fix above -- see "Open" above for why (level 7 is NY's real municipal
-  tier, a multi-level `city` config was tried and measured worse overall
-  for reasons specific to how townships compete with towns at the
-  quadtree's cell-classification stage, not yet fixed).
+  **New York resolved at region grain, not city -- fixed by a per-region
+  override, not a country-wide level.** Manhattan, Brooklyn, the Bronx and
+  Albany still returned `city: null` after the level-8 fix above: New
+  York's real municipal tier is OSM `admin_level=7` (towns), not the
+  nationally-correct 8 (villages, only 2.1% coverage in NY vs. towns'
+  92.8%). `COUNTRY_ADMIN_LEVELS` couldn't express "level 8 everywhere
+  except New York, where it's 7" -- only one level per *country*. Fixed
+  by adding `overrides?: Record<string, number[]>` to
+  `CountryAdminLevels`, keyed by region name (`US: { ..., overrides: {
+  "New York": [8, 7] } }`): a region listed here ignores the country's
+  own `city` level and coverage vote entirely, using its own
+  `[primary, ...gapFill]` list instead -- the first level is that
+  region's primary unconditionally, later levels gap-fill only within
+  that region, on top of its own primary, never the country's.
+
+  Two flatter designs were tried first and both caused real, measured
+  regressions, which is why the final shape is `[primary, ...gapFill]`
+  specifically, not a plain level list:
+  - A country-wide `US: { city: [7, 8] }` gap-fill (no region scoping at
+    all) fixed NY but made the *whole country* worse: 399 fewer correct
+    cities500 matches nationally (63.95% -> 62.12%). Cause: a large
+    level-7 township can out-vote a real, smaller level-8 town it
+    geographically contains at their shared boundary cells --
+    `buildChunkRecords`'s max-depth tie-break picks whichever candidate
+    covers the larger *share* of an ambiguous leaf cell, and nothing in
+    `pruneAncestors` treats "geographically nested inside" as exclusive
+    the way the hierarchy's own city-inside-region ancestry is. Confirmed
+    on Wrightsville, AR (5.5 km^2): a boundary cell inside both it and the
+    1,120 km^2 Big Rock Township it sits in resolved to the township once
+    township became a candidate there too, even though a real,
+    correctly-covering Wrightsville primary already existed.
+  - A single-level `overrides: { "New York": [7] }` (region-scoped, but
+    still just one level) avoided that -- Arkansas was untouched, since
+    `detectGapFill` now excludes a candidate whose level is *some*
+    region's override but not its own region's. But it broke New York
+    *internally*: the state has its own real two-tier structure, villages
+    (level 8) inside towns (level 7), and dropping level 8 as NY's own
+    primary meant its ~550 villages lost to their containing town by the
+    identical coverage-share mechanism, just scoped to NY (Village of
+    Akron -> Town of Newstead, Village of Ardsley -> Town of Greenburgh,
+    ...) -- still a net loss nationally (-80) versus the plain baseline.
+
+  `overrides: { "New York": [8, 7] }` fixes both: level 8 (villages) is
+  NY's own primary, so it never competes against level 7 for a cell it
+  already covers; level 7 only gap-fills the towns with no covering
+  village (Manhattan, Brooklyn, the Bronx, Albany, and every other town
+  never split into a smaller incorporated village). Net result on the
+  same 21,785-place cities500 US run: 63.88% (13,917 matches) vs. the
+  plain-level-8 baseline's 63.95% (13,931) -- effectively a wash on raw
+  count (-14), but a real quality improvement: NYC's boroughs and Albany
+  now resolve correctly, at the cost of a small number of NY villages
+  still losing to their town at a shared boundary cell (Akron, Ardsley,
+  and similar -- the same finite-quadtree-resolution imprecision the
+  "Natural Earth's country outlines are too coarse" entry above
+  describes, not a routing bug: confirmed each such village's own
+  representative point does resolve correctly, only some of its edge
+  cells don't). Fixing that residue would need actual geometry-precision
+  work (a real ancestor/containment relationship between two same-tier
+  candidates, or higher `--max-depth`), out of scope for this fix.
 
 - **Ireland/Estonia/Portugal-shaped region gaps.** Previously documented
   (and, before that, in `prepare-europe.ts`/the deleted Python prototype)

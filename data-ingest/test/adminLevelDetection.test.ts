@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { selectRegionLevels, selectPrimaryLevels } from "../src/lib/adminLevelDetection.js";
+import RBush from "rbush";
+import { selectRegionLevels, selectPrimaryLevels, detectGapFill } from "../src/lib/adminLevelDetection.js";
+import type { PrimaryLevelResult } from "../src/lib/adminLevelDetection.js";
 import type { AdminBoundaryIndex, CityCandidateMeta } from "../src/lib/adminBoundaryIndex.js";
 import { COUNTRY_ADMIN_LEVELS } from "../src/lib/countryAdminLevels.js";
 import type { CountryIndex } from "../src/lib/countryIndex.js";
@@ -102,4 +104,126 @@ test("selectPrimaryLevels: a level with real area data is still ignored if the c
   const index = fakeIndex({ areaByCountryLevel: new Map([["IS", new Map([[5, 102066]])]]) });
   const { primaryLevelByCountry } = selectPrimaryLevels(index, countries);
   assert.equal(primaryLevelByCountry.has("IS"), false);
+});
+
+test("selectPrimaryLevels: a region override's first level is primary regardless of the country-wide vote", () => {
+  assert.deepEqual(
+    COUNTRY_ADMIN_LEVELS.US?.overrides,
+    { "New York": [8, 7] },
+    "test assumes US's real table entry still overrides New York to [8, 7]",
+  );
+  const countries = fakeCountries({ US: 9834000 });
+  // Deliberately no level-8 area data at all for US -- the country-wide
+  // vote would resolve nothing -- so a level-8 NY candidate becoming
+  // primary can only be the override, never a coincidental country pick.
+  const nyCandidate = fakeCandidate("US", 8, 5);
+  const otherCandidate = fakeCandidate("US", 6, 50);
+  const index = fakeIndex({ cityCandidates: [nyCandidate, otherCandidate] });
+  const { primaryIds } = selectPrimaryLevels(index, countries, undefined, (candidate) =>
+    candidate === nyCandidate ? "New York" : "Ohio",
+  );
+  assert.equal(primaryIds.has(nyCandidate.id), true);
+  assert.equal(primaryIds.has(otherCandidate.id), false);
+});
+
+test("selectPrimaryLevels: a region override's later (gap-fill-only) level is never primary, even matching the country's own chosen level", () => {
+  assert.deepEqual(COUNTRY_ADMIN_LEVELS.US?.overrides, { "New York": [8, 7] }, "test assumes US's override is still [8, 7]");
+  const countries = fakeCountries({ US: 9834000 });
+  // Level 8 is both the country's own chosen level here (real area data)
+  // AND New York's own primary -- but this candidate is level 7, New
+  // York's *second* (gap-fill-only) override level. It must not become
+  // primary just because 8 happens to also be what non-NY candidates use
+  // -- selectPrimaryLevels only ever promotes a region's first override
+  // level to primary; a later one is detectGapFill's job.
+  const nyLevel7Candidate = fakeCandidate("US", 7, 5);
+  const index = fakeIndex({
+    areaByCountryLevel: new Map([["US", new Map([[8, 1000000]])]]),
+    cityCandidates: [nyLevel7Candidate],
+  });
+  const { primaryIds } = selectPrimaryLevels(index, countries, undefined, () => "New York");
+  assert.equal(primaryIds.has(nyLevel7Candidate.id), false);
+});
+
+test("detectGapFill: a candidate at another region's override level, in a region without that override, is never gap-fill-eligible", () => {
+  assert.deepEqual(COUNTRY_ADMIN_LEVELS.US?.overrides, { "New York": [8, 7] }, "test assumes US's override is still [8, 7]");
+  // Big Rock Township, AR: a real regression this guards -- level 7 only
+  // exists as a US city candidate at all because New York overrides to
+  // it, but nothing in COUNTRY_ADMIN_LEVELS.US ever meant "level 7 is
+  // also a legitimate Arkansas city level." Left unfiltered, this
+  // candidate's own point is uncovered by any Arkansas level-8 primary
+  // (no incorporated town's boundary happens to cover a rural township's
+  // centroid), so it would wrongly gap-fill in and contest cells against
+  // real, smaller level-8 towns it geographically contains.
+  const arkansasCandidate = fakeCandidate("US", 7, 1119.58);
+  const index = fakeIndex({ cityCandidates: [arkansasCandidate] });
+  const primary: PrimaryLevelResult = {
+    primaryLevelByCountry: new Map([["US", 8]]),
+    primaryIds: new Set(), // not primary -- otherwise gap-fill wouldn't even consider it
+  };
+  const primaryGeom = { tree: new RBush(), byId: new Map() };
+  const gapFill = detectGapFill(index, primary, primaryGeom, undefined, () => "Arkansas");
+  assert.deepEqual(gapFill, []);
+});
+
+test("detectGapFill: a New York candidate at its region's own gap-fill level (7) IS eligible when uncovered by its region's own primary (8)", () => {
+  assert.deepEqual(COUNTRY_ADMIN_LEVELS.US?.overrides, { "New York": [8, 7] }, "test assumes US's override is still [8, 7]");
+  // Town of Galen, NY, say -- a level-7 town with no level-8 village
+  // covering this particular point.
+  const nyTownCandidate = fakeCandidate("US", 7, 5);
+  const index = fakeIndex({ cityCandidates: [nyTownCandidate] });
+  const primary: PrimaryLevelResult = {
+    primaryLevelByCountry: new Map([["US", 8]]),
+    primaryIds: new Set(),
+  };
+  const primaryGeom = { tree: new RBush(), byId: new Map() }; // empty tree -- nothing covers this point
+  const gapFill = detectGapFill(index, primary, primaryGeom, undefined, () => "New York");
+  assert.deepEqual(
+    gapFill.map((c) => c.id),
+    [nyTownCandidate.id],
+  );
+});
+
+test("detectGapFill: a New York candidate at its region's own gap-fill level (7) is skipped when its region's own primary (8) already covers the point", () => {
+  assert.deepEqual(COUNTRY_ADMIN_LEVELS.US?.overrides, { "New York": [8, 7] }, "test assumes US's override is still [8, 7]");
+  // Village of Clyde inside Town of Galen: the exact regression this
+  // guards -- the town (level 7, gap-fill) must lose to a village
+  // (level 8, primary) that already covers the same point, not out-vote
+  // it via the quadtree's coverage-share tie-break.
+  const townCandidate = fakeCandidate("US", 7, 1000); // large, contains the village
+  const index = fakeIndex({ cityCandidates: [townCandidate] });
+  const primary: PrimaryLevelResult = {
+    primaryLevelByCountry: new Map([["US", 8]]),
+    primaryIds: new Set(["US-8-5"]), // a village primary already "loaded"
+  };
+  const villagePolygon = {
+    type: "Polygon" as const,
+    coordinates: [
+      [
+        [-1, -1],
+        [1, -1],
+        [1, 1],
+        [-1, 1],
+        [-1, -1],
+      ],
+    ],
+  };
+  const primaryGeom = {
+    tree: new RBush().load([{ minX: -1, minY: -1, maxX: 1, maxY: 1, id: "US-8-5", feature: { type: "Feature" as const, properties: {}, geometry: villagePolygon } }]),
+    byId: new Map(),
+  };
+  townCandidate.repPoint = [0, 0]; // inside the village polygon above
+  const gapFill = detectGapFill(index, primary, primaryGeom, undefined, () => "New York");
+  assert.deepEqual(gapFill, []);
+});
+
+test("selectPrimaryLevels: a non-overridden region in the same country is unaffected by another region's override", () => {
+  assert.deepEqual(COUNTRY_ADMIN_LEVELS.US?.overrides, { "New York": [8, 7] }, "test assumes US's override is still [8, 7]");
+  const countries = fakeCountries({ US: 9834000 });
+  const ohioCandidate = fakeCandidate("US", 8, 50);
+  const index = fakeIndex({
+    areaByCountryLevel: new Map([["US", new Map([[8, 1000000]])]]),
+    cityCandidates: [ohioCandidate],
+  });
+  const { primaryIds } = selectPrimaryLevels(index, countries, undefined, () => "Ohio");
+  assert.equal(primaryIds.has(ohioCandidate.id), true);
 });

@@ -125,8 +125,15 @@ async function main(): Promise<void> {
   );
 
   console.error("Pass 2/4: selecting primary admin levels...");
-  const primary = selectPrimaryLevels(index, countries);
   const regionIndex = buildRegionIndex(finalRegions);
+  // Only needed to route a region-override candidate (see
+  // COUNTRY_ADMIN_LEVELS.overrides) to its region's own level instead of
+  // the country-wide one -- resolves the same way emitCity's own region
+  // assignment does later, just early enough for selectPrimaryLevels to
+  // use it.
+  const resolveCandidateRegion = (candidate: CityCandidateMeta): string | null =>
+    assignCityRegion(candidate.repPoint, candidate.country, regionIndex);
+  const primary = selectPrimaryLevels(index, countries, undefined, resolveCandidateRegion);
 
   // Full-precision city geometry for the whole world does not fit in
   // memory at once -- ~295k primaries measured at roughly 60KB each, so
@@ -187,7 +194,7 @@ async function main(): Promise<void> {
       `  batch ${batchIndex + 1}/${batches.length}: ${batch.countries.size} countries, ${batch.primaryCount.toLocaleString()} primaries`,
     );
     const primaryGeom = await loadPrimaryGeometries(files, batch.primaryIds);
-    const gapFill = detectGapFill(index, primary, primaryGeom, batch.countries);
+    const gapFill = detectGapFill(index, primary, primaryGeom, batch.countries, resolveCandidateRegion);
     gapFillByCountryBatch.push(gapFill);
 
     for (const candidate of index.cityCandidates) {

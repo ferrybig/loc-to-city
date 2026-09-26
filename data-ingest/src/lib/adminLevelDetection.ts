@@ -71,11 +71,27 @@ export interface PrimaryLevelResult {
  * already disjoint by construction (a hand-reviewable, per-country data
  * table, not a shared worldwide range), so unlike an earlier version of
  * this function there is no exclusion parameter to thread through -- the
- * same polygons can never accidentally end up eligible for both roles. */
+ * same polygons can never accidentally end up eligible for both roles.
+ *
+ * `resolveRegion`, when given, decides `primaryIds` membership for a
+ * region with its own `overrides` entry differently: such a region
+ * ignores this function's area vote (and the country's `chosen` level)
+ * entirely -- only the *first* level in its own `[primary, ...gapFill]`
+ * list is primary here, unconditionally, no threshold, no competition
+ * with the country-wide level. A candidate at one of that region's later
+ * (gap-fill) levels is deliberately left out of `primaryIds` by this
+ * function -- `detectGapFill` is what promotes those, region-scoped, the
+ * same "not covered by any primary" rule it already applies country-
+ * wide. See `CountryAdminLevels.overrides`'s doc comment for why this
+ * primary-then-gap-fill order matters -- both a flat country-wide
+ * multi-level `city` list and a flat "every override level is primary"
+ * design were tried and caused real regressions (README's "New York"
+ * entry has the measurements). */
 export function selectPrimaryLevels(
   index: AdminBoundaryIndex,
   countries: CountryIndex,
   threshold = DEFAULT_COVERAGE_THRESHOLD,
+  resolveRegion?: (candidate: CityCandidateMeta) => string | null,
 ): PrimaryLevelResult {
   const primaryLevelByCountry = new Map<string, number>();
 
@@ -111,7 +127,21 @@ export function selectPrimaryLevels(
 
   const primaryIds = new Set<string>();
   for (const candidate of index.cityCandidates) {
-    if (primaryLevelByCountry.get(candidate.country) === candidate.level) primaryIds.add(candidate.id);
+    const overrides = COUNTRY_ADMIN_LEVELS[candidate.country]?.overrides;
+    const region = overrides && resolveRegion ? resolveRegion(candidate) : null;
+    const overrideLevels = region ? overrides![region] : undefined;
+    if (overrideLevels) {
+      // An overridden region never falls through to the country-wide
+      // level, even for a candidate at a level the override doesn't list
+      // at all -- such a candidate simply isn't primary here (it can
+      // never gap-fill either; see detectGapFill). Only the region's own
+      // first (primary) level is added here -- a later, gap-fill-only
+      // level in the same list is intentionally excluded from
+      // primaryIds, even for a candidate that matches it exactly.
+      if (overrideLevels[0] === candidate.level) primaryIds.add(candidate.id);
+    } else if (primaryLevelByCountry.get(candidate.country) === candidate.level) {
+      primaryIds.add(candidate.id);
+    }
   }
 
   console.error(
@@ -191,16 +221,37 @@ export async function loadPrimaryGeometries(
  * additional file I/O) plus Pass 2's in-memory primary geometry index --
  * both are already exactly the data this test needs.
  *
- * `cityCandidates` only ever contains levels a country's own
- * `COUNTRY_ADMIN_LEVELS` entry lists under `city` (see
- * `adminBoundaryIndex.ts`), so a level that instead won that country's
- * region vote was never added here in the first place -- no separate
- * exclusion is needed to keep it out of gap-fill. */
+ * `cityCandidates` contains every level any of a country's regions is
+ * allowed to use -- the country's own `city` list *and* every level any
+ * region's `overrides` list names, flattened (`adminBoundaryIndex.ts`'s
+ * Pass 1, which can't yet know which region a given candidate belongs
+ * to). Left unfiltered, that means a level meant only for one region (New
+ * York's `[8, 7]`) shows up as an ordinary candidate everywhere else in
+ * the same country too (an Arkansas level-7 township, say) -- uncovered
+ * by any Arkansas level-8 primary on its own account, so it would
+ * wrongly gap-fill in as if Arkansas also used level 7, contesting cells
+ * against real level-8 towns it geographically contains (see README's
+ * "New York" entry for the exact regression this caused before
+ * `resolveRegion` was added here). `resolveRegion`, when given, excludes
+ * exactly that case: a candidate whose own level is *some* region's
+ * override level, but doesn't appear anywhere in the override list of
+ * the region it itself resolves to, is skipped entirely -- neither
+ * primary (already excluded by `selectPrimaryLevels`, which only ever
+ * marks a region's *first* override level primary) nor gap-fill. A
+ * candidate at a level that IS in its own region's list, but not first
+ * (New York's level 7, behind its own primary level 8), reaches the
+ * ordinary point-in-polygon check below exactly like any other gap-fill
+ * candidate -- covered by a level-8 village -> skipped, not covered ->
+ * added, the same rule, just correctly scoped to compete only against
+ * that region's own primary set, never a peer region's or the country's.
+ * A candidate at a plain country-level (never listed in any override) is
+ * never affected by this check. */
 export function detectGapFill(
   index: AdminBoundaryIndex,
   primary: PrimaryLevelResult,
   primaryGeom: PrimaryGeometryIndex,
   countries?: ReadonlySet<string> | undefined,
+  resolveRegion?: (candidate: CityCandidateMeta) => string | null,
 ): CityCandidateMeta[] {
   const gapFill: CityCandidateMeta[] = [];
 
@@ -213,6 +264,20 @@ export function detectGapFill(
     // country.
     if (countries && !countries.has(candidate.country)) continue;
     if (primary.primaryIds.has(candidate.id)) continue;
+
+    const overrides = COUNTRY_ADMIN_LEVELS[candidate.country]?.overrides;
+    if (overrides) {
+      const overrideLevelsInCountry = new Set(Object.values(overrides).flat());
+      if (overrideLevelsInCountry.has(candidate.level)) {
+        // This level only exists as a candidate at all because *some*
+        // region in this country overrides to it -- only that region's
+        // own candidates may gap-fill at it.
+        const region = resolveRegion ? resolveRegion(candidate) : null;
+        const ownOverride = region ? overrides[region] : undefined;
+        if (!ownOverride?.includes(candidate.level)) continue;
+      }
+    }
+
     const [x, y] = candidate.repPoint;
     const hits = primaryGeom.tree.search({ minX: x, minY: y, maxX: x, maxY: y });
     let covered = false;

@@ -4,6 +4,30 @@ export interface CountryAdminLevels {
   region: number[];
   /** admin_level candidates for the country's city tier, same tie-break. */
   city: number[];
+  /** Per-region city level override, keyed by the exact region name this
+   * country's regions resolve to (the same string `region` above's chosen
+   * level produces). A region listed here ignores `city`/the country-wide
+   * coverage vote entirely -- its own list is `[primary, ...gapFill]`:
+   * the first level is that region's primary, unconditionally (no
+   * coverage threshold, unlike the country-wide vote -- deliberately
+   * simpler, since an override is already a hand-picked exception, not
+   * something to re-derive a vote for); every later level gap-fills
+   * *within this region only*, on top of that region's own primary, the
+   * same "not covered by any primary -> add it" rule `detectGapFill`
+   * already applies country-wide. A region's own levels never compete
+   * against the country's `city` level, or against another region's
+   * override levels, or against each other except via that same primary-
+   * then-gap-fill order -- see README's "New York" entry for the two
+   * regressions this shape exists to avoid: a country-wide multi-level
+   * `city` list let a large gap-fill level (NY's towns) out-vote real,
+   * smaller cities it geographically contains elsewhere in the country
+   * (Arkansas townships beating Arkansas towns); and a flat "every listed
+   * level is primary" override let NY's own two real tiers (villages
+   * inside towns) do the same thing to each other. `[primary, ...gapFill]`
+   * order sidesteps both: a level only gap-fills where its own region's
+   * primary has no coverage, never where a peer already does. A region
+   * not listed here is unaffected and keeps using `city` as normal. */
+  overrides?: Record<string, number[]>;
 }
 
 /**
@@ -43,7 +67,29 @@ export interface CountryAdminLevels {
  *   matches 64.0% of them vs. county's 4.3% (county's own name is almost
  *   never what GeoNames calls the place). Uncovered (unincorporated)
  *   points gap-fill to region instead of showing a wrong county name --
- *   see README's "US resolved at county grain, not city".
+ *   see README's "US resolved at county grain, not city". New York
+ *   State is a further, region-scoped exception on top of that: its own
+ *   real municipal tier is level 7 (towns, 92.8% of the state), not the
+ *   nationally-correct 8 (villages, only 2.1% there) -- confirmed level 7
+ *   resolves Manhattan/Brooklyn/the Bronx/Albany correctly where level 8
+ *   returns nothing. Two earlier, simpler attempts each caused a real
+ *   regression, both the same shape: a country-wide `city: [7, 8]`
+ *   gap-fill let level-7 towns out-vote real, smaller level-8 towns they
+ *   geographically contain *elsewhere in the US* (measured: 399 fewer
+ *   correct cities500 matches nationally -- e.g. Wrightsville, AR lost to
+ *   the Big Rock Township it sits inside); a single-level
+ *   `overrides: { "New York": [7] }` fixed that, but then lost NY's own
+ *   villages (Village of Clyde, Village of Akron, ...) to the towns they
+ *   themselves sit inside, for the identical reason, just scoped to NY
+ *   (measured: 80 fewer correct matches nationally, still a net loss
+ *   versus the plain level-8 baseline). `overrides: { "New York": [8, 7] }`
+ *   fixes both: `[primary, ...gapFill]` order means level 8 is NY's own
+ *   primary (its villages, the more specific real answer wherever one
+ *   exists) and level 7 only gap-fills *within New York*, never
+ *   contesting a cell a village already covers -- see this file's
+ *   `overrides` doc comment above for the general rule, and README's
+ *   "New York" entry for both measured regressions this final shape
+ *   avoids.
  * - CA: same shape as US -- level 6 (regional districts, 66.2%) auto-won
  *   over level 8 (municipalities, 31.4%), resolving Terrace, BC as
  *   "Regional District of Kitimat-Stikine". Overridden to level 8: against
@@ -301,7 +347,17 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   TZ: { region: [4], city: [5] }, // region 94.0%, city 94.0%
   UA: { region: [4], city: [7] }, // region 104.1%, city 99.7%
   UG: { region: [4], city: [6] }, // region 99.8%, city 6.4%
-  US: { region: [4], city: [8] }, // region 106.6%, city 10.7% -- see override note above
+  US: {
+    region: [4],
+    city: [8], // region 106.6%, city 10.7% -- see override note above
+    // NY has two real, nested tiers of its own: villages (8, the more
+    // specific answer wherever one exists) inside towns (7, the state's
+    // ~100% tessellation) -- 8 primary, 7 gap-fills the towns without a
+    // village. Neither ever competes against the national level 8 list
+    // (Cleveland, Wrightsville, ...), nor against each other outside
+    // this primary/gap-fill order.
+    overrides: { "New York": [8, 7] },
+  },
   UY: { region: [4], city: [8] }, // region 99.7%, city 1.3%
   UZ: { region: [6], city: [8] }, // region 99.9%, city 1.3%
   VC: { region: [6], city: [] }, // region 106.2%, city 0.0%

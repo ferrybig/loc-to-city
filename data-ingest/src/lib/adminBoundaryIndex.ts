@@ -29,6 +29,16 @@ const PLAUSIBLE_ADMIN_LEVELS = new Set([4, 5, 6, 7, 8, 9, 10, 11]);
 // get right than an ordinary city), not to decide role or acceptance.
 const REGION_SAMPLE_LEVELS = new Set([4, 5, 6]);
 
+/** Every level any of this country's region `overrides` lists, flattened
+ * -- a level here needs to survive Pass 1's `isCity` test even when it's
+ * absent from the country-wide `city` list, since a candidate's region
+ * (and therefore whether an override applies to it) isn't known until
+ * later. */
+function overrideLevels(levels: { overrides?: Record<string, number[]> } | undefined): number[] {
+  if (!levels?.overrides) return [];
+  return Object.values(levels.overrides).flat();
+}
+
 export interface CityCandidateMeta {
   id: string;
   /** Undefined for unnamed relations -- kept (not dropped) here since Pass
@@ -150,7 +160,13 @@ export async function buildAdminBoundaryIndex(files: string[], countries: Countr
     }
 
     const levels = COUNTRY_ADMIN_LEVELS[country];
-    const isCity = levels?.city.includes(level) ?? false;
+    // A superset check: a level that's only an override level for one of
+    // this country's regions (not in the country-wide `city` list) still
+    // needs to survive Pass 1, since which region a candidate belongs to
+    // isn't known until regions are resolved, later in prepare-world.ts.
+    // Routing a surviving candidate to its actual region/level (override
+    // vs. country-wide) happens there, not here.
+    const isCity = (levels?.city.includes(level) ?? false) || overrideLevels(levels).includes(level);
     const isRegionLevel = levels?.region.includes(level) ?? false;
     if (!isCity && !isRegionLevel) continue;
 
@@ -166,12 +182,20 @@ export async function buildAdminBoundaryIndex(files: string[], countries: Countr
         repPoint,
         bbox: featureBbox,
       });
-      let byLevel = areaByCountryLevel.get(country);
-      if (!byLevel) {
-        byLevel = new Map();
-        areaByCountryLevel.set(country, byLevel);
+      // Area accumulates here only for the country-wide `city` vote --
+      // an override-only level (a candidate that survived solely because
+      // some region's override list includes it) never competes for the
+      // country's own primary level, so it's excluded from this tally.
+      // `cityCandidates` above still holds it either way; routing happens
+      // once each candidate's region is known, in prepare-world.ts.
+      if (levels?.city.includes(level)) {
+        let byLevel = areaByCountryLevel.get(country);
+        if (!byLevel) {
+          byLevel = new Map();
+          areaByCountryLevel.set(country, byLevel);
+        }
+        byLevel.set(level, (byLevel.get(level) ?? 0) + featureArea);
       }
-      byLevel.set(level, (byLevel.get(level) ?? 0) + featureArea);
       diagnostics.keptCity++;
     }
 
