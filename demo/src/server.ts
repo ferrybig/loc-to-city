@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 /**
  * Tiny stdlib-only web server for the CGEODATA demo: serves the Leaflet
  * page, a JSON query API, and a tile overlay -- the JS/TS equivalent of
@@ -10,18 +10,27 @@ import { existsSync, readFileSync } from "node:fs";
  *
  * dataset defaults to data/zuid-holland.bin (see the plan / README for how
  * that's built); pass a different .bin path to point at a later, larger
- * build without changing any code. A `<dataset>.search-index.bin` next to
- * it (from `cgeodata build-search-index`) is picked up automatically.
+ * build without changing any code. A `<dataset>.search-index.bin` and
+ * `<dataset>.locate-index.bin` next to it (from `cgeodata
+ * build-search-index` / `build-locate-index`) are picked up automatically.
+ *
+ * The dataset is only ever read in a piscina pool of worker threads
+ * (src/worker.ts); this thread just routes requests to them.
  */
-import { createServer } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-	CGeoDataReader,
-	locateIndexPathFor,
-	searchIndexPathFor,
-} from "@loc-to-city/read\er";
-import { Piscina } from "piscina";
+import { Piscina, queueOptionsSymbol } from "piscina";
+import { type LaneOptions, LaneTaskQueue } from "./taskQueue.js";
+import type { Cancellable, WorkerData } from "./worker.js";
+
+/** The worker's exports, each one a task `piscina.run` can name. */
+type Tasks = typeof import("./worker.js");
+/** The ones a request runs; `indexes` only runs once, at startup. */
+type RequestTask = Exclude<keyof Tasks, "indexes">;
+
+/** The pool's queue already holds `maxQueue` tasks. */
+class QueueFullError extends Error {}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -29,29 +38,12 @@ const PUBLIC_DIR = path.resolve(__dirname, "../public");
 
 const TILE_RE = /^\/tiles\/(\d+)\/(\d+)\/(\d+)\.png$/;
 
-/** Attaches the sidecar index at `indexPath` if there is one, read on
- * demand from the file; one that doesn't match the dataset is skipped. */
-function attachIndex(
-	kind: string,
-	indexPath: string,
-	use: (index: string | undefined) => void,
-): void {
-	if (!existsSync(indexPath)) {
-		console.error(`No ${kind} index at ${indexPath}; ${kind} scans the dataset.`);
-		return;
-	}
-	try {
-		use(indexPath);
-		console.error(`Using ${kind} index ${indexPath}.`);
-	} catch (error) {
-		use(undefined);
-		console.error(
-			`Ignoring ${kind} index ${indexPath}: ${(error as Error).message}`,
-		);
-	}
+function sendJson(res: ServerResponse, status: number, body: unknown): void {
+	res.writeHead(status, { "Content-Type": "application/json" });
+	res.end(JSON.stringify(body));
 }
 
-function main(): void {
+async function main(): Promise<void> {
 	const port = Number(process.argv[2] ?? 8766);
 	const datasetArg = process.argv[3];
 	const datasetPath = datasetArg
@@ -59,32 +51,54 @@ function main(): void {
 		: path.join(REPO_ROOT, "data/zuid-holland.bin");
 
 	console.error(`Loading ${datasetPath}...`);
-	const reader = CGeoDataReader.open(datasetPath);
-	// Optional sidecars next to the dataset: data/world.bin pairs with
-	// data/world.search-index.bin (`cgeodata build-search-index`) and
-	// data/world.locate-index.bin (`cgeodata build-locate-index`). They
-	// only speed up /api/search and /api/locate; results are the same
-	// without them. Attached up front so a stale one is skipped with a
-	// warning here instead of failing every request.
-	attachIndex("search", searchIndexPathFor(datasetPath), (index) =>
-		reader.useSearchIndex(index),
-	);
-	attachIndex("locate", locateIndexPathFor(datasetPath), (index) =>
-		reader.useLocateIndex(index),
-	);
-	console.error("Loaded.");
-	const piscina = new Piscina({
-		filename: path.resolve(__dirname, "tile-worker.js"),
-    	idleTimeout: 1000,
+	const pool = new Piscina({
+		filename: path.resolve(__dirname, "worker.js"),
+		minThreads: 1,
+		idleTimeout: 60000,
 		maxQueue: 256,
-		workerData: {
-			datasetPath,
-		},
+		taskQueue: new LaneTaskQueue(),
+		stricterFIFO: true,
+		workerData: { datasetPath } satisfies WorkerData,
 	});
 
-	const server = createServer((req, res) => {
-		const url = new URL(req.url ?? "/", "http://localhost");
+	/** Runs the worker's `name` export on `task` for the request `res`
+	 * answers. Tiles go in the queue's background lane, behind any
+	 * waiting query, search or locate. No piscina `signal`: that would
+	 * bypass the queue (see LaneTaskQueue); a task instead carries a
+	 * `cancelled` flag, set once the client goes away (see Cancellable). */
+	async function run<N extends RequestTask>(
+		res: ServerResponse,
+		name: N,
+		task: Omit<Parameters<Tasks[N]>[0], keyof Cancellable>,
+	): Promise<Exclude<ReturnType<Tasks[N]>, undefined>> {
+		// Piscina's own backpressure check (`queueSize` against
+		// `maxQueue`), made here so a full queue is told apart from a
+		// task that failed.
+		if (pool.queueSize >= pool.options.maxQueue) {
+			throw new QueueFullError("too many requests queued, try again later");
+		}
+		const payload: Cancellable = {
+			...task,
+			cancelled: false,
+			[queueOptionsSymbol]: { background: name === "tile" } satisfies LaneOptions,
+		};
+		res.on("close", () => {
+			payload.cancelled = true;
+		});
+		const result = await pool.run(payload, { name });
+		if (result === undefined) {
+			throw new Error("client went away before its task ran");
+		}
+		return result;
+	}
 
+	// Doubles as a startup check: a dataset that fails to open rejects
+	// here, before the server listens, rather than on every request.
+	const indexStatus: string[] = await pool.run(undefined, { name: "indexes" });
+	for (const line of indexStatus) console.error(line);
+	console.error("Loaded.");
+
+	async function handle(url: URL, res: ServerResponse): Promise<void> {
 		if (url.pathname === "/" || url.pathname === "/index.html") {
 			const body = readFileSync(path.join(PUBLIC_DIR, "index.html"));
 			res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -96,72 +110,35 @@ function main(): void {
 			const lat = Number(url.searchParams.get("lat"));
 			const lon = Number(url.searchParams.get("lon"));
 			if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-				res.writeHead(400, { "Content-Type": "application/json" });
-				res.end(JSON.stringify({ error: "missing or invalid lat/lon" }));
+				sendJson(res, 400, { error: "missing or invalid lat/lon" });
 				return;
 			}
-			try {
-				const t0 = performance.now();
-				const result = reader.query(lat, lon);
-				const t1 = performance.now();
-				res.writeHead(200, { "Content-Type": "application/json" });
-				res.end(JSON.stringify({ ...result, query_time_us: (t1 - t0) * 1000 }));
-			} catch (err) {
-				res.writeHead(400, { "Content-Type": "application/json" });
-				res.end(
-					JSON.stringify({
-						error: err instanceof Error ? err.message : String(err),
-					}),
-				);
-			}
+			sendJson(res, 200, await run(res, "query", { lat, lon }));
 			return;
 		}
 
 		if (url.pathname === "/api/search") {
 			const q = url.searchParams.get("q") ?? "";
 			if (!q.trim()) {
-				res.writeHead(200, { "Content-Type": "application/json" });
-				res.end(JSON.stringify({ results: [] }));
+				sendJson(res, 200, { results: [] });
 				return;
 			}
-			const results = [...reader.search(q, { sort: true, limit: 5 })].map(
-				(place) => ({
-					id: place.id,
-					level: place.level,
-					names: place.names,
-					region: place.region?.names ?? null,
-					country: place.country.names,
-				}),
-			);
-			res.writeHead(200, { "Content-Type": "application/json" });
-			res.end(JSON.stringify({ results }));
+			sendJson(res, 200, { results: await run(res, "search", { q }) });
 			return;
 		}
 
 		if (url.pathname === "/api/locate") {
 			const id = Number(url.searchParams.get("id"));
 			if (!Number.isInteger(id) || id < 0) {
-				res.writeHead(400, { "Content-Type": "application/json" });
-				res.end(JSON.stringify({ error: "missing or invalid id" }));
+				sendJson(res, 400, { error: "missing or invalid id" });
 				return;
 			}
-			try {
-				const pos = reader.locate(id);
-				if (!pos) {
-					res.writeHead(404, { "Content-Type": "application/json" });
-					res.end(JSON.stringify({ error: "place has no geometry" }));
-					return;
-				}
-				res.writeHead(200, { "Content-Type": "application/json" });
-				res.end(JSON.stringify({ lat: pos.lat, lon: pos.lon }));
-			} catch (err) {
-				res.writeHead(400, { "Content-Type": "application/json" });
-				res.end(
-					JSON.stringify({
-						error: err instanceof Error ? err.message : String(err),
-					}),
-				);
+			const pos = await run(res, "locate", { id });
+			if (!pos) {
+				sendJson(res, 404, { error: "place has no geometry" });
+				return;
 			}
+			sendJson(res, 200, pos);
 			return;
 		}
 
@@ -171,28 +148,36 @@ function main(): void {
 			const x = Number(tileMatch[2]);
 			const y = Number(tileMatch[3]);
 			const resolution = Number(url.searchParams.get("res") ?? "8");
-  			const abortController = new AbortController();
-			const promise = piscina.run({
-				x,
-				y,
-				z,
-				resolution,
-			}, { signal: abortController.signal });
-			res.on("close", () => abortController.abort());
-			return promise.then((png) => {
-				res.writeHead(200, {
-					"Content-Type": "image/png",
-					"Cache-Control": "public, max-age=3600",
-				});
-				res.end(png);
-			}, () => {
-				res.writeHead(503, { "Content-Type": "application/json" });
-				res.end(JSON.stringify({ error: "service unavailable" }));
+			const png = await run(res, "tile", { x, y, z, resolution });
+			res.writeHead(200, {
+				"Content-Type": "image/png",
+				"Cache-Control": "public, max-age=3600",
 			});
+			res.end(png);
+			return;
 		}
 
-		res.writeHead(404, { "Content-Type": "application/json" });
-		res.end(JSON.stringify({ error: "not found" }));
+		sendJson(res, 404, { error: "not found" });
+	}
+
+	const server = createServer((req, res) => {
+		const url = new URL(req.url ?? "/", "http://localhost");
+		handle(url, res).catch((err: unknown) => {
+			// The client went away; there's no one to answer.
+			if (res.destroyed) return;
+			// A RangeError is the reader rejecting the request's coordinate
+			// or place id. Anything but that or a full queue is a bug.
+			const status =
+				err instanceof QueueFullError
+					? 503
+					: err instanceof RangeError
+						? 400
+						: 500;
+			if (status === 500) console.error(err);
+			sendJson(res, status, {
+				error: err instanceof Error ? err.message : String(err),
+			});
+		});
 	});
 
 	const host = process.env.HOST ?? "127.0.0.1";
@@ -203,4 +188,4 @@ function main(): void {
 	});
 }
 
-main();
+await main();
