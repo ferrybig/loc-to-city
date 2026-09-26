@@ -17,10 +17,11 @@ import {
 } from "./placeTable.js";
 import { existsSync } from "node:fs";
 import {
-	candidatePositions,
-	SearchIndex,
-	searchIndexPathFor,
-} from "./searchIndex.js";
+	LEVEL_BONUS,
+	placeMatchQuality,
+	tokenize,
+} from "./relevance.js";
+import { SearchIndex, searchIndexPathFor } from "./searchIndex.js";
 import { openSource, type RandomAccessSource } from "./source.js";
 import { safeInflate } from "./zlibUtil.js";
 
@@ -315,13 +316,9 @@ export class CGeoDataReader {
 				"search index was built from a different .bin file (checksum mismatch); rebuild it with build-search-index",
 			);
 		}
-		const { countryCount, totalRegions, totalCities } = this.placeTable;
-		if (
-			index.firstId !== countryCount + totalRegions ||
-			index.placeCount !== totalCities
-		) {
+		if (index.placeCount !== this.placeTable.totalPlaces) {
 			throw new Error(
-				`search index covers places ${index.firstId}..${index.firstId + index.placeCount}, but this file's cities are ${countryCount + totalRegions}..${countryCount + totalRegions + totalCities}`,
+				`search index covers ${index.placeCount} places, but this file has ${this.placeTable.totalPlaces}`,
 			);
 		}
 	}
@@ -368,8 +365,9 @@ export class CGeoDataReader {
 	/**
 	 * Case-insensitive substring match against every name of every place
 	 * (all levels unless filtered). Without a search index this is a plain
-	 * linear scan over the name blocks; with one (`useSearchIndex()`), the
-	 * city scan only visits the index's candidates. Same results either way.
+	 * linear scan over the name blocks; with one (`useSearchIndex()`), only
+	 * the places the index can't rule out are compared. Same results
+	 * either way.
 	 */
 	*search(text: string, options: SearchOptions = {}): IterableIterator<Place> {
 		if (options.sort) {
@@ -379,9 +377,10 @@ export class CGeoDataReader {
 		const needle = text.toLowerCase();
 		let remaining = options.limit ?? Infinity;
 		if (remaining <= 0) return;
+		const candidates = this.activeSearchIndex()?.candidates(text);
 		for (const level of LEVELS) {
 			if (options.level !== undefined && options.level !== level) continue;
-			for (const id of this.searchScope(level, options, text)) {
+			for (const id of this.searchScope(level, options, candidates)) {
 				// Match on the bare names first; resolving parents is only worth
 				// doing for the few that hit.
 				if (!this.names(id).some((name) => name.toLowerCase().includes(needle)))
@@ -392,26 +391,47 @@ export class CGeoDataReader {
 		}
 	}
 
-	/** The `sort: true` path of `search()`: scores every match (see
-	 * `nameMatchQuality`/`LEVEL_BONUS`), then yields highest-scored first,
-	 * ties broken by id. `limit` is applied after sorting, not during the
-	 * scan -- the top match can turn up anywhere in id order. */
+	/** The `sort: true` path of `search()`: scores every match in relevance
+	 * order (Appendix B.5, `relevance.ts`), then yields highest-scored
+	 * first, ties broken by id. `limit` is applied after sorting, not
+	 * during the scan -- the top match can turn up anywhere in id order. */
 	private *searchRanked(
 		text: string,
 		options: SearchOptions,
 	): IterableIterator<Place> {
 		const needle = text.toLowerCase();
+		const index = this.activeSearchIndex();
+		const shortQuery =
+			index !== undefined &&
+			options.limit !== undefined &&
+			options.limit <= index.topCount &&
+			options.level === undefined &&
+			options.country === undefined &&
+			options.region === undefined
+				? index.shortQuery(text)
+				: undefined;
+		if (shortQuery) {
+			// The table already holds the answer (Appendix B.9 step 1); only
+			// confirm each place really matches, so a corrupt table can't add
+			// a wrong result.
+			let remaining = options.limit ?? Infinity;
+			for (const id of shortQuery) {
+				if (remaining <= 0) return;
+				if (!this.names(id).some((name) => name.toLowerCase().includes(needle)))
+					continue;
+				yield this.place(id);
+				remaining--;
+			}
+			return;
+		}
+
 		const needleTokens = tokenize(needle);
+		const candidates = index?.candidates(text);
 		const scored: Array<{ id: number; score: number }> = [];
 		for (const level of LEVELS) {
 			if (options.level !== undefined && options.level !== level) continue;
-			for (const id of this.searchScope(level, options, text)) {
-				const quality = Math.max(
-					0,
-					...this.names(id).map((name) =>
-						nameMatchQuality(name, needle, needleTokens),
-					),
-				);
+			for (const id of this.searchScope(level, options, candidates)) {
+				const quality = placeMatchQuality(this.names(id), needle, needleTokens);
 				if (quality === 0) continue;
 				scored.push({ id, score: quality + LEVEL_BONUS[level] });
 			}
@@ -426,23 +446,20 @@ export class CGeoDataReader {
 	}
 
 	/** The ids (ascending) of `level` under the filter that `search()` has
-	 * to check for `text`: the whole `idRange`, or -- for cities, with a
-	 * search index attached -- just the index's candidates within it. */
+	 * to check: the whole `idRange`, or, when a search index narrowed the
+	 * query to `candidates` (ascending), just those within it. */
 	private *searchScope(
 		level: PlaceLevel,
 		filter: PlaceFilter,
-		text: string,
+		candidates: readonly number[] | undefined,
 	): IterableIterator<number> {
 		const [start, end] = this.idRange(level, filter);
-		const index = level === "city" ? this.activeSearchIndex() : undefined;
-		const candidates = index && candidatePositions(index, text);
-		if (!index || !candidates) {
+		if (!candidates) {
 			for (let id = start; id < end; id++) yield id;
 			return;
 		}
-		for (const position of candidates) {
-			const id = index.firstId + position;
-			if (id < start) continue;
+		for (let i = lowerBound(candidates, start); i < candidates.length; i++) {
+			const id = candidates[i]!;
 			if (id >= end) return;
 			yield id;
 		}
@@ -633,68 +650,6 @@ export class CGeoDataReader {
 
 const LEVELS: readonly PlaceLevel[] = ["country", "region", "city"];
 
-/** `search({ sort: true })`'s per-level bonus: a city is what most
- * queries are actually after, so it outranks a region, which outranks a
- * country, all else being equal. */
-const LEVEL_BONUS: Record<PlaceLevel, number> = {
-	city: 4,
-	region: 2,
-	country: 1,
-};
-
-/** Lowercases and splits on any run of non-letter/non-digit characters,
- * so "Nieuw-Amsterdam" and "Nieuw Amsterdam" tokenize identically
- * regardless of which separator the data used. Unicode-aware (`\p{L}`),
- * so accented letters count as letters rather than splitting a word in
- * two. */
-function tokenize(text: string): string[] {
-	return text
-		.toLowerCase()
-		.split(/[^\p{L}\p{N}]+/u)
-		.filter((token) => token.length > 0);
-}
-
-/** True if `needleTokens` occurs as a contiguous run within `tokens` --
- * i.e. the query matches one or more *whole* words of the name, not
- * just a substring that happens to straddle a word boundary. */
-function containsTokenRun(
-	tokens: string[],
-	needleTokens: readonly string[],
-): boolean {
-	if (needleTokens.length === 0 || needleTokens.length > tokens.length)
-		return false;
-	search: for (let i = 0; i + needleTokens.length <= tokens.length; i++) {
-		for (let j = 0; j < needleTokens.length; j++) {
-			if (tokens[i + j] !== needleTokens[j]) continue search;
-		}
-		return true;
-	}
-	return false;
-}
-
-/**
- * `search({ sort: true })`'s name-match component: an exact match (4)
- * beats a whole-word match (2) beats a plain substring match (1); no
- * match at all is 0. `needle` and `needleTokens` are precomputed once
- * per search, not once per name -- `needle` must already be lowercase.
- *
- * Only a substring match counts at all, so sorting ranks the same set
- * unsorted search finds: without that, " di " would match "Di" by its
- * tokens alone, and a search index (which only guarantees substring
- * candidates, Appendix B.7) would miss it.
- */
-function nameMatchQuality(
-	name: string,
-	needle: string,
-	needleTokens: readonly string[],
-): number {
-	const lower = name.toLowerCase();
-	if (!lower.includes(needle)) return 0;
-	if (lower === needle) return 4;
-	if (containsTokenRun(tokenize(name), needleTokens)) return 2;
-	return 1;
-}
-
 function checkId(id: number, lo: number, hi: number, what: string): void {
 	if (!Number.isInteger(id) || id < lo || id >= hi) {
 		throw new RangeError(
@@ -708,6 +663,18 @@ function unknownResult(
 	chunkIndex: number,
 ): QueryResult {
 	return { country: null, region: null, city: null, boundingBox, chunkIndex };
+}
+
+/** The first index of the ascending `sorted` whose value is >= `value`. */
+function lowerBound(sorted: readonly number[], value: number): number {
+	let lo = 0;
+	let hi = sorted.length;
+	while (lo < hi) {
+		const mid = (lo + hi) >>> 1;
+		if (sorted[mid]! < value) lo = mid + 1;
+		else hi = mid;
+	}
+	return lo;
 }
 
 /** bisect_right(sorted, value) - 1, per Section 9 step 6. */
