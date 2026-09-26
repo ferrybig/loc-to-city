@@ -36,6 +36,11 @@ export interface CityCandidateMeta {
    * assembly in prepare-world.ts drops nameless survivors, mirroring
    * prepare-europe.ts's own null-name filtering. */
   name: string | undefined;
+  /** OSM's `name:en` tag, when present (README.md's "International/local
+   * name pairs" item). Purely a display addition -- never part of any
+   * join/dedup key, so it can be missing or inconsistent without affecting
+   * matching. */
+  nameEn: string | undefined;
   country: string;
   level: number;
   area: number;
@@ -46,6 +51,8 @@ export interface CityCandidateMeta {
 export interface RegionCandidate {
   id: string;
   name: string;
+  /** OSM's `name:en` tag, when present -- see CityCandidateMeta.nameEn. */
+  nameEn: string | undefined;
   country: string;
   /** The admin_level this candidate was tagged at. A country's own
    * COUNTRY_ADMIN_LEVELS entry keeps its region and city level lists
@@ -88,6 +95,7 @@ export interface AdminBoundaryIndex {
 interface AdminBoundaryProps {
   admin_level?: string;
   name?: string;
+  "name:en"?: string;
 }
 
 /** Pass 1 of the 3-pass admin_level auto-detection (README.md's "Europe
@@ -148,7 +156,16 @@ export async function buildAdminBoundaryIndex(files: string[], countries: Countr
 
     if (isCity) {
       const featureArea = area(geometry) / 1_000_000; // m^2 -> km^2
-      cityCandidates.push({ id, name: props?.name, country, level, area: featureArea, repPoint, bbox: featureBbox });
+      cityCandidates.push({
+        id,
+        name: props?.name,
+        nameEn: props?.["name:en"],
+        country,
+        level,
+        area: featureArea,
+        repPoint,
+        bbox: featureBbox,
+      });
       let byLevel = areaByCountryLevel.get(country);
       if (!byLevel) {
         byLevel = new Map();
@@ -176,6 +193,7 @@ export async function buildAdminBoundaryIndex(files: string[], countries: Countr
       regionsByCountryName.set(key, {
         id,
         name,
+        nameEn: props?.["name:en"],
         country,
         level,
         bbox: featureBbox,

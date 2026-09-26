@@ -11,7 +11,7 @@ import {
 } from "@loc-to-city/reader";
 import { buildCGeoDataFile } from "../src/build.js";
 import type { HierarchyCountry } from "../src/hierarchy.js";
-import type { CityProperties } from "../src/placeIds.js";
+import { assembleNameEntry, type CityProperties } from "../src/placeIds.js";
 
 // A tiny synthetic dataset: one country, two regions (only one of which has
 // cities -- Section 7.2 explicitly allows a region's city count to be 0),
@@ -115,4 +115,63 @@ test("Beta (0 cities) is still present and resolvable by name", () => {
 
   const betaCityCount = placeTable.cityRegionPrefix[2]! - placeTable.cityRegionPrefix[1]!;
   assert.equal(betaCityCount, 0);
+});
+
+test("assembleNameEntry", () => {
+  assert.equal(assembleNameEntry("Nederland", "The Netherlands"), "Nederland|The Netherlands");
+  assert.equal(assembleNameEntry("Amsterdam", undefined), "Amsterdam");
+  // Writers SHOULD omit trailing empty fields (Section 7.4) -- an
+  // international name identical to the local one carries no information.
+  assert.equal(assembleNameEntry("Berlin", "Berlin"), "Berlin");
+  // Section 7.4: fields must not contain "|" or NUL, and there's no escape
+  // mechanism -- an international name that would violate that is dropped
+  // rather than corrupting the wire format.
+  assert.equal(assembleNameEntry("Local", "Bad|Name"), "Local");
+  assert.equal(assembleNameEntry("Local", "Bad\0Name"), "Local");
+});
+
+test("a region's international name doesn't affect the region/city join, only its displayed name entry", () => {
+  // Alpha's join key (used to match Springfield/Shelbyville) stays the
+  // plain local "Alpha" throughout ingest -- regionNames only adds a
+  // display-time international name, keyed by that same local name
+  // (README.md's "International/local name pairs" item).
+  const intlHierarchy: HierarchyCountry[] = [
+    {
+      code: "TL",
+      name: "Testland",
+      regions: ["Alpha", "Beta"],
+      regionNames: { Alpha: "Alpha Province" },
+    },
+  ];
+  const intlCities: FeatureCollection<Polygon, CityProperties> = {
+    type: "FeatureCollection",
+    features: cities.features.map((f) => ({
+      ...f,
+      properties: { ...f.properties, nameEn: f.properties.name === "Springfield" ? "Springfield City" : undefined },
+    })),
+  };
+
+  const { bytes } = buildCGeoDataFile(intlHierarchy, intlCities, options);
+  const reader = CGeoDataReader.open(bytes);
+
+  // The join still resolves correctly -- Springfield is still found inside
+  // Alpha despite both having gained an unrelated international name. The
+  // reader returns the full split name array (local first, then
+  // international), not just the local name.
+  const result = reader.query(0.5, 0.25);
+  assert.deepEqual(result.country, ["Testland"]);
+  assert.deepEqual(result.region, ["Alpha", "Alpha Province"]);
+  assert.deepEqual(result.city, ["Springfield", "Springfield City"]);
+
+  const source = openSource(bytes);
+  const { header, directory } = readHeaderAndDirectory(source);
+  const placeTable = parsePlaceTable(source, directory.placeTableStart, directory.placeTableLength, header.keyframeExp);
+
+  // Alpha/Beta are region global ids 1/2 (after country id 0). Cities are
+  // sorted by id within a region (placeIds.ts), and "shelbyville" sorts
+  // before "springfield", so Shelbyville is city id 3, Springfield id 4.
+  assert.deepEqual(readNameEntry(source, placeTable, 1), ["Alpha", "Alpha Province"]);
+  assert.deepEqual(readNameEntry(source, placeTable, 2), ["Beta"]);
+  assert.deepEqual(readNameEntry(source, placeTable, 3), ["Shelbyville"]);
+  assert.deepEqual(readNameEntry(source, placeTable, 4), ["Springfield", "Springfield City"]);
 });

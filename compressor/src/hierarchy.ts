@@ -12,6 +12,14 @@ export interface HierarchyCountry {
   code: string;
   name: string;
   regions: string[];
+  /** Region local name -> international/English name (README.md's
+   * "International/local name pairs" item), for regions where OSM tagged
+   * one. Deliberately keyed by the same local name used in `regions` --
+   * that array stays the join key between a hierarchy region and its
+   * cities (see placeIds.ts), so the international name rides along as a
+   * side lookup instead of ever replacing it. Absent entirely, or missing
+   * a given region's key, both mean "no international name known". */
+  regionNames?: Record<string, string>;
 }
 
 export function loadHierarchy(path: string): HierarchyCountry[] {
@@ -22,6 +30,9 @@ export function loadHierarchy(path: string): HierarchyCountry[] {
   for (const entry of raw) {
     const e = entry as Partial<HierarchyCountry>;
     if (typeof e.code !== "string" || typeof e.name !== "string" || !Array.isArray(e.regions)) {
+      throw new Error(`invalid hierarchy entry: ${JSON.stringify(entry)}`);
+    }
+    if (e.regionNames !== undefined && (typeof e.regionNames !== "object" || e.regionNames === null)) {
       throw new Error(`invalid hierarchy entry: ${JSON.stringify(entry)}`);
     }
   }

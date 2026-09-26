@@ -4,9 +4,26 @@ import type { HierarchyCountry } from "./hierarchy.js";
 export interface CityProperties {
   id?: string;
   name: string;
+  /** International/English name (README.md's "International/local name
+   * pairs" item), when OSM tagged one. Never part of the region/country
+   * join key -- only `name` is (see featuresByKey below) -- so it's purely
+   * a display addition folded into the name entry at the very end. */
+  nameEn?: string;
   region: string;
   country: string;
   [key: string]: unknown;
+}
+
+/** Assembles a Section 7.4 name entry from a local name and an optional
+ * international name: `local|international`, or just `local` when there's
+ * no international name or it's identical to the local one (writers
+ * SHOULD omit trailing empty fields). Fields must not contain `|` or NUL
+ * (Section 7.4); a name carrying either is passed through as the local
+ * name only, since there is no escape mechanism to represent it. */
+export function assembleNameEntry(local: string, international: string | undefined): string {
+  if (!international || international === local) return local;
+  if (international.includes("|") || international.includes("\0")) return local;
+  return `${local}|${international}`;
 }
 
 export type CityFeature = Feature<Polygon | MultiPolygon, CityProperties>;
@@ -45,7 +62,7 @@ export function buildPlaceIdSpace(
   hierarchy.forEach((country, countryId) => {
     for (const regionName of country.regions) {
       regionOwners.push({ countryCode: country.code, regionName, countryId });
-      nameEntries.push(regionName);
+      nameEntries.push(assembleNameEntry(regionName, country.regionNames?.[regionName]));
     }
   });
   const totalRegions = regionOwners.length;
@@ -84,7 +101,7 @@ export function buildPlaceIdSpace(
     cityCounts[r] = matched.length;
     const regionGlobalId = countryCount + r;
     for (const feature of matched) {
-      nameEntries.push(feature.properties.name);
+      nameEntries.push(assembleNameEntry(feature.properties.name, feature.properties.nameEn));
       cityFeaturesById.set(nextCityId, feature);
       cityAncestors.set(nextCityId, [regionGlobalId, owner.countryId]);
       nextCityId++;

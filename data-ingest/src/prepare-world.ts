@@ -156,6 +156,10 @@ async function main(): Promise<void> {
   // has no city tier, or Khartoum State) would otherwise vanish and its
   // points resolve at country level only.
   const regionsByCountry = new Map<string, Set<string>>();
+  // Local region name -> international name (README.md's "International/
+  // local name pairs" item), keyed by the exact same local name used as
+  // the join key everywhere else -- see HierarchyCountry.regionNames.
+  const regionNamesByCountry = new Map<string, Map<string, string>>();
   for (const r of finalRegions.values()) {
     let names = regionsByCountry.get(r.country);
     if (!names) {
@@ -163,6 +167,14 @@ async function main(): Promise<void> {
       regionsByCountry.set(r.country, names);
     }
     names.add(r.name);
+    if (r.nameEn) {
+      let intlNames = regionNamesByCountry.get(r.country);
+      if (!intlNames) {
+        intlNames = new Map();
+        regionNamesByCountry.set(r.country, intlNames);
+      }
+      intlNames.set(r.name, r.nameEn);
+    }
   }
   const skippedNoRegionByCountry = new Map<string, number>();
   let cityCount = 0;
@@ -221,7 +233,13 @@ async function main(): Promise<void> {
 
     const feature: Feature<Polygon | MultiPolygon, CityProperties> = {
       type: "Feature",
-      properties: { id: candidate.id, name: candidate.name, region, country: candidate.country },
+      properties: {
+        id: candidate.id,
+        name: candidate.name,
+        ...(candidate.nameEn ? { nameEn: candidate.nameEn } : {}),
+        region,
+        country: candidate.country,
+      },
       geometry: geometry.geometry,
     };
     await write("\x1e" + JSON.stringify(feature) + "\n");
@@ -250,11 +268,15 @@ async function main(): Promise<void> {
   // instead of silently vanishing from the output entirely.
   const hierarchy: HierarchyCountry[] = [...countries.nameByCode.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([code, name]) => ({
-      code,
-      name,
-      regions: [...(regionsByCountry.get(code) ?? [])].sort((a, b) => a.localeCompare(b)),
-    }));
+    .map(([code, name]) => {
+      const regionNames = regionNamesByCountry.get(code);
+      return {
+        code,
+        name,
+        regions: [...(regionsByCountry.get(code) ?? [])].sort((a, b) => a.localeCompare(b)),
+        ...(regionNames && regionNames.size > 0 ? { regionNames: Object.fromEntries(regionNames) } : {}),
+      };
+    });
   writeFileSync(HIERARCHY_OUT, JSON.stringify(hierarchy));
   console.error(
     `wrote ${HIERARCHY_OUT} (${hierarchy.length} countries, ${hierarchy.reduce((n, c) => n + c.regions.length, 0)} regions) and ${CITIES_OUT} (${cityCount} cities)`,
@@ -267,11 +289,14 @@ async function main(): Promise<void> {
   writeFileSync(COUNTRIES_OUT, JSON.stringify(countryCollection));
   console.error(`wrote ${COUNTRIES_OUT} (${countryCollection.features.length} countries)`);
 
-  const regionCollection: FeatureCollection<Polygon | MultiPolygon, { name: string; country: string }> = {
+  const regionCollection: FeatureCollection<
+    Polygon | MultiPolygon,
+    { name: string; nameEn?: string; country: string }
+  > = {
     type: "FeatureCollection",
     features: [...finalRegions.values()].map((r) => ({
       type: "Feature",
-      properties: { name: r.name, country: r.country },
+      properties: { name: r.name, ...(r.nameEn ? { nameEn: r.nameEn } : {}), country: r.country },
       geometry: r.feature.geometry,
     })),
   };

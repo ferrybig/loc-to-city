@@ -644,35 +644,29 @@ section, since those are spec decisions rather than pipeline work.
   correctly. Also blocks pushing `--max-depth` further worldwide (see
   "Europe scaling test" below): finer subdivision only exposes this same
   problem more visibly, it doesn't fix it.
-- **International/local name pairs aren't populated.** Section 7.4 of
-  `binary-format.md` and the reader (`placeTable.ts`'s `.split("|")`)
-  already support `local|international|alt...` name entries, but nothing
-  in `data-ingest` captures a second name to join in -- every entry the
-  pipeline currently produces is a single name. Confirmed the source data
-  actually has it: the raw admin boundary export
-  (`data-ingest/work-world/*-admin.geojson`) carries a plain `name:en`
-  property already, on 81,279 of 357,825 admin_level features (~23% --
-  the rest genuinely have no English name tagged in OSM). Adding it for
-  regions/cities is real but not free: `placeIds.ts` currently uses the
-  *same* `name`/`region` string both as the hierarchy's display name and
-  as the exact-match join key between a hierarchy region and its cities
-  (`` `${country} ${name}` ``, `data-ingest/src/lib/adminBoundaryIndex.ts`
-  and `compressor/src/placeIds.ts`). Naively joining `name:en` into that
-  same field would break every match whose two sides pick up the
-  international name inconsistently -- the join key needs to stay the
-  plain local `name` throughout ingest/matching, with the `local|intl`
-  string only assembled once, at the very end, when `nameEntries` is
-  built for the name blocks. Countries are a separate problem: Natural
-  Earth's `ne_10m_admin_0_countries.geojson` (the current country source)
-  has no local-name field at all -- its `NAME`/`NAME_EN` properties are
-  both already the English name (confirmed for `NL`: `NAME` = `NAME_EN` =
+- **International/local name pairs aren't populated for countries.**
+  Regions and cities now get them: `adminBoundaryIndex.ts` captures OSM's
+  `name:en` tag alongside `name` into `nameEn` (on both `CityCandidateMeta`
+  and `RegionCandidate`), `prepare-world.ts` carries it into each city
+  feature's `nameEn` property and into a per-country `regionNames` map
+  (local region name -> international name) on the hierarchy JSON, and
+  `compressor/src/placeIds.ts`'s `assembleNameEntry` joins `local|intl`
+  into the actual name entry only at the very end, when `nameEntries` is
+  built -- the region/city join key (`` `${country} ${region}` ``) stays
+  the plain local `name`/`region` string throughout ingest/matching,
+  completely unaffected by whether either side has an international name.
+  Countries are still English-only: Natural Earth's
+  `ne_10m_admin_0_countries.geojson` (the current country source) has no
+  local-name field at all -- its `NAME`/`NAME_EN` properties are both
+  already the English name (confirmed for `NL`: `NAME` = `NAME_EN` =
   `"Netherlands"`, not `"Nederland"`), so a genuine `Nederland|The
   Netherlands` pair would need country geometry/names to come from OSM's
   own `admin_level=2` relations instead of (or alongside) Natural Earth --
-  a bigger change than regions/cities, which already have both tags
-  sitting unused in the existing extract. This and the item above both
-  need the same new OSM `admin_level=2` country source, so they're
-  natural to tackle together.
+  those relations are already extracted (unfiltered) into
+  `data-ingest/work-world/*-admin.geojson` by `extract-boundaries.sh`, but
+  discarded by `adminBoundaryIndex.ts`'s `PLAUSIBLE_ADMIN_LEVELS` prefilter
+  (levels 4-11 only). This and the item above both want the same new OSM
+  `admin_level=2` country source, so they're natural to tackle together.
 - **New York (and likely other New England-convention US states) resolve
   at region grain, not city.** See the US entry under "Resolved" below --
   New York's real municipal tier is OSM `admin_level=7`, not the
