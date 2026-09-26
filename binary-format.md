@@ -29,7 +29,8 @@ without decompressing the whole list.
 12. [Open Issues](#12-open-issues)
 - [Appendix A. Worked Example](#appendix-a-worked-example)
 - [Appendix B. Text Search Index](#appendix-b-text-search-index)
-- [Appendix C. References](#appendix-c-references)
+- [Appendix C. Place Location Index](#appendix-c-place-location-index)
+- [Appendix D. References](#appendix-d-references)
 
 ## 1. Introduction
 
@@ -65,7 +66,9 @@ The format is designed with the following goals, in rough priority order:
    search over countries, regions, and cities, and resolving a place to
    its parents. An optional sidecar index
    ([Appendix B](#appendix-b-text-search-index)) speeds up text search
-   without changing the file.
+   without changing the file, and another
+   ([Appendix C](#appendix-c-place-location-index)) gives each place a
+   representative coordinate.
 6. **Implementable with no dependencies in JavaScript** (Node.js and
    browsers) as well as other languages: only zlib, integer arithmetic,
    and binary search are required.
@@ -74,8 +77,10 @@ The format is designed with the following goals, in rough priority order:
 
 - The format does not store polygon geometry and cannot answer
   distance-to-border or area queries.
-- The format does not store a representative coordinate per place (see
-  [Section 12](#12-open-issues)).
+- The file itself does not store a representative coordinate per place.
+  One is defined by the chunks ([Section C.3](#c3-representative-cell))
+  and can be precomputed into an optional sidecar file
+  ([Appendix C](#appendix-c-place-location-index)).
 - The format does not attempt exact answers at borders; cells that remain
   ambiguous at the maximum depth are attributed to one place by the
   encoder.
@@ -208,7 +213,8 @@ The file has no trailer. The end of the last chunk is the end of the
 file.
 
 Derived sidecar files, such as the text search index of
-[Appendix B](#appendix-b-text-search-index), are separate files that
+[Appendix B](#appendix-b-text-search-index) and the place location index
+of [Appendix C](#appendix-c-place-location-index), are separate files that
 share the signature and the version field's kind mechanism
 ([Section 5](#5-header)). They are never embedded in a CGEODATA file,
 and a CGEODATA file never refers to them.
@@ -235,7 +241,7 @@ signature. The kinds are:
 |------|--------------------|------|
 | `0`  | `0` to `15`        | A CGEODATA file as described by Sections 4 to 9. |
 | `1`  | `16` to `31`       | A text search index derived from a kind `0` file ([Appendix B](#appendix-b-text-search-index)). |
-| `2`  | `32` to `47`       | Reserved for a place location index, which maps places to coordinates. Not yet specified. |
+| `2`  | `32` to `47`       | A place location index derived from a kind `0` file ([Appendix C](#appendix-c-place-location-index)). |
 
 Other kinds are reserved. Kinds `1` and up are sidecar files: each is
 derived from one kind `0` file, is regenerated rather than edited, and
@@ -685,11 +691,14 @@ The following are known gaps or unresolved decisions in version `0`.
    shrink in east-west extent towards the poles. A per-row scaling
    factor, or fewer columns at high latitudes, would keep cells closer to
    square on the ground. Not addressed in this version.
-2. **No coordinate per place.** A place search that returns a location
-   for each hit (as Immich's `searchPlaces` does) needs a representative
-   point per place. The place table has no such field; a future version
-   could add a delta-coded coordinate per entry, or a sidecar file of
-   kind `2` ([Section 5](#5-header)) could carry it.
+2. **Representative points are derived, not stored.** A place search
+   that returns a location for each hit (as Immich's `searchPlaces`
+   does) needs a representative point per place. The place table has no
+   such field; the point is derived from the chunks
+   ([Section C.3](#c3-representative-cell)) and cached in a sidecar file
+   of kind `2`. It is therefore limited to what the cells show: it cannot
+   be an administrative centre or a label position from the source data.
+   A future version could let the encoder supply one.
 3. **No exact-fallback marker.** The prototype's approach C reserves a
    sentinel for cells that should be resolved by exact polygon
    arithmetic. This format only supports build-time attribution
@@ -1250,7 +1259,384 @@ now yields `01`, making all three cities candidates; comparing their
 names confirms only `Zaandam`. The result is the same as with `G = 1`,
 after two more name comparisons.
 
-## Appendix C. References
+## Appendix C. Place Location Index
+
+This appendix defines a **representative cell** for every place, a
+cell near the middle of the place's area whose centre serves as the
+place's coordinate, and specifies an OPTIONAL sidecar file that stores
+it. The file is derived entirely from one CGEODATA file and carries file
+kind `2` ([Section 5](#5-header)).
+
+### C.1. Purpose and Properties
+
+A place search that shows its results on a map, or hands them to an
+application that wants a coordinate per result, needs a point for each
+place. The file stores areas, not points, so the point has to be
+derived from the chunks: [Section C.3](#c3-representative-cell) defines
+it. Deriving it for one place means decoding every chunk that might
+hold one of the place's cells, which at worldwide scale is every chunk,
+about 1.5 seconds. The index described here stores the result for every
+place, so that finding it costs one read of a few bytes.
+
+The index has the following properties:
+
+- **It is a cache, not a data source.** Every entry is the
+  representative cell of [Section C.3](#c3-representative-cell), which a
+  reader can compute from the source file alone. A reader MUST produce
+  the same result with and without the index.
+- **It is a pure function of its source.** Two writers given the same
+  source file MUST produce byte-identical files. The file carries no
+  timestamp and no parameter chosen by the writer. It is bound to its
+  source by a checksum ([Section C.4](#c4-file-layout)).
+- **It is uncompressed and fixed-width.** Entry `id` is at a computed
+  offset, so a lookup reads exactly one entry and a reader needs to keep
+  nothing but the header in memory between lookups.
+- **It is disposable.** It can be rebuilt from its source at any time,
+  and a reader that lacks it computes the same cells from the chunks.
+
+### C.2. Entries
+
+An **entry** names one cell of the source file, or no cell at all. It
+is an unsigned integer. Let `B = width_exp + height_exp`, so that a
+chunk index fits in `B` bits. The entry for the cell of depth `d` whose
+chunk index is `i` ([Section 6.1](#61-chunk-grid)) and whose stored code
+is `code` ([Section 8.1](#81-cell-grid-and-morton-codes)) is
+
+```
+entry = 2^(B + 2d) + i × 4^d + (code >> 2(D - d))
+```
+
+that is, a single `1` bit (the **marker**), followed by the `B` bits of
+the chunk index, followed by the cell's `2d`-bit path from the top of
+the chunk's quadtree. The entry `0` has no marker and means that the
+place has no cells. A reader decodes a non-zero entry as follows:
+
+1. Let `t` be the position of the most significant `1` bit, so that
+   `2^t <= entry < 2^(t+1)`.
+2. `t - B` MUST be even, and between `0` and `2D` inclusive. Otherwise
+   the entry is invalid. The depth is `d = (t - B) / 2`.
+3. Let `rest = entry - 2^t`. The chunk index is `i = rest >> 2d`, and
+   the stored code is `(rest mod 4^d) << 2(D - d)`.
+
+Since `rest < 2^(B + 2d)`, the chunk index is always less than
+`W × H`. The largest entry, for a cell of depth `D`, has
+`B + 2D + 1` bits, so every entry of a file fits in
+
+```
+entry_width = ceil((width_exp + height_exp + 2 × max_depth + 1) / 8)
+```
+
+bytes, which is what the index uses for all of them. For a `64 × 64`
+chunk grid this is 4 bytes up to `max_depth = 9`, 5 bytes up to
+`max_depth = 13`, and 6 bytes up to `max_depth = 17`. A reader whose
+integers are exact only up to `2^53`, such as one in JavaScript, can
+handle entries of up to 6 bytes and MAY reject an index with wider
+ones. The marker is what lets one width serve cells of
+every depth, and lets `0` stand for no cell without reserving any
+valid cell's value.
+
+Writers following this version store only full-precision cells
+(`d = D`), as [Section C.3](#c3-representative-cell) requires. Readers
+MUST nevertheless accept an entry of any depth, so that a later version
+can name coarser cells without a new layout.
+
+### C.3. Representative Cell
+
+The **area** of a place is the set of records, across all chunks,
+attributed to that place or to a place under it: for a city, the
+records whose palette entry is the city; for a region, those of the
+region and of its cities; for a country, those of the country, its
+regions, and their cities ([Section 7.1](#71-identifiers-and-hierarchy)).
+Records with palette index `0` belong to no area. A place whose area is
+empty has no representative cell, and its entry is `0`.
+
+Each record of the area is placed on the global grid of full-precision
+cells used by the lookup procedure ([Section 9](#9-lookup-procedure),
+step 2). For a record with stored code `code` and depth `d` in chunk
+`i = r × W + c`, let `(x, y)` be the cell whose full-precision code is
+`code`, the south-west corner cell of the record. Then the record
+covers the `s × s` square of global cells with south-west corner
+`(gx, gy)`, where
+
+```
+gx = c × 2^D + x        gy = r × 2^D + y        s = 2^(D - d)
+```
+
+and it has **weight** `s × s`, its area in full-precision cells. The
+representative cell is computed from these squares in four steps.
+
+1. **Centres.** The centre of each square, in units of half a cell, is
+   `u = 2 × gx + s` horizontally and `v = 2 × gy + s` vertically. Both
+   are integers.
+2. **Weighted median per axis.** Let `T` be the total weight of the
+   area. For the `u` axis, let `lo` be the smallest centre `u` for which
+   the weight of all squares with centre at most `u` is at least `T / 2`.
+   If that weight is exactly `T / 2`, let `hi` be the smallest centre
+   greater than `lo`, which exists because the remaining weight is
+   positive. Otherwise let `hi = lo`. The median lies at `(lo + hi) / 2`
+   half-cells, in the full-precision cell column
+
+   ```
+   fx = floor((lo + hi) / 4)
+   ```
+
+   The same procedure on the `v` centres gives the row `fy`. With equal
+   weights this is the familiar median: the middle value of an odd
+   count, and the midpoint of the two middle values of an even one.
+3. **Nearest cell of the area.** For every square, its cell nearest to
+   `(fx, fy)` is `(clamp(fx, gx, gx + s - 1), clamp(fy, gy, gy + s - 1))`,
+   at offset `(dx, dy)` from `(fx, fy)`. Its squared distance is
+
+   ```
+   (a × dx)^2 + (b × dy)^2      where  g = min(2 × H, W),  a = 2 × H / g,  b = W / g
+   ```
+
+   which is proportional to the squared distance in degrees, a
+   full-precision cell being `360 / (W × 2^D)` degrees wide and
+   `180 / (H × 2^D)` high. The representative cell is the nearest of
+   these cells. Among equally near cells, it is the one in the lower
+   row, and among those, the one in the lower column. When `(fx, fy)`
+   itself lies in the area, it is the only cell at distance `0`, and so
+   it is the representative cell.
+4. **Entry.** The representative cell `(px, py)` is the full-precision
+   cell `x = px mod 2^D`, `y = py mod 2^D` of chunk
+   `i = (py >> D) × W + (px >> D)`, and its entry is formed as in
+   [Section C.2](#c2-entries) with `d = D`.
+
+The representative cell always lies within one of the area's records,
+so a lookup ([Section 9](#9-lookup-procedure)) of any point in it, in
+particular its centre, resolves to the place or to a place under it.
+The result depends only on the set of records in the area, not on the
+order in which they are visited.
+
+Every quantity above is an integer, and implementations MUST compute
+them exactly. The largest is a squared distance, which is less than
+`(a × W × 2^D)^2 + (b × H × 2^D)^2`; an implementation whose integers
+are exact only up to `2^53`, such as one in JavaScript, SHOULD check
+this bound before computing any representative cell. It holds for a
+`64 × 64` chunk grid up to `max_depth = 19`.
+
+Informally: the median locates the middle of the place along each axis
+independently, weighting every cell by its area. Unlike the mean, it is
+not dragged away by a distant exclave or island. Unlike the centre of
+the bounding box, it follows where the area actually is. When the
+median point falls outside the place, as it can for a crescent-shaped
+area or one made of several islands, step 3 moves it to the nearest
+cell that is inside. Two known imperfections follow from working on
+the grid: weights are areas in degrees, not on the ground, so cells at
+high latitude count for more than their true size; and the horizontal
+axis does not wrap, so the median of a place that straddles the 180th
+meridian lands on one side of it rather than in the middle.
+
+### C.4. File Layout
+
+The file is one header followed by the entries, with no padding and no
+trailer.
+
+| Field             | Type                         | Description |
+|-------------------|------------------------------|-------------|
+| `signature`       | 8 bytes                      | The ASCII bytes `CGEODATA`, as in [Section 5](#5-header). |
+| `version`         | varint                       | Kind and version as defined in Section 5. This appendix specifies kind `2`, version `0`, so the value is `32` (`20`). |
+| `source_checksum` | u64                          | Checksum of the start of the source file, defined below. |
+| `entry_width`     | u8                           | The width in bytes of every entry. MUST equal the value given in [Section C.2](#c2-entries) for the source's header. |
+| `place_count`     | varint                       | `N`, the number of places in the source ([Section 7.1](#71-identifiers-and-hierarchy)). |
+| `entries`         | `N × entry_width` bytes      | The entry of place `0`, then of place `1`, and so on, each an unsigned little-endian integer of `entry_width` bytes. |
+
+The file length MUST be exactly the header length plus
+`N × entry_width`. The entry of place `id` starts at byte
+`header_length + id × entry_width`.
+
+`source_checksum` is the 64-bit FNV-1a hash
+([Section B.6](#b6-source-checksum)) of the first bytes of the source
+file up to, but not including, the first chunk: the header, the
+directory, and the place table, that is file offsets `0` to
+`chunks_start - 1` ([Section 6.3](#63-locating-a-chunk)). It is stored
+least significant byte first.
+
+The index depends on the chunks as well as on the place table, so the
+checksum of [Section B.6](#b6-source-checksum), which covers only the
+place table, would not do. Hashing the chunks themselves would make
+loading an index read the whole source file. The directory is a
+compromise: it holds the length of every compressed chunk, which
+changes whenever the chunk's content does, except in the unlikely case
+that a rebuilt chunk compresses to exactly its old length. Writers that
+rebuild a source SHOULD rebuild its index at the same time rather than
+rely on the checksum to catch the difference.
+
+Readers SHOULD compute the checksum when they load an index, and a
+reader that does so MUST reject an index whose `source_checksum`
+differs from it. A reader that rejects an index falls back to computing
+representative cells from the chunks.
+
+### C.5. Lookup Procedure
+
+To find the representative coordinate of place `id` with an index:
+
+1. **Validate.** `id` MUST be less than `N`.
+2. **Read the entry.** Read `entry_width` bytes at
+   `header_length + id × entry_width` and interpret them as an unsigned
+   little-endian integer.
+3. **Decode** it as in [Section C.2](#c2-entries). An entry of `0`
+   means the place has no representative cell, and no coordinate.
+4. **Compute the coordinate.** The cell's extent follows from its chunk
+   ([Section 6.1](#61-chunk-grid)) and its path within the chunk
+   ([Section 8.1](#81-cell-grid-and-morton-codes)), as for any record.
+   The place's coordinate is the centre of that extent.
+
+Without an index, a reader computes the same cell from the chunks by
+[Section C.3](#c3-representative-cell) and continues at step 4.
+
+The extent of the cell tells a reader how precisely to present the
+coordinate: a full-precision cell of a worldwide file with
+`max_depth = 8` is about `0.02°` wide, so three decimals are
+meaningful and more are not.
+
+### C.6. Robustness
+
+A locate index may come from an untrusted source, or may be stale.
+Readers MUST NOT assume that it is well formed or that it matches its
+source.
+
+- Readers MUST verify the signature, kind, and version before
+  interpreting any other field.
+- Readers MUST check that `entry_width` equals the value
+  [Section C.2](#c2-entries) gives for the source, that `place_count`
+  equals `N`, and that the file length is exactly the header length
+  plus `N × entry_width`, before reading any entry.
+- Readers MUST reject an entry whose marker is not at a valid position
+  ([Section C.2](#c2-entries), step 2). The decoding cannot produce a
+  chunk index outside the grid, so no further bounds check is needed
+  before computing the cell's extent.
+- Unlike a search index, a locate index contributes its result directly:
+  a malformed or mismatched index yields a wrong coordinate rather than
+  a missed one. A reader that cannot trust the pairing MAY confirm a
+  result by looking up its coordinate and checking that it resolves to
+  the place or to a place under it, at the cost of decoding one chunk.
+
+### C.7. Design Notes
+
+This section is informative.
+
+**Measurements.** On a worldwide file of 319,440 places with a
+`64 × 64` chunk grid and `max_depth = 8` (9.2 MiB), entries are 4 bytes
+and the index is 1.2 MiB. Building it decodes the chunks two or three
+times, since places are processed a batch of countries at a time to
+bound memory, and takes about 11 seconds. Without the index, one representative cell
+costs about 1.6 seconds, nearly all of it spent decoding chunks. With
+it, a lookup takes well under a millisecond, even with the file evicted
+from the operating system's cache, and a reader that is idle between
+lookups holds nothing but an open file. An older worldwide build at
+`max_depth = 11` (67 MiB, 255,555 places) needs 5-byte entries, for an
+index of 1.2 MiB built in 2.5 minutes.
+
+**Alternatives measured.** Storing only the chunk of each place's cell
+(2 bytes per place for a `64 × 64` grid) and decoding that chunk at
+lookup time cost 4 to 6 ms per lookup, and about 50 ms for a burst of
+ten, the typical page of search results; the time goes into decoding
+the chunk, not reading it. With `max_depth = 11`, where chunks are
+about ten times larger, it would cost tens of milliseconds per lookup.
+Compressing the entries in blocks of 256 saved 30% of the size and
+doubled the lookup time, since the cells of neighbouring places are
+close but their low-order bits are not. Storing a coarser cell to save
+bytes and refining it from the chunk at lookup time has the costs of
+the chunk-only design for every place whose cell is deeper than the
+coarse cell. Fitting 4-byte entries at `max_depth = 11` means coarsening
+every cell deeper than depth 9, which was 16% of places, with chunk
+decodes of 40 to 140 ms each.
+
+**Why the whole area.** The records attributed directly to a region or
+country are only the parts not covered by any of its children: often
+nothing at all, and otherwise leftover strips such as water or
+unincorporated land. On the worldwide file, 41% of regions have no
+records of their own. Including the records of every place under a
+place makes the coordinate of a region or country the middle of the
+region or country, as a user expects.
+
+### C.8. Worked Example
+
+This example indexes the source file of
+[Appendix A](#appendix-a-worked-example). There, `B = 1 + 1 = 2` and
+`D = 2`, so entries have at most `2 + 4 + 1 = 7` bits and
+`entry_width = 1`. The file is `19 + 7 = 26` bytes.
+
+#### C.8.1. File (26 bytes)
+
+```
+43 47 45 4f 44 41 54 41   signature "CGEODATA"
+20                        version 32 -> kind 2 (place location index), version 0
+ea 66 ac 6c a7 f7 4b 33   source_checksum 0x334bf7a76cac66ea
+01                        entry_width 1
+07                        place_count 7
+73 00 73 00 00 74 00      entries of places 0 to 6
+```
+
+The checksum is the FNV-1a 64 hash of the first 131 bytes of the
+Appendix A file: the 17-byte header, the 5-byte directory, and the
+109-byte place table, up to the first byte of chunk `3` at offset
+`131`.
+
+#### C.8.2. Areas
+
+All records are in chunk `3` (`c = 1`, `r = 1`), so `gx = 4 + x` and
+`gy = 4 + y`. The four records with a place are:
+
+| Record | Code, depth | Place            | `(gx, gy)` | `s` | Weight | `u`  | `v`  |
+|--------|-------------|------------------|------------|-----|--------|------|------|
+| 0      | 0, 1        | 2, Noord-Holland | (4, 4)     | 2   | 4      | 10   | 10   |
+| 1      | 4, 2        | 5, Zaandam       | (6, 4)     | 1   | 1      | 13   | 9    |
+| 3      | 8, 1        | 2, Noord-Holland | (4, 6)     | 2   | 4      | 10   | 14   |
+| 4      | 12, 2       | 5, Zaandam       | (6, 6)     | 1   | 1      | 13   | 13   |
+
+Record `2` has palette index `0`. The area of Zaandam (`5`) is records
+`1` and `4`. The areas of Noord-Holland (`2`) and of Nederland (`0`),
+which contains it, are all four records. Amsterdam, België, and both
+Antwerpens have no records, so their entries are `00`.
+
+#### C.8.3. Zaandam
+
+`T = 2`. Both `u` centres are `13`, which already holds more than half
+the weight, so `lo = hi = 13` and `fx = floor(26 / 4) = 6`. The `v`
+centres are `9` and `13`, one weight each. The weight at or below `9`
+is exactly `T / 2`, so `lo = 9`, `hi = 13`, and
+`fy = floor(22 / 4) = 5`: the median falls midway between Zaandam's two
+cells.
+
+Cell `(6, 5)` is local cell `(2, 1)` of chunk `3`, code `6`, which has
+no record. The nearest cells of the area are record `1`'s `(6, 4)` and
+record `4`'s `(6, 6)`, both one row away. With `g = min(4, 2) = 2`,
+`a = 2` and `b = 1`, both are at squared distance `1`. The tie goes to
+the lower row, `(6, 4)`: local cell `(2, 0)` of chunk `3`, code `4`.
+The entry is `2^(2 + 4) + 3 × 16 + 4 = 116`, `74`.
+
+Its centre is `lat -90 + 4.5 × 22.5 = 11.25`,
+`lon -180 + 6.5 × 45 = 112.5`, which is the cell of the first lookup in
+[Section A.5](#a5-lookups), Zaandam.
+
+#### C.8.4. Noord-Holland and Nederland
+
+`T = 4 + 1 + 4 + 1 = 10`. The `u` centres are `10` with weight `8`
+and `13` with weight `2`: `10` holds more than half, so
+`fx = floor(20 / 4) = 5`. The `v` centres are `9` (weight `1`), `10`
+(`4`), `13` (`1`), and `14` (`4`). The weight at or below `10` is `5`,
+exactly half, so `lo = 10`, `hi = 13`, and `fy = floor(23 / 4) = 5`.
+
+Cell `(5, 5)` is local cell `(1, 1)`, inside record `0`'s square, so it
+is the representative cell. Its code at depth `2` is `3`, and the
+entry is `64 + 48 + 3 = 115`, `73`. Its centre is `lat 33.75`,
+`lon 67.5`, where a lookup finds record `0`: Noord-Holland, which is
+the place itself for ID `2` and a place under it for ID `0`.
+
+#### C.8.5. Decoding
+
+Entry `74` is `116`. Its most significant bit is `t = 6`, and
+`t - B = 4` is even and at most `2D = 4`, so `d = 2`.
+`rest = 116 - 64 = 52`, the chunk index is `52 >> 4 = 3`, and the
+stored code is `52 mod 16 = 4`. An entry of `75` (`117`) would decode
+the same way to code `5`, a cell with no place: a well-formed entry is
+not necessarily a correct one, which is what the checksum is for. An
+entry of `20` (`32`) would be rejected, since `t - B = 3` is odd.
+
+## Appendix D. References
 
 - [RFC1950] Deutsch, P. and J-L. Gailly, "ZLIB Compressed Data Format
   Specification version 3.3", May 1996.

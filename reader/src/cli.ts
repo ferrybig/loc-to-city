@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { buildLocateIndexCmd } from "./cli/buildLocateIndex.js";
 import { buildSearchIndexCmd } from "./cli/buildSearchIndex.js";
 import { chunk } from "./cli/chunk.js";
 import { info } from "./cli/info.js";
@@ -18,6 +19,7 @@ const COMMANDS: readonly Command[] = [
 	show,
 	chunk,
 	locate,
+	buildLocateIndexCmd,
 ];
 
 const USAGE = `usage: cgeodata <command> <file.bin> [...]

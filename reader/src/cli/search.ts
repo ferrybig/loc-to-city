@@ -32,8 +32,10 @@ grep's convention.
                  stops the scan as soon as it has enough matches; with
                  --sort, the whole file has to be scored first, since the
                  best match isn't necessarily the first one found.
-  --locate       append a lat,lon coordinate to each result (sequential
-                 chunk scan per match -- use --limit to keep it fast)
+  --locate       append a lat,lon coordinate to each result, as
+                 \`locate\` prints it (one read per match with a locate
+                 index next to <file>, a scan of every chunk per match
+                 without one -- then use --limit to keep it fast)
   --index F      use this bitmap search index (built with
                  build-search-index) to skip most of the city table,
                  instead of <file>'s default <file>.search-index.bin

@@ -909,7 +909,10 @@ section, since those are spec decisions rather than pipeline work.
   Immich's reverse geocoding" above).** Addressed via a bitmap search
   index (`build-search-index` CLI command, attached with
   `CGeoDataReader.useSearchIndex()` / the `--index` flag for `search`),
-  conforming to `binary-format.md` Appendix B.
+  conforming to `binary-format.md` Appendix B. The coordinate per result
+  comes from `CGeoDataReader.locate()`, backed by a place location index
+  (`build-locate-index`, `binary-format.md` Appendix C) that turns a
+  ~1.6s scan of every chunk into a sub-millisecond read.
 
 ## Historical record: the Python prototype
 

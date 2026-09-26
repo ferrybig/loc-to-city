@@ -84,6 +84,7 @@ npx tsx reader/src/cli.ts search data/world.bin amst        # exit 1 when nothin
 npx tsx reader/src/cli.ts search data/world.bin amsterdam --sort  # rank by relevance, not id order
 npx tsx reader/src/cli.ts show   data/world.bin 192858      # a place id from any other command
 npx tsx reader/src/cli.ts chunk  data/world.bin 3232        # the chunk index lookup printed
+npx tsx reader/src/cli.ts locate data/world.bin 309463      # a representative lat, lon per place id
 ```
 
 `<file.bin>` may be `-` for stdin. `search` is a linear scan over the
@@ -102,6 +103,24 @@ whole-word match beats plain substring, city beats region beats country
 to score every match before yielding any, since the best one isn't
 necessarily the first found; plain `search` keeps the cheaper early-exit
 scan when `--limit` is given without `--sort`.
+
+`locate` (and `search --locate`) returns the centre of a place's
+representative cell (`binary-format.md` Section C.3): the area-weighted
+per-axis median of the cells of the place *and everything under it*
+(a country's regions and cities count), moved to the nearest cell inside
+that area if the median falls outside it -- so `query()` at the point
+always resolves to the place or a descendant. Computing it decodes every
+chunk (~1.6s on `data/world.bin`); a locate index (Appendix C,
+`build-locate-index <file.bin> --output data/<name>.locate-index.bin`,
+~11s, one fixed-width entry per place id) makes it one small read, and
+is picked up next to the `.bin` and overridden (`useLocateIndex()`,
+`--index`/`--no-index`) exactly like the search index. Index and scan
+must agree -- `reader/test/locateIndex.test.ts` asserts that on every
+place of `data/zuid-holland.bin`, and its builder output byte-for-byte
+against Appendix C.8. The builder reads chunks with `chunk(i, { cache:
+false })`: cached chunks are `WeakRef`s, whose targets stay alive until
+the current synchronous job ends, so a cached one-pass walk pins every
+chunk in memory.
 
 Also runnable as `npm run reader -- <subcommand> ...` (the `--` is
 required so npm forwards args instead of eating them).

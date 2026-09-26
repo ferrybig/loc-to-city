@@ -16,7 +16,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CGeoDataReader } from "@loc-to-city/read\er";
+import {
+	CGeoDataReader,
+	locateIndexPathFor,
+	searchIndexPathFor,
+} from "@loc-to-city/read\er";
 import { Piscina } from "piscina";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -24,6 +28,28 @@ const REPO_ROOT = path.resolve(__dirname, "../..");
 const PUBLIC_DIR = path.resolve(__dirname, "../public");
 
 const TILE_RE = /^\/tiles\/(\d+)\/(\d+)\/(\d+)\.png$/;
+
+/** Attaches the sidecar index at `indexPath` if there is one, read on
+ * demand from the file; one that doesn't match the dataset is skipped. */
+function attachIndex(
+	kind: string,
+	indexPath: string,
+	use: (index: string | undefined) => void,
+): void {
+	if (!existsSync(indexPath)) {
+		console.error(`No ${kind} index at ${indexPath}; ${kind} scans the dataset.`);
+		return;
+	}
+	try {
+		use(indexPath);
+		console.error(`Using ${kind} index ${indexPath}.`);
+	} catch (error) {
+		use(undefined);
+		console.error(
+			`Ignoring ${kind} index ${indexPath}: ${(error as Error).message}`,
+		);
+	}
+}
 
 function main(): void {
 	const port = Number(process.argv[2] ?? 8766);
@@ -34,20 +60,18 @@ function main(): void {
 
 	console.error(`Loading ${datasetPath}...`);
 	const reader = CGeoDataReader.open(datasetPath);
-	// Optional sidecar from `cgeodata build-search-index`: data/world.bin
-	// pairs with data/world.search-index.bin. Only speeds up /api/search;
-	// results are the same without it.
-	const indexPath = `${datasetPath.replace(/\.bin$/, "")}.search-index.bin`;
-	if (existsSync(indexPath)) {
-		try {
-			reader.useSearchIndex(readFileSync(indexPath));
-			console.error(`Using search index ${indexPath}.`);
-		} catch (error) {
-			console.error(
-				`Ignoring search index ${indexPath}: ${(error as Error).message}`,
-			);
-		}
-	}
+	// Optional sidecars next to the dataset: data/world.bin pairs with
+	// data/world.search-index.bin (`cgeodata build-search-index`) and
+	// data/world.locate-index.bin (`cgeodata build-locate-index`). They
+	// only speed up /api/search and /api/locate; results are the same
+	// without them. Attached up front so a stale one is skipped with a
+	// warning here instead of failing every request.
+	attachIndex("search", searchIndexPathFor(datasetPath), (index) =>
+		reader.useSearchIndex(index),
+	);
+	attachIndex("locate", locateIndexPathFor(datasetPath), (index) =>
+		reader.useLocateIndex(index),
+	);
 	console.error("Loaded.");
 	const piscina = new Piscina({
 		filename: path.resolve(__dirname, "tile-worker.js"),

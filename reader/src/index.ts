@@ -8,6 +8,16 @@ export { type ChunkRecords, parseChunk } from "./chunk.js";
 export { readHeaderAndDirectory } from "./container.js";
 export { type CGeoDataDirectory, parseDirectory } from "./directory.js";
 export { type CGeoDataHeader, parseHeader } from "./header.js";
+export {
+	type BuildLocateIndexOptions,
+	buildLocateIndex,
+	decodeLocateEntry,
+	encodeLocateEntry,
+	type LocateCell,
+	LocateIndex,
+	locateEntryWidth,
+	locateIndexPathFor,
+} from "./locateIndex.js";
 export { lowBits, mortonDecode, mortonEncode, shiftRight } from "./morton.js";
 export {
 	type PlaceTableInfo,

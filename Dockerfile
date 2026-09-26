@@ -19,6 +19,13 @@ COPY demo/tsconfig.json demo/
 
 RUN npm run build -w reader && npm run build -w demo
 
+# Sidecar indexes next to world.bin, which the demo picks up by name:
+# /api/search checks only the cities the search index leaves over, and
+# /api/locate reads one entry instead of scanning every chunk.
+COPY data/world.bin data/world.bin
+RUN node reader/dist/cli.js build-search-index data/world.bin --output data/world.search-index.bin \
+ && node reader/dist/cli.js build-locate-index data/world.bin --output data/world.locate-index.bin
+
 RUN npm prune --omit=dev
 
 # ---- runtime ----
@@ -32,7 +39,7 @@ COPY --from=builder /app/reader/dist reader/dist
 COPY --from=builder /app/demo/package.json demo/
 COPY --from=builder /app/demo/dist demo/dist
 COPY demo/public demo/public
-COPY data/world.bin data/world.bin
+COPY --from=builder /app/data/world.bin /app/data/world.search-index.bin /app/data/world.locate-index.bin data/
 
 EXPOSE 8766
 ENV HOST=::

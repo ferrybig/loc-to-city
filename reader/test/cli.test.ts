@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -205,6 +205,47 @@ test("search: --level, --country and --limit narrow the scan", () => {
   assert.equal(run(["search", fixturePath, "a", "--country", "nederland", "--level", "city"]).stdout, `4\tcity\tAmsterdam\tNoord-Holland\t${NL}\n5\tcity\tZaandam\tNoord-Holland\t${NL}\n`);
   assert.equal(jsonLines(run(["search", fixturePath, "dam", "--limit", "1", "--json"]).stdout).length, 1);
   assert.equal(run(["search", fixturePath]).status, 2, "text is required");
+});
+
+// --- locate / build-locate-index -------------------------------------------
+
+test("locate: prints a point per id at the cell's precision, exit 1 when one has none", () => {
+  // Appendix C.8: Zaandam, then Nederland; België has no cells. The cells
+  // are 22.5 degrees high, so no decimals are meaningful.
+  const { stdout, stderr, status } = run(["locate", fixturePath, "5", "0", "1", "--no-index"]);
+  assert.equal(status, 1);
+  assert.equal(stdout, "11, 113\n34, 68\n");
+  assert.equal(stderr, "1: no geometry found\n");
+  assert.equal(run(["locate", fixturePath]).status, 2, "an id is required");
+  assert.equal(run(["locate", fixturePath, "5", "--index", "x", "--no-index"]).status, 2);
+});
+
+test("build-locate-index: writes the Appendix C.8 file, which locate picks up next to the .bin", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "cgeodata-cli-locate-"));
+  const binPath = path.join(dir, "fixture.bin");
+  const indexPath = path.join(dir, "fixture.locate-index.bin");
+  writeFileSync(binPath, APPENDIX_A_BYTES);
+  const build = run(["build-locate-index", binPath, "--output", indexPath]);
+  assert.equal(build.status, 0);
+  assert.equal(
+    readFileSync(indexPath).toString("hex"),
+    "4347454f44415441" + "20" + "ea66ac6ca7f74b33" + "01" + "07" + "73007300007400",
+  );
+  assert.equal(run(["locate", binPath, "5", "0"]).stdout, "11, 113\n34, 68\n");
+  assert.match(run(["search", binPath, "zaandam", "--locate"]).stdout, /\tZaandam\t.*\t11,113\n$/);
+
+  // A stale index is an error rather than a silent fallback; --no-index or
+  // an explicit --index gets past it.
+  const stale = readFileSync(indexPath);
+  stale[9] = stale[9]! ^ 0xff;
+  writeFileSync(indexPath, stale);
+  const broken = run(["locate", binPath, "5"]);
+  assert.equal(broken.status, 2);
+  assert.match(broken.stderr, /fixture\.locate-index\.bin: .*checksum mismatch/);
+  assert.equal(run(["locate", binPath, "5", "--no-index"]).stdout, "11, 113\n");
+  const good = path.join(dir, "elsewhere.bin");
+  assert.equal(run(["build-locate-index", binPath, "--output", good]).status, 0);
+  assert.equal(run(["locate", binPath, "5", "--index", good]).stdout, "11, 113\n");
 });
 
 // --- show / chunk / info ----------------------------------------------------
