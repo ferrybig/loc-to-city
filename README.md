@@ -671,12 +671,34 @@ section, since those are spec decisions rather than pipeline work.
   at region grain, not city.** See the US entry under "Resolved" below --
   New York's real municipal tier is OSM `admin_level=7`, not the
   nationally-correct 8, and the current one-level-per-*country* model in
-  `countryAdminLevels.ts` can't express a per-state exception. Candidate
-  fix, untested: `US: { city: [7, 8] }`. Level 8 stays primary (largest
-  share), and level-7 towns whose representative point no incorporated
-  place covers get gap-filled -- the same pattern that fixed London and
-  Scotland (see GB under "Resolved"). The catch: it would also add every
-  uncovered Midwest civil township, so it needs its own cities500 run.
+  `countryAdminLevels.ts` can't express a per-state exception.
+  `US: { city: [7, 8] }` was tried and measured (scoped North America
+  build, full cities500 US run, 21,785 places): it does fix the target
+  cases (Manhattan, Brooklyn, the Bronx, Albany all resolve correctly),
+  but nets **399 matches worse overall** (63.95% -> 62.12%), because it's
+  not a clean gap-fill the way GB/DE's multi-level configs were. Diffed
+  the two builds directly: 253 points flip from wrong/missing to
+  correct, but 652 flip from correct to wrong -- concretely, a
+  level-7 township can out-vote a real, smaller level-8 town it overlaps
+  at a shared boundary cell, not just fill in cells no level-8 primary
+  reaches at all (confirmed on Wrightsville, AR, 5.5 km^2: a leaf cell at
+  its edge, inside both it and the 1,120 km^2 Big Rock Township it sits
+  in, resolves to the township once township is added as a candidate,
+  because `buildChunkRecords`' max-depth tie-break picks whichever
+  candidate covers the larger *share* of an ambiguous leaf cell, and nothing
+  in `pruneAncestors` treats "geographically nested inside" as an
+  ancestor relationship the way the hierarchy's own city-inside-region
+  chain is -- two same-tier city candidates (a level-8 town and a
+  level-7 gap-fill township) compete on cell coverage share alone. This
+  makes multi-level city configs risky specifically when the added level
+  is much *larger* on average than the primary (true for
+  US townships vs. incorporated places; not true for GB's parish/
+  district/unitary-authority stack, which is closer to a strict subset
+  relationship, or DE's single added level covering only 3 specific
+  cities). Not applied. A real fix would need either a genuine per-state
+  override (not per-country) or a gap-fill mode that only wins cells no
+  primary touches at all, never a share contest against one -- bigger
+  changes than a config edit, not attempted here.
 - **Slovenia has zero cities: another Ireland/Estonia/Portugal-shaped
   region gap.** `SI: { region: [], city: [8] }` -- city coverage is fine
   (101.9%, real municipalities: Bled, Solčava, Mežica confirmed present in
@@ -862,20 +884,10 @@ section, since those are spec decisions rather than pipeline work.
   **Known residual gap: New York (and likely other New England-convention
   states) still resolve at region grain, not city.** Manhattan, Brooklyn,
   the Bronx and Albany all still return `city: null` after the level-8
-  fix above. New York State's real municipal tier in OSM is tagged
-  `admin_level=7` (civil towns/cities/villages), not 8 -- confirmed by
-  scoping the same area-coverage check to just NY State's own polygon:
-  level 7 covers 92.8% of the state (1,000 features) vs. level 8's 2.1%
-  (567 small fragments, not full municipalities). Nationally, though,
-  level 8 is the right choice (10.7% US-wide coverage vs. level 7's 5.5%,
-  since most other states use the standard incorporated-place convention
-  at 8) -- so `COUNTRY_ADMIN_LEVELS`'s one-level-per-*country* model can't
-  express both correctly at once. Fixing this needs the city tier to vary
-  by *state*, not just by country, which is a real pipeline change
-  (multi-level-with-local-fallback in `selectPrimaryLevels`/gap-fill), not
-  a config edit -- not attempted here, left as a known gap: NY-area points
-  gap-fill to `region: New York` instead of showing a wrong city name,
-  which is still no worse than the pre-fix county-grain behavior.
+  fix above -- see "Open" above for why (level 7 is NY's real municipal
+  tier, a multi-level `city` config was tried and measured worse overall
+  for reasons specific to how townships compete with towns at the
+  quadtree's cell-classification stage, not yet fixed).
 
 - **Ireland/Estonia/Portugal-shaped region gaps.** Previously documented
   (and, before that, in `prepare-europe.ts`/the deleted Python prototype)
