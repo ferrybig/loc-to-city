@@ -262,6 +262,20 @@ a large candidate level can out-vote a real, smaller one it geographically
 contains at their shared boundary cells once both are eligible for the
 same cell; `[primary, ...gapFill]` order is what prevents that.
 
+**Voronoi-from-cities500 fallback** (`voronoiFallback.ts`, `cities500.ts`,
+`countryAdminLevels.ts`'s `VORONOI_CITY_FALLBACK`): for a country with a
+genuine, confirmed absence of OSM city-tier admin polygons (Libya, Egypt,
+Chad, Eritrea — 0–0.7% coverage, not fixable by any `admin_level` choice,
+unlike every per-country override above), synthesizes a city polygon per
+`agent-resources/cities500.txt` point instead: `d3-delaunay` builds the
+Voronoi diagram (clipped to a bbox), `@turf/intersect` re-clips each cell
+to the country's real outline. `prepare-world.ts` routes a synthesized
+candidate through the same `assignCityRegion`/`emitCity` path as a real
+OSM one — it isn't a separate output shape, just an extra `city`
+candidate source, opt-in per country (see README's "Libya, Egypt, Chad
+and Eritrea" entry for the full rationale and why a fixed-radius buffer
+per point was rejected in favor of a real tessellation).
+
 **Multi-file country handling.** OSM relations for a single country (e.g.
 Russia, Turkey) can be split across multiple continent extract files with
 zero overlap — each file has a complete, non-overlapping slice. Resolved

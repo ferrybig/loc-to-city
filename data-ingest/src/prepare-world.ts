@@ -41,12 +41,18 @@ import {
 } from "./lib/adminLevelDetection.js";
 import type { PrimaryLevelResult } from "./lib/adminLevelDetection.js";
 import { buildRegionIndex, assignCityRegion } from "./lib/regionPolygons.js";
+import { streamCities500 } from "./lib/cities500.js";
+import type { Cities500Row } from "./lib/cities500.js";
+import { buildCityFallback } from "./lib/voronoiFallback.js";
+import { VORONOI_CITY_FALLBACK } from "./lib/countryAdminLevels.js";
+import type { LonLat } from "./lib/geo.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
 
 const WORK_DIR = path.join(REPO_ROOT, "data-ingest/work-world");
 const COUNTRIES_SOURCE = path.join(REPO_ROOT, "agent-resources/ne_10m_admin_0_countries.geojson");
+const CITIES500_SOURCE = path.join(REPO_ROOT, "agent-resources/cities500.txt");
 
 const HIERARCHY_OUT = path.join(REPO_ROOT, "data/world-hierarchy.json");
 const CITIES_OUT = path.join(REPO_ROOT, "data/world-cities-filtered.geojsonseq");
@@ -225,9 +231,59 @@ async function main(): Promise<void> {
     if (emitted) cityCount++;
   }
 
+  // README's "Voronoi-from-cities500" fallback (VORONOI_CITY_FALLBACK's
+  // doc comment has the full rationale): a hand-reviewed list of
+  // countries with a confirmed, genuine absence of OSM city-tier
+  // administrative polygons, not fixable by any admin_level choice.
+  // Reads cities500.txt once, groups it by country here (not inside
+  // voronoiFallback.ts, which stays country-agnostic), and synthesizes a
+  // Voronoi city polygon per point for just the opted-in countries --
+  // every other country's real OSM data is completely unaffected. Goes
+  // through the same emitCity path as everything else, so a fallback
+  // city still resolves to its real region via assignCityRegion.
+  if (VORONOI_CITY_FALLBACK.size > 0) {
+    console.error(`Voronoi fallback: loading cities500.txt for ${[...VORONOI_CITY_FALLBACK].join(", ")}...`);
+    const pointsByCountry = new Map<string, Cities500Row[]>();
+    for await (const row of streamCities500(CITIES500_SOURCE)) {
+      if (!VORONOI_CITY_FALLBACK.has(row.countryCode)) continue;
+      let points = pointsByCountry.get(row.countryCode);
+      if (!points) {
+        points = [];
+        pointsByCountry.set(row.countryCode, points);
+      }
+      points.push(row);
+    }
+    let voronoiCount = 0;
+    for (const [countryCode, points] of pointsByCountry) {
+      const countryPolygon = countries.simplifiedFeatureByCode.get(countryCode);
+      if (!countryPolygon) continue;
+      const candidates = buildCityFallback(countryPolygon, points);
+      for (const candidate of candidates) {
+        const emitted = await emitCity(candidate, { type: "Feature", properties: {}, geometry: candidate.geometry });
+        if (emitted) {
+          cityCount++;
+          voronoiCount++;
+        }
+      }
+    }
+    console.error(`Voronoi fallback: ${voronoiCount.toLocaleString()} synthesized cities emitted`);
+  }
+
   await new Promise<void>((resolve, reject) => cityOut.end((err?: Error | null) => (err ? reject(err) : resolve())));
 
-  async function emitCity(candidate: CityCandidateMeta, geometry: Feature<Polygon | MultiPolygon>): Promise<boolean> {
+  // Structural, not CityCandidateMeta itself, so a synthesized Voronoi
+  // fallback candidate (voronoiFallback.ts's VoronoiCityCandidate -- no
+  // level/area/bbox, since it was never an OSM relation) can be emitted
+  // through the exact same path as a real one, rather than needing a
+  // second, parallel emit function.
+  interface EmittableCity {
+    id: string;
+    name: string | undefined;
+    nameEn?: string | undefined;
+    country: string;
+    repPoint: LonLat;
+  }
+  async function emitCity(candidate: EmittableCity, geometry: Feature<Polygon | MultiPolygon>): Promise<boolean> {
     if (!candidate.name) {
       skippedNoName++;
       return false;

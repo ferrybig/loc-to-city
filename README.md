@@ -679,16 +679,18 @@ section, since those are spec decisions rather than pipeline work.
   17.6% coverage -- not a full tessellation, so it wouldn't cleanly fix
   this the way e.g. Ireland's `admin_level=6` counties did. Not fixed
   here; flagged so it doesn't need rediscovering.
-- **Libya, Egypt, Chad, Sudan (and similar) have no city tier.** Even
-  with regions fixed (see "Resolved" below), Tripoli, Cairo, N'Djamena
-  and Khartoum resolve to `city: -`: `countryAdminLevels.ts` records city
-  coverage at 0-0.7% for Libya/Egypt/Chad -- a genuine absence of
-  sub-region administrative polygons in OSM there, not a wrong level
-  pick. Eritrea is the same: OSM has only its six level-4 zobas
-  (13.009241, 42.744713 now resolves to `region: Southern Red Sea`, no
-  city). Coverage is patchy rather than uniformly zero elsewhere: Niamey
-  (Niger) and Nouakchott (Mauritania) resolve all the way to city despite
-  their countries' low national percentages.
+- **Sudan has no city tier, and its zero-region-drop root cause is still
+  unexplained.** Khartoum resolves to neither region nor city despite
+  `countryAdminLevels.ts` recording 100.5% region coverage -- the same
+  unexplained pattern the "Regions with no cities were dropped" fix below
+  was supposed to have already covered, not yet distinguished from it.
+  Not in `VORONOI_CITY_FALLBACK` yet for that reason: adding a fallback on
+  top of an unroot-caused bug risks papering over whichever second issue
+  Sudan actually has, the way Slovenia's region gap once masked its city
+  tier being fine all along. Coverage is patchy rather than uniformly zero
+  everywhere in this class of country: Niamey (Niger) and Nouakchott
+  (Mauritania) resolve all the way to city despite their countries' low
+  national percentages.
 - **Some region tiers look finer than a province.** Fixing the region
   drop below surfaced regions that were previously hidden, and a few
   countries' `COUNTRY_ADMIN_LEVELS` region level turns out to be a
@@ -758,6 +760,53 @@ section, since those are spec decisions rather than pipeline work.
   later.
 
 ### Resolved
+
+- **Libya, Egypt, Chad and Eritrea had no city tier -- fixed with a
+  Voronoi fallback synthesized from GeoNames, not an OSM admin_level.**
+  Tripoli, Cairo, N'Djamena and Asmara all resolved to `city: -`: these
+  four countries have a genuine, confirmed absence of city-tier OSM
+  administrative *polygons* (`countryAdminLevels.ts` records 0-0.7% city
+  coverage), so no `admin_level` choice could ever fix them -- unlike
+  every other country-level fix in this section, which was always a
+  matter of picking the *right* level.
+
+  Fixed instead by synthesizing city polygons from `cities500.txt`
+  (GeoNames' populated-places export, already vendored in
+  `agent-resources/`) via a Voronoi diagram: `voronoiFallback.ts`'s
+  `buildCityFallback` takes a country's cities500 points as Voronoi
+  sites (`d3-delaunay`, clipped first to a bounding box then to the
+  country's own real outline with `@turf/intersect`, since `d3-delaunay`
+  only clips to a rectangle) and gives every point in the country a
+  city, following local point density the way a real settlement layer
+  would -- dense near towns, large in empty country. A synthesized city
+  still resolves to its real region: `prepare-world.ts` routes it through
+  the exact same `assignCityRegion`/`emitCity` path a real OSM candidate
+  uses, rather than hardcoding one.
+
+  Deliberately a real tessellation, not a fixed-radius buffer around each
+  point: buffers overlap in dense areas and leave gaps in sparse ones, so
+  a point between two buffers would fall through to the country/region
+  instead of resolving to its nearest city -- precisely the
+  "nearest-labeled-point is wrong" failure mode this whole project
+  exists to fix (see "Why nearest-point is wrong"). A Voronoi cell has no
+  gaps or overlaps by construction. Every cities500 point in the country
+  becomes a site, unfiltered by population -- matches this format's
+  existing city granularity elsewhere (real OSM city polygons aren't
+  population-filtered either), so a point near a small town resolves to
+  that town rather than a distant, filtered-in major city.
+
+  Explicit opt-in only (`VORONOI_CITY_FALLBACK`, a hand-reviewed
+  `Set<string>` in `countryAdminLevels.ts`), same philosophy as
+  `COUNTRY_ADMIN_LEVELS` itself: a country is added only after its OSM
+  city coverage is confirmed unfixable by a level change, never
+  automatically just because a build's coverage happens to come out low.
+  Sudan is a confirmed same-shape case but isn't listed yet -- see the
+  "Open" entry above for why. Verified end-to-end on a scoped Africa
+  build: Tripoli, N'Djamena and Asmara now resolve to their own name;
+  Cairo's exact GeoNames coordinate does too (a nearby but distinct
+  coordinate resolved to Būlāq Abū al 'Ilā, a real, separate Cairo
+  district also present in cities500 -- expected Voronoi nearest-site
+  behavior, not a bug).
 
 - **Ethiopia, Afghanistan, Saudi Arabia, Taiwan and the UK used the wrong
   city (and in some cases region) level.** Verified on a scoped Africa+

@@ -374,3 +374,23 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   ZM: { region: [4], city: [5] }, // region 99.8%, city 99.8%
   ZW: { region: [4], city: [6] }, // region 100.3%, city 100.3%
 };
+
+/** Countries with a genuine, confirmed absence of city-tier administrative
+ * *polygon* data in OSM (per this file's own `city` coverage comments --
+ * Libya 0%, Egypt 0.1%, Chad 0.7%, Eritrea 0%; see README's "Libya, Egypt,
+ * Chad, Sudan (and similar) have no city tier"), not a wrong level pick --
+ * there is no OSM admin_level that would fix these, at any level.
+ * `voronoiFallback.ts`'s `buildCityFallback` synthesizes a city polygon
+ * per `cities500.txt` point instead, via a Voronoi diagram clipped to the
+ * country outline. Explicit opt-in list, not automatic: a country only
+ * ends up here after its OSM city coverage was hand-confirmed to be
+ * unfixable by a level change, same philosophy as `COUNTRY_ADMIN_LEVELS`
+ * itself -- never silently triggers just because a build's coverage
+ * happens to come out low this run. Sudan is a confirmed same-class case
+ * (Khartoum resolves to neither region nor city despite the region entry
+ * claiming 100.5% coverage) but isn't listed yet -- its zero-city root
+ * cause wasn't distinguished from the same still-open region-drop
+ * question the README raises for it, so adding it here without checking
+ * first could paper over a second, different bug the way Slovenia's
+ * region gap once did for its city tier. */
+export const VORONOI_CITY_FALLBACK: ReadonlySet<string> = new Set(["LY", "EG", "TD", "ER"]);
