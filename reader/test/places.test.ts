@@ -71,15 +71,32 @@ test("search({ sort: true }): equal name-match quality is broken by level, then 
   assert.deepEqual(ids(reader.search("nothing here", { sort: true })), []);
 });
 
+test("search({ sort: true }) ranks the same match set as unsorted search", () => {
+  // Leading/trailing spaces keep "amsterdam"'s tokens but aren't a
+  // substring of "Amsterdam": neither search may match it.
+  for (const q of [" amsterdam", "amsterdam ", " antwerp ", "antwerp", "dam"]) {
+    assert.deepEqual(
+      new Set(ids(reader.search(q, { sort: true }))),
+      new Set(ids(reader.search(q))),
+      JSON.stringify(q),
+    );
+  }
+  assert.deepEqual(ids(reader.search(" amsterdam", { sort: true })), []);
+});
+
 test("search({ sort: true }) on the real worldwide dataset: an exact name match outranks a fuzzier one", () => {
   // Unlike Appendix A, the real dataset has several places whose name
   // merely contains "amsterdam" (Nieuw Amsterdam, Amsterdam-Duivendrecht,
-  // ...) alongside the one actually named "Amsterdam" -- the case that
+  // ...) alongside the ones actually named "Amsterdam" (the Dutch city,
+  // plus US incorporated places in Missouri, Ohio, ...) -- the case that
   // motivated --sort in the first place. Assertions are shaped around
   // that invariant rather than specific ids, since a later data rebuild
   // can renumber places.
-  const path = new URL("../../data/world_no_chunk.bin", import.meta.url);
+  const path = new URL("../../data/world.bin", import.meta.url);
   const worldReader = CGeoDataReader.open(fileURLToPath(path));
+  // Ranking is under test here, not the index: don't depend on whether a
+  // (gitignored, possibly stale) world.search-index.bin sits next to it.
+  worldReader.useSearchIndex(undefined);
   try {
     const unsorted = [...worldReader.search("amsterdam")];
     const sorted = [...worldReader.search("amsterdam", { sort: true })];
@@ -93,8 +110,14 @@ test("search({ sort: true }) on the real worldwide dataset: an exact name match 
     const isExactMatch = (p: Place) => p.names.some((n) => n.toLowerCase() === "amsterdam");
     assert.equal(sorted[0]?.level, "city");
     assert.ok(isExactMatch(sorted[0]!), "the top match is a place actually named \"Amsterdam\"");
-    for (const place of sorted.slice(1)) {
-      assert.ok(!isExactMatch(place), `runner-up ${place.id} (${place.names.join(" | ")}) should not also be an exact match`);
+    const firstOther = sorted.findIndex((p) => !(isExactMatch(p) && p.level === "city"));
+    const exactCities = firstOther === -1 ? sorted.length : firstOther;
+    assert.ok(exactCities >= 1, "sanity: at least one city is named exactly \"Amsterdam\"");
+    for (const place of sorted.slice(exactCities)) {
+      assert.ok(
+        !(isExactMatch(place) && place.level === "city"),
+        `${place.id} (${place.names.join(" | ")}) is a city named exactly "Amsterdam" but ranks below a fuzzier match`,
+      );
     }
   } finally {
     worldReader.close();

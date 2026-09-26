@@ -21,5 +21,5 @@ data-ingest/scripts/extract-boundaries.sh "$@"
 NODE_OPTIONS="--max-old-space-size=9216" npx tsx data-ingest/src/prepare-world.ts
 npx tsx compressor/src/cli.ts data/world-hierarchy.json data/world-cities-filtered.geojsonseq \
   data/world.bin --regions data/world-regions.geojson --countries data/world-country-polygons.geojson \
-  --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 13 \
+  --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 7 \
   --attribution "[OpenStreetMap](https://openstreetmap.org/copyright)" --workers "$(nproc)"

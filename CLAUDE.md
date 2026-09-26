@@ -88,21 +88,27 @@ npx tsx reader/src/cli.ts locate data/world.bin 309463      # a representative l
 ```
 
 `<file.bin>` may be `-` for stdin. `search` is a linear scan over the
-name blocks unless a text search index (`binary-format.md` Appendix B)
-is in use: a reader opened from a path picks up
+name blocks unless a trigram search index (`binary-format.md` Appendix B,
+`reader/src/searchIndex.ts`) is in use: its trigram lists narrow queries
+of 3+ characters to candidate places, and its short-query table answers
+sorted 1-2 character searches with `--limit` up to its top count (5) and
+no filters outright. A reader opened from a path picks up
 `<name>.search-index.bin` next to it (`build-search-index <file.bin>
 --output data/<name>.search-index.bin`) on the first search, reading
 only the lists a query needs; `useSearchIndex()` (the CLI's `--index` /
 `--no-index`) overrides that. A stale index next to the file makes
 `search` throw rather than silently fall back. The index only narrows
-which cities get checked, so results must stay identical with and
-without it -- `reader/test/searchIndex.test.ts` asserts that; compare
-timings against `--no-index`. `--sort` scores each match -- exact name match beats
-whole-word match beats plain substring, city beats region beats country
-(`nameMatchQuality`/`LEVEL_BONUS` in `reader/src/reader.ts`) -- and has
-to score every match before yielding any, since the best one isn't
-necessarily the first found; plain `search` keeps the cheaper early-exit
-scan when `--limit` is given without `--sort`.
+which places get checked, so results must stay identical with and
+without it -- `reader/test/searchIndex.test.ts` asserts that, and
+builds Appendix B.12's worked example byte for byte; compare timings
+against `--no-index`. `--sort` scores each match in Appendix B.5's
+relevance order -- exact name match beats whole-word match beats plain
+substring, city beats region beats country (`reader/src/relevance.ts`,
+shared by the search and the short-query table builder, which must
+rank identically) -- and has to score every match before yielding any,
+since the best one isn't necessarily the first found; plain `search`
+keeps the cheaper early-exit scan when `--limit` is given without
+`--sort`.
 
 `locate` (and `search --locate`) returns the centre of a place's
 representative cell (`binary-format.md` Section C.3): the area-weighted
@@ -146,7 +152,7 @@ hierarchy JSON, a cities GeoJSON/`.geojsonseq`, an output path, and
 ```bash
 npx tsx compressor/src/cli.ts <hierarchy.json> <cities.geojson|.geojsonseq> <out.bin> \
   --regions <regions.geojson> --countries <countries.geojson> \
-  --width-exp 6 --height-exp 6 --max-depth N --keyframe-exp 13 \
+  --width-exp 6 --height-exp 6 --max-depth N --keyframe-exp 7 \
   --attribution "..." --workers N [--only-chunks LIST]
 ```
 

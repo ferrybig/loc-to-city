@@ -6,88 +6,109 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+	buildSearchIndex,
 	CGeoDataReader,
+	fnv1a32,
+	foldSymbols,
 	type Place,
+	readVarint,
+	SearchIndex,
+	type SearchIndexOptions,
 	type SearchOptions,
 	searchIndexPathFor,
+	trigramListIndex,
+	trigramListIndices,
 } from "../src/index.js";
-import { buildSearchIndex, SearchIndex } from "../src/searchIndex.js";
 import { APPENDIX_A_BYTES } from "./fixtures/appendixA.js";
+import { APPENDIX_B_BYTES, APPENDIX_B_OPTIONS } from "./fixtures/appendixB.js";
 
 function ids(places: Iterable<Place>): number[] {
-	return [...places].map((p) => p.id).sort((a, b) => a - b);
+	return [...places].map((p) => p.id);
 }
 
-// ── Binary format round-trip ─────────────────────────────────────────────────
-
-test("buildSearchIndex: starts with CGEODATA signature", () => {
-	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
-	const buf = buildSearchIndex(reader);
-	reader.close();
-	const expected = [0x43, 0x47, 0x45, 0x4f, 0x44, 0x41, 0x54, 0x41]; // "CGEODATA"
-	for (let i = 0; i < 8; i++) assert.equal(buf[i], expected[i], `byte ${i}`);
-});
-
-test("buildSearchIndex: version byte encodes kind=1 version=0 (value 16)", () => {
-	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
-	const buf = buildSearchIndex(reader);
-	reader.close();
-	assert.equal(buf[8], 0x10); // varint 16
-});
-
-test("SearchIndex.open: rejects wrong magic bytes", () => {
-	const bad = new Uint8Array(100);
-	assert.throws(() => SearchIndex.open(bad), /wrong magic bytes/);
-});
-
-test("SearchIndex.open: rejects too-short buffer", () => {
-	assert.throws(() => SearchIndex.open(new Uint8Array(5)), /too short/);
-});
-
-test("SearchIndex.open: rejects wrong kind (a plain CGEODATA file has kind=0 = version 0)", () => {
-	// Build a fake header with version varint = 0 (kind 0, not kind 1).
-	const fake = new Uint8Array(30);
-	fake.set([0x43, 0x47, 0x45, 0x4f, 0x44, 0x41, 0x54, 0x41]); // signature
-	fake[8] = 0x00; // version varint = 0 → kind=0
-	assert.throws(() => SearchIndex.open(fake), /kind/);
-});
-
-test("SearchIndex.open: round-trips all header fields from the Appendix A fixture", () => {
-	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
-	const { cities, countries, regions } = reader.placeCounts;
-	const buf = buildSearchIndex(reader);
-	reader.close();
-
-	const index = SearchIndex.open(buf);
-	assert.equal(index.placeCount, cities);
-	assert.equal(index.firstId, countries + regions);
-	assert.equal(index.groupSize, 4);
-	assert.equal(index.ngram, 2);
-	assert.equal(index.listCount, 784); // 28^2
-	assert.equal(index.bitsPerList, Math.ceil(cities / 4));
-	assert.equal(index.bytesPerList, Math.ceil(Math.ceil(cities / 4) / 8));
-});
-
-// ── Source checksum ───────────────────────────────────────────────────────────
-
-// Section B.10.1 of binary-format.md gives the expected checksum for the
-// Appendix A place table (109 bytes at file offsets 22–130):
-//   source_checksum = 9f e6 00 b9 37 18 dc 77  → 0x77dc1837b900e69f
 const APPENDIX_A_CHECKSUM = 0x77dc1837b900e69fn;
 
-test("placeTableChecksum: matches the Appendix B.10 worked example", () => {
+// ── B.12 worked example ──────────────────────────────────────────────────────
+
+test("buildSearchIndex: reproduces Appendix B.12 byte for byte", () => {
+	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
+	const built = buildSearchIndex(reader, APPENDIX_B_OPTIONS);
+	reader.close();
+	assert.equal(built.length, 3207);
+	assert.deepEqual(built, APPENDIX_B_BYTES);
+});
+
+test("SearchIndex.open: reads B.12.1's header", () => {
+	const index = SearchIndex.open(APPENDIX_B_BYTES);
+	assert.equal(index.sourceChecksum, APPENDIX_A_CHECKSUM);
+	assert.equal(index.placeCount, 7);
+	assert.equal(index.hashExp, 4);
+	assert.equal(index.listCount, 21968);
+	assert.equal(index.topCount, 2);
+	assert.equal(index.topBlockExp, 4);
+});
+
+test("candidates: B.12.4's queries", () => {
+	const index = SearchIndex.open(APPENDIX_B_BYTES);
+	assert.deepEqual(index.candidates("dam"), [4, 5]);
+	assert.deepEqual(index.candidates("dams"), [4]); // rejected later, by its names
+	assert.deepEqual(index.candidates("antwerp"), [3, 6]);
+	assert.deepEqual(index.candidates("Zaan-dam"), []); // `an-` isn't stored
+	assert.equal(index.candidates("a"), undefined); // no trigram
+	assert.equal(index.candidates("an"), undefined);
+	assert.deepEqual(index.candidates("België"), [1]); // folds to `belgie`
+});
+
+test("shortQuery: B.12.3's table entries", () => {
+	const index = SearchIndex.open(APPENDIX_B_BYTES);
+	assert.deepEqual(index.shortQuery("a"), [4, 5]);
+	assert.deepEqual(index.shortQuery("A"), [4, 5]); // lowercased, like search()
+	assert.deepEqual(index.shortQuery(" "), [0]); // the first key of block 0
+	assert.deepEqual(index.shortQuery("en"), [6, 3]); // relevance order, not id order
+	assert.deepEqual(index.shortQuery("h"), [2, 0]);
+	assert.deepEqual(index.shortQuery("e"), [4, 6]); // no België: `e` isn't folded
+	assert.deepEqual(index.shortQuery("rd"), [4, 2]); // the first key of block 3
+	assert.deepEqual(index.shortQuery("ë"), [1]); // the last key of all
+	assert.deepEqual(index.shortQuery("nl"), []); // not a key: no match
+	assert.deepEqual(index.shortQuery("!"), []); // sorts before every key
+	assert.equal(index.shortQuery("dam"), undefined); // not 1-2 code points
+	assert.equal(index.shortQuery(""), undefined);
+});
+
+// ── B.2, B.3: folding and list indices ────────────────────────────────────────
+
+test("foldSymbols: B.2's mapping", () => {
+	assert.deepEqual(foldSymbols("Az"), [0, 25]);
+	assert.deepEqual(foldSymbols("é-É 9"), [4, 26, 4, 26, 27]);
+	assert.deepEqual(foldSymbols("België"), [1, 4, 11, 6, 8, 4]);
+	assert.deepEqual(foldSymbols("Straße"), [18, 19, 17, 0, 0xdf, 4]);
+	assert.deepEqual(foldSymbols("Łódź"), [0x142, 14, 3, 25]);
+	assert.deepEqual(foldSymbols("東京"), [0x6771, 0x4eac]);
+	assert.deepEqual(foldSymbols("a\u00a0b"), [0, 0xa0, 1]); // non-ASCII space: its own symbol
+});
+
+test("fnv1a32: B.3's test vectors", () => {
+	const ascii = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0));
+	assert.equal(fnv1a32(ascii("")), 0x811c9dc5);
+	assert.equal(fnv1a32(ascii("a")), 0xe40c292c);
+	assert.equal(fnv1a32(ascii("foobar")), 0xbf9cf968);
+});
+
+test("trigramListIndex: B.3's Latin and hashed examples", () => {
+	assert.equal(trigramListIndex(3, 0, 12, 15), 2364); // `dam`
+	assert.equal(trigramListIndex(0x142, 14, 3, 15), 24650); // `łód`
+	assert.equal(trigramListIndex(0x6771, 0x4eac, 0x90fd, 15), 47909); // `東京都`
+	assert.equal(trigramListIndex(0, 0xdf, 4, 15), 22629); // `aße`
+	assert.deepEqual(trigramListIndices("Zaan-dam", 4), [19600, 13, 390, 10923, 20468, 2364]);
+	assert.deepEqual(trigramListIndices("ab", 4), []);
+});
+
+// ── B.8: source checksum ─────────────────────────────────────────────────────
+
+test("placeTableChecksum: matches the Appendix B.12 worked example", () => {
 	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
 	assert.equal(reader.placeTableChecksum(), APPENDIX_A_CHECKSUM);
 	reader.close();
-});
-
-test("buildSearchIndex: embeds the correct source checksum", () => {
-	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
-	const buf = buildSearchIndex(reader);
-	reader.close();
-
-	const index = SearchIndex.open(buf);
-	assert.equal(index.sourceChecksum, APPENDIX_A_CHECKSUM);
 });
 
 // Fast 32-bit-halves hash vs a straightforward BigInt FNV-1a, on a real
@@ -123,17 +144,78 @@ test("placeNames: throws RangeError for out-of-range id", () => {
 	reader.close();
 });
 
-// ── search() with an attached index ───────────────────────────────────────────
+// ── B.10: robustness ─────────────────────────────────────────────────────────
 
-// The Appendix A fixture has cities: id=4 (Amsterdam), id=5 (Zaandam),
-// id=6 (Antwerpen — a city in Belgium).
+/** The B.12 example with `edit` applied to a copy. Header offsets: version
+ * 8, checksum 9-16, place_count 17, hash_exp 18, top_count 19,
+ * top_block_exp 20, list_directory_length 21-22, lists_length 23,
+ * table_directory_length 24; presence from 25, entries from 2771, lists
+ * from 2818, table directory from 2865, table blocks from 2881. */
+function tampered(edit: (bytes: Uint8Array) => void): Uint8Array {
+	const bytes = APPENDIX_B_BYTES.slice();
+	edit(bytes);
+	return bytes;
+}
+
+test("SearchIndex.open: rejects a bad signature, kind, or version", () => {
+	assert.throws(() => SearchIndex.open(new Uint8Array(100)), /wrong magic bytes/);
+	assert.throws(() => SearchIndex.open(new Uint8Array(5)), /too short/);
+	assert.throws(() => SearchIndex.open(tampered((b) => (b[8] = 0x00))), /kind 0/);
+	assert.throws(() => SearchIndex.open(tampered((b) => (b[8] = 0x10))), /old bigram layout/);
+	assert.throws(() => SearchIndex.open(tampered((b) => (b[8] = 0x12))), /unsupported search index version 2/);
+});
+
+test("SearchIndex.open: rejects out-of-range parameters and section lengths", () => {
+	assert.throws(() => SearchIndex.open(tampered((b) => (b[18] = 0))), /hash_exp/);
+	assert.throws(() => SearchIndex.open(tampered((b) => (b[18] = 25))), /hash_exp/);
+	assert.throws(() => SearchIndex.open(tampered((b) => (b[20] = 25))), /top_block_exp/);
+	assert.throws(() => SearchIndex.open(APPENDIX_B_BYTES.subarray(0, 2800)), /past the end/);
+	assert.throws(() => SearchIndex.open(tampered((b) => (b[19] = 0))), /top_count 0/);
+});
+
+test("candidates: rejects a list directory that doesn't add up", () => {
+	// lists_length one short: the entries still add up to 47.
+	const short = SearchIndex.open(tampered((b) => (b[23] = 0x2e)));
+	assert.throws(() => short.candidates("dam"), /add up to 47, but lists_length is 46/);
+	// `and` (the third entry) claims a 2-byte bitmap, where N = 7 needs 1.
+	const bitmap = SearchIndex.open(tampered((b) => (b[2771 + 2] = 0x05)));
+	assert.throws(() => bitmap.candidates("dam"), /bitmap for list 367 is 2 bytes, expected 1/);
+});
+
+test("candidates: rejects a presence bit beyond L", () => {
+	// hash_exp 1 gives L = 21954, so the last presence byte (of 2745) has
+	// bits for lists 21954 and up, which MUST be 0. B.12's L = 21968 is a
+	// multiple of 8 and has no such bits.
+	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
+	const bytes = buildSearchIndex(reader, { hashExp: 1, topCount: 0 });
+	reader.close();
+	let off = 21; // signature, version, checksum, place_count 7, three u8s
+	for (let i = 0; i < 3; i++) off += readVarint(bytes, off).bytesRead;
+	bytes[off + 2744]! |= 0x80; // list 21959
+	assert.throws(() => SearchIndex.open(bytes).candidates("dam"), /list 21959, beyond its 21954 lists/);
+});
+
+test("candidates: rejects place ids beyond N", () => {
+	// `aan`'s id list (the first stored list) names place 9 of 7.
+	const index = SearchIndex.open(tampered((b) => (b[2818] = 0x09)));
+	assert.throws(() => index.candidates("zaan"), /place 9, beyond its 7 places/);
+});
+
+test("shortQuery: rejects a table block that disagrees with its directory", () => {
+	// Block 0's first key " " becomes "!", no longer the directory's first key.
+	const index = SearchIndex.open(tampered((b) => (b[2881] = 0x21)));
+	assert.throws(() => index.shortQuery("a"), /not in key order/);
+});
+
+// ── search() with an index attached ──────────────────────────────────────────
 
 /** Two readers over the same bytes: one with an index attached, one
  * without, so every test compares indexed against linear search. */
-function makeReaders(bytes: Uint8Array | string = APPENDIX_A_BYTES) {
+function makeReaders(bytes: Uint8Array | string = APPENDIX_A_BYTES, options: SearchIndexOptions = {}) {
 	const indexed = CGeoDataReader.open(bytes);
-	indexed.useSearchIndex(buildSearchIndex(indexed));
+	indexed.useSearchIndex(buildSearchIndex(indexed, options));
 	const linear = CGeoDataReader.open(bytes);
+	linear.useSearchIndex(undefined);
 	return {
 		indexed,
 		linear,
@@ -151,11 +233,74 @@ function assertSameSearch(
 ): void {
 	// Order matters too (id order, or rank order with sort), so no sorting here.
 	assert.deepEqual(
-		[...readers.indexed.search(text, options)].map((p) => p.id),
-		[...readers.linear.search(text, options)].map((p) => p.id),
+		ids(readers.indexed.search(text, options)),
+		ids(readers.linear.search(text, options)),
 		`mismatch for ${JSON.stringify(text)} ${JSON.stringify(options)}`,
 	);
 }
+
+const FIXTURE_QUERIES = ["dam", "Dam", "dams", "antwerp", "ANTWERP", "zaan-dam", "België", "belgie", "the net", "a", "an", "ë", "e", "h", "nl", " amsterdam", "amsterdam ", " dam", "d-h", "xqzqxqz"];
+const OPTION_SETS: SearchOptions[] = [
+	{},
+	{ limit: 1 },
+	{ level: "city" },
+	{ level: "region" },
+	{ country: 0 },
+	{ country: 1, level: "city" },
+	{ sort: true },
+	{ sort: true, limit: 1 },
+	{ sort: true, limit: 2 },
+	{ sort: true, limit: 5 },
+	{ sort: true, limit: 2, country: 1 },
+	{ sort: true, limit: 2, level: "city" },
+];
+
+for (const [name, options] of [
+	["default parameters", {}],
+	["B.12's parameters", APPENDIX_B_OPTIONS],
+	["no short-query table", { topCount: 0 }],
+	["one hashed list", { hashExp: 1 }],
+] as const) {
+	test(`search with index (${name}) matches the linear scan`, () => {
+		const readers = makeReaders(APPENDIX_A_BYTES, options);
+		for (const q of FIXTURE_QUERIES) for (const o of OPTION_SETS) assertSameSearch(readers, q, o);
+		readers.close();
+	});
+}
+
+test("search: a sorted 1-2 character search with a small limit reads the short-query table", () => {
+	// Swap block 0's entry for `a` (`4 5`) to `5 4`: only an answer taken
+	// from the table can come out in that order.
+	const swapped = tampered((b) => {
+		const entry = b.indexOf(0x61, 2881); // "a" NUL 02 04 05
+		assert.deepEqual([...b.subarray(entry, entry + 5)], [0x61, 0x00, 0x02, 0x04, 0x05]);
+		b[entry + 3] = 0x05;
+		b[entry + 4] = 0x04;
+	});
+	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
+	reader.useSearchIndex(swapped);
+	assert.deepEqual(ids(reader.search("a", { sort: true, limit: 2 })), [5, 4]);
+	// Anything the table can't answer exactly falls back to the scan.
+	assert.deepEqual(ids(reader.search("a", { sort: true, limit: 3 })), [4, 5, 6]);
+	assert.deepEqual(ids(reader.search("a", { sort: true })).slice(0, 2), [4, 5]);
+	assert.deepEqual(ids(reader.search("a", { sort: true, limit: 2, level: "city" })), [4, 5]);
+	assert.deepEqual(ids(reader.search("a", { limit: 2 })), [0, 2]); // id order: Nederland, Noord-Holland
+	reader.close();
+});
+
+test("search: short-query places are confirmed, so a corrupt table can't add a wrong result", () => {
+	// `a`'s entry names België (1), which has no `a` in its names.
+	const corrupt = tampered((b) => {
+		const entry = b.indexOf(0x61, 2881);
+		b[entry + 3] = 0x01;
+	});
+	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
+	reader.useSearchIndex(corrupt);
+	assert.deepEqual(ids(reader.search("a", { sort: true, limit: 2 })), [5]);
+	reader.close();
+});
+
+// ── Attaching an index ───────────────────────────────────────────────────────
 
 test("useSearchIndex: attaches an index built from the same file", () => {
 	const readers = makeReaders();
@@ -166,9 +311,9 @@ test("useSearchIndex: attaches an index built from the same file", () => {
 	readers.close();
 });
 
-test("useSearchIndex: accepts an already-loaded index", () => {
+test("useSearchIndex: accepts an already-open index", () => {
 	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
-	reader.useSearchIndex(SearchIndex.open(buildSearchIndex(reader)));
+	reader.useSearchIndex(SearchIndex.open(APPENDIX_B_BYTES));
 	assert.deepEqual(ids(reader.search("dam", { level: "city" })), [4, 5]);
 	reader.close();
 });
@@ -176,11 +321,19 @@ test("useSearchIndex: accepts an already-loaded index", () => {
 test("useSearchIndex: accepts a path, read on demand", () => {
 	const dir = mkdtempSync(path.join(tmpdir(), "cgeodata-use-index-"));
 	const indexPath = path.join(dir, "some-index.bin");
+	writeFileSync(indexPath, APPENDIX_B_BYTES);
 	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
-	writeFileSync(indexPath, buildSearchIndex(reader));
 	reader.useSearchIndex(indexPath);
 	assert.equal(reader.hasSearchIndex, true);
 	assert.deepEqual(ids(reader.search("dam", { level: "city" })), [4, 5]);
+	reader.close();
+});
+
+test("useSearchIndex: rejects an index with the wrong checksum or place count", () => {
+	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
+	assert.throws(() => reader.useSearchIndex(tampered((b) => (b[9]! ^= 0xff))), /checksum mismatch/);
+	assert.throws(() => reader.useSearchIndex(tampered((b) => (b[17] = 0x08))), /covers 8 places, but this file has 7/);
+	assert.equal(reader.hasSearchIndex, false);
 	reader.close();
 });
 
@@ -193,9 +346,7 @@ test("open: picks up <name>.search-index.bin next to the file", () => {
 	assert.equal(without.hasSearchIndex, false);
 	without.close();
 
-	const builder = CGeoDataReader.open(APPENDIX_A_BYTES);
-	writeFileSync(searchIndexPathFor(binPath), buildSearchIndex(builder));
-	builder.close();
+	writeFileSync(searchIndexPathFor(binPath), APPENDIX_B_BYTES);
 	assert.equal(searchIndexPathFor(binPath), path.join(dir, "fixture.search-index.bin"));
 
 	const reader = CGeoDataReader.open(binPath);
@@ -210,11 +361,7 @@ test("open: a stale index next to the file throws on search, not silently ignore
 	const dir = mkdtempSync(path.join(tmpdir(), "cgeodata-stale-index-"));
 	const binPath = path.join(dir, "fixture.bin");
 	writeFileSync(binPath, APPENDIX_A_BYTES);
-	const builder = CGeoDataReader.open(APPENDIX_A_BYTES);
-	const bytes = buildSearchIndex(builder);
-	builder.close();
-	bytes[9]! ^= 0xff; // first checksum byte, after "CGEODATA" + version 0x10
-	writeFileSync(searchIndexPathFor(binPath), bytes);
+	writeFileSync(searchIndexPathFor(binPath), tampered((b) => (b[9]! ^= 0xff)));
 
 	const reader = CGeoDataReader.open(binPath); // opening alone doesn't touch it
 	assert.throws(() => [...reader.search("dam")], /fixture\.search-index\.bin: .*checksum mismatch/);
@@ -224,74 +371,27 @@ test("open: a stale index next to the file throws on search, not silently ignore
 	reader.close();
 });
 
-test("useSearchIndex: rejects an index with the wrong checksum", () => {
-	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
-	const bytes = buildSearchIndex(reader);
-	bytes[9]! ^= 0xff; // first checksum byte, after "CGEODATA" + version 0x10
-	assert.throws(() => reader.useSearchIndex(bytes), /checksum mismatch/);
-	assert.equal(reader.hasSearchIndex, false);
+test("open: an old bigram index next to the file says to rebuild it", () => {
+	const dir = mkdtempSync(path.join(tmpdir(), "cgeodata-old-index-"));
+	const binPath = path.join(dir, "fixture.bin");
+	writeFileSync(binPath, APPENDIX_A_BYTES);
+	writeFileSync(searchIndexPathFor(binPath), tampered((b) => (b[8] = 0x10)));
+	const reader = CGeoDataReader.open(binPath);
+	assert.throws(() => [...reader.search("dam")], /old bigram layout.*rebuild/);
 	reader.close();
 });
 
-test("search with index: 'dam' matches the linear scan", () => {
-	const readers = makeReaders();
-	assertSameSearch(readers, "dam", { level: "city" });
-	assertSameSearch(readers, "dam");
-	readers.close();
-});
+// ── Real data (skipped when the file is absent) ──────────────────────────────
 
-test("search with index: 'antwerp' scans country+region linearly plus city via index", () => {
-	const readers = makeReaders();
-	assertSameSearch(readers, "antwerp");
-	readers.close();
-});
-
-test("search with index: short query (<2 chars) falls back to linear scan", () => {
-	const readers = makeReaders();
-	assertSameSearch(readers, "a");
-	readers.close();
-});
-
-test("search with index: --limit is respected", () => {
-	const readers = makeReaders();
-	assertSameSearch(readers, "a", { level: "city", limit: 1 });
-	assertSameSearch(readers, "dam", { limit: 1 });
-	readers.close();
-});
-
-test("search with index: --sort matches the linear scan's ranking", () => {
-	const readers = makeReaders();
-	assertSameSearch(readers, "dam", { sort: true });
-	assertSameSearch(readers, "antwerpen", { sort: true, limit: 2 });
-	readers.close();
-});
-
-test("search with index: --country narrows the city candidates", () => {
-	const readers = makeReaders();
-	for (const country of [0, 1]) {
-		assertSameSearch(readers, "dam", { country });
-		assertSameSearch(readers, "antwerp", { country, level: "city" });
-	}
-	readers.close();
-});
-
-test("search with index: no match returns empty", () => {
-	const readers = makeReaders();
-	assert.equal([...readers.indexed.search("xqzqxqz")].length, 0);
-	readers.close();
-});
-
-// ── Zuid-Holland integration test (skipped when file is absent) ──────────────
-
-const ZH_PATH = fileURLToPath(new URL("../../data/zuid-holland.bin", import.meta.url));
-
-if (existsSync(ZH_PATH)) {
+if (existsSync(ZH_BIN)) {
 	test("search with index vs linear scan on zuid-holland.bin", () => {
-		const readers = makeReaders(ZH_PATH);
-		const QUERIES = ["amsterdam", "dam", "rotterdam", "gouda", "leiden", "nieuw", "den haag"];
+		const readers = makeReaders(ZH_BIN);
+		const QUERIES = ["amsterdam", "dam", "rotterdam", "gouda", "leiden", "nieuw", "den haag", "'s-g", "a", "aa", "ij", "z", " a"];
 		for (const q of QUERIES) {
+			assertSameSearch(readers, q);
 			assertSameSearch(readers, q, { level: "city" });
 			assertSameSearch(readers, q, { sort: true, limit: 5 });
+			assertSameSearch(readers, q, { sort: true });
 		}
 		readers.close();
 	});
@@ -311,20 +411,32 @@ function run(args: string[]): { stdout: string; stderr: string; status: number }
 	return { stdout: r.stdout, stderr: r.stderr, status: r.status ?? 1 };
 }
 
-test("CLI: build-search-index writes a valid index file", () => {
+test("CLI: build-search-index writes B.12's example with its parameters", () => {
+	const example = path.join(tmpDir, "example.search-index.bin");
+	const r = run(["build-search-index", fixtureBin, "--output", example, "--hash-exp", "4", "--top-count", "2", "--top-block-exp", "4"]);
+	assert.equal(r.status, 0, `stderr: ${r.stderr}`);
+	assert.match(r.stderr, /7 places/);
+	assert.deepEqual(new Uint8Array(readFileSync(example)), APPENDIX_B_BYTES);
+});
+
+test("CLI: build-search-index rejects out-of-range parameters", () => {
+	assert.equal(run(["build-search-index", fixtureBin, "--hash-exp", "0"]).status, 2);
+	assert.equal(run(["build-search-index", fixtureBin, "--top-count", "x"]).status, 2);
+});
+
+test("CLI: build-search-index writes a default index next to the file", () => {
 	const r = run(["build-search-index", fixtureBin, "--output", indexBin]);
 	assert.equal(r.status, 0, `stderr: ${r.stderr}`);
-	assert.match(r.stderr, /cities/);
 });
 
 test("CLI: search uses the index next to the file, same output as --no-index", () => {
 	// indexBin is fixture.bin's default search-index path, so plain `search`
 	// picks it up; --index and --no-index override that either way.
-	for (const q of ["dam", "antwerp", "a"]) {
-		const linear = run(["search", fixtureBin, q, "--no-index"]);
+	for (const args of [["dam"], ["antwerp"], ["a"], ["a", "--sort", "--limit", "2"], ["en", "--sort", "--limit", "5"]]) {
+		const linear = run(["search", fixtureBin, ...args, "--no-index"]);
 		for (const indexed of [
-			run(["search", fixtureBin, q]),
-			run(["search", fixtureBin, q, "--index", indexBin]),
+			run(["search", fixtureBin, ...args]),
+			run(["search", fixtureBin, ...args, "--index", indexBin]),
 		]) {
 			assert.equal(indexed.status, linear.status, indexed.stderr);
 			assert.equal(indexed.stdout, linear.stdout);
@@ -339,7 +451,7 @@ test("CLI: search --index exits 1 when nothing matches", () => {
 test("CLI: search --index exits 2 on checksum mismatch", () => {
 	const badIndexBin = path.join(tmpDir, "bad.search-index.bin");
 	const indexBytes = readFileSync(indexBin);
-	// The checksum is at bytes 9–16 (after "CGEODATA" + version byte 0x10).
+	// The checksum is at bytes 9–16 (after "CGEODATA" + version byte 0x11).
 	indexBytes[9]! ^= 0xff;
 	writeFileSync(badIndexBin, indexBytes);
 	const r = run(["search", fixtureBin, "dam", "--index", badIndexBin]);

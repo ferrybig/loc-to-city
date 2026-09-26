@@ -39,10 +39,22 @@ export {
 	type SearchOptions,
 } from "./reader.js";
 export {
+	containsTokenRun,
+	LEVEL_BONUS,
+	nameMatchQuality,
+	placeMatchQuality,
+	tokenize,
+} from "./relevance.js";
+export {
 	buildSearchIndex,
-	candidatePositions,
+	DEFAULT_SEARCH_INDEX_OPTIONS,
+	fnv1a32,
+	foldSymbols,
 	SearchIndex,
+	type SearchIndexOptions,
 	searchIndexPathFor,
+	trigramListIndex,
+	trigramListIndices,
 } from "./searchIndex.js";
 export { openSource, type RandomAccessSource } from "./source.js";
 export {

@@ -906,7 +906,7 @@ section, since those are spec decisions rather than pipeline work.
   turf is what was being replaced for giving wrong answers on multi-part
   polygons at country/region scale.
 - **`searchPlaces` (the secondary Immich API shape from "Goal: replacing
-  Immich's reverse geocoding" above).** Addressed via a bitmap search
+  Immich's reverse geocoding" above).** Addressed via a trigram search
   index (`build-search-index` CLI command, attached with
   `CGeoDataReader.useSearchIndex()` / the `--index` flag for `search`),
   conforming to `binary-format.md` Appendix B. The coordinate per result

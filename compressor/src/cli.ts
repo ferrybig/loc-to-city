@@ -88,7 +88,7 @@ async function main(): Promise<void> {
     widthExp,
     heightExp,
     maxDepth: Number(flags["max-depth"] ?? 12),
-    keyframeExp: Number(flags["keyframe-exp"] ?? 13),
+    keyframeExp: Number(flags["keyframe-exp"] ?? 7), // binary-format.md Section 7.3
     regions,
     countries,
     workers,

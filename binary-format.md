@@ -394,9 +394,33 @@ The blocks act as keyframes for random access: to recover the name of
 place `id`, a reader inflates only block `floor(id / I)` and skips
 `id mod I` `NUL`-terminated entries. A smaller `I` gives cheaper random
 access; a larger `I` gives better compression, since zlib finds more
-repetition in a larger block. An interval around `2^13` entries is
-expected to be a reasonable compromise but has not been measured
-carefully.
+repetition in a larger block, and a shorter `block_lengths` list.
+
+`keyframe_exp = 7` (blocks of 128 names) is RECOMMENDED. Measured on the
+worldwide file (about 319,000 places), with a reader that opens the file
+afresh for every operation so that no name block is cached, which is
+the situation of a reader that is queried only occasionally:
+
+| `keyframe_exp` | Place table | Resolving one place | Scanning all names |
+|----------------|-------------|---------------------|--------------------|
+| `13`           | 1.64 MB     | 4.9 ms              | 134 ms             |
+| `11`           | 1.70 MB     | 1.7 ms              | 142 ms             |
+| `9`            | 1.82 MB     | 0.9 ms              | 141 ms             |
+| `7`            | 2.05 MB     | 0.7 ms              | 152 ms             |
+| `5`            | 2.53 MB     | 1.4 ms              | 210 ms             |
+
+"Resolving one place" is a place and its parents' names, as every
+lookup ([Section 9](#9-lookup-procedure)) that finds a place needs.
+Name access is random in nearly every use: a lookup needs up to three
+names from anywhere in the table, and a search confirms candidates
+spread across it ([Section B.9](#b9-query-procedure)), so every
+operation other than a full scan pays for one block per distinct name
+it touches, and a smaller block is directly cheaper. Below `7` the
+fixed costs take over: a reader parses `K - 1` block lengths when it
+opens the file, and each block carries its own zlib framing, so both
+opening the file and a full scan get slower. The place table grows by
+a quarter from `13` to `7`, which is small beside the chunks at any
+useful `max_depth`.
 
 ### 7.4. Name Entries
 
@@ -710,8 +734,6 @@ The following are known gaps or unresolved decisions in version `0`.
    complexity has not been measured.
 6. **Name escaping.** `|` cannot appear in a name. No real place name
    affected by this is known, but there is no escape mechanism.
-7. **Keyframe interval.** The suggested `2^13` has not been measured
-   against real data.
 
 ## Appendix A. Worked Example
 
@@ -867,41 +889,49 @@ carries file kind `1` ([Section 5](#5-header)).
 ### B.1. Purpose and Properties
 
 A text search without an index reads every name in the place table and
-compares it with the query. That is a linear scan over the name blocks
-and, at worldwide scale, over a quarter of a million cities. The index
-described here lets a reader discard most places without reading their
-names: it records, for every place, which letter pairs occur in its
-names, so that a query can eliminate every place that lacks even one of
-the pairs the query contains.
+compares it with the query: a linear scan over every name block, which
+at worldwide scale means inflating the names of over 300,000 places. The
+index described here lets a reader avoid most of that, in two ways:
+
+- **Trigram lists** ([Section B.3](#b3-trigrams-and-lists)) record, for
+  every run of three symbols, which places contain it in one of their
+  names. A query of three or more symbols reads only the lists of its own
+  trigrams, and only the places present in all of them can match.
+- **A short-query table** ([Section B.6](#b6-short-query-table)) answers
+  queries of one or two characters, which have no trigram and match a
+  large part of the table, by storing the first places of their
+  relevance-ordered result directly.
 
 The index has the following properties:
 
-- **It is an accelerator, not a data source.** It never contributes a
-  result by itself. A reader confirms every place the index leaves over
-  by comparing its names, exactly as it would without the index, and
-  MUST produce the same results with and without it.
-- **It can only over-approximate.** Every step that maps names to index
-  bits is many-to-one, so the set of places the index leaves over is a
-  superset of the true matches ([Section B.7](#b7-query-procedure)).
+- **It covers every place.** Countries, regions, and cities are all
+  indexed, so a query never has to scan any part of the place table
+  linearly while the index applies.
+- **The trigram lists only over-approximate.** Every step that maps
+  names to lists is many-to-one, so the places they leave over are a
+  superset of the true matches ([Section B.9](#b9-query-procedure)). A
+  reader confirms every candidate by comparing its names, exactly as it
+  would without the index, and MUST produce the same results with and
+  without it.
 - **It is a pure function of the place table.** Two writers given the
   same place table and the same parameters MUST produce byte-identical
-  files. The file carries no timestamp, and no field whose value
-  depends on the writer. It is bound to its source by a checksum over
-  the source's place table ([Section B.6](#b6-source-checksum)).
-- **It is uncompressed.** A query reads a handful of whole lists and
-  combines them bitwise; compressing the lists would only mean
-  inflating each one before use, so the lists are stored raw. This also
-  lets a reader keep the file memory-mapped and read only the lists a
-  query needs.
+  files. The file carries no timestamp and nothing else that depends on
+  the writer, and nothing in it is compressed, since deflate output is
+  not guaranteed to be identical between zlib implementations. It is
+  bound to its source by a checksum over the source's place table
+  ([Section B.8](#b8-source-checksum)).
+- **It is read in parts.** The header records the length of every
+  section, so a reader reads only the header up front, and afterwards
+  only what a query needs: the list directory and a few lists for a long
+  query, or the table directory and one table block for a short one.
 - **It is disposable.** Because it is derived, it can be rebuilt from
-  its source at any time, and a reader that lacks it, or that finds it
-  does not match its source, falls back to the linear scan.
+  its source at any time.
 
 ### B.2. Symbol Folding
 
-Names and queries are reduced to sequences of **symbols** from a fixed
-alphabet of 28 values before they are indexed or looked up. The
-procedure is:
+Names and queries are reduced to sequences of **symbols**, which are
+non-negative integers, before their trigrams are taken. The procedure
+is:
 
 1. Decompose the text into Unicode Normalization Form D [UAX15].
 2. Remove every code point in the Combining Diacritical Marks block,
@@ -909,99 +939,215 @@ procedure is:
 3. Convert the result to lowercase with the Unicode default case
    conversion (the locale-independent `toLowercase()` of [UNICODE]
    Section 3.13).
-4. Map each remaining code point to one symbol:
+4. Map each remaining code point `c` to one symbol:
 
-| Code points                | Symbol   |
-|----------------------------|----------|
-| `a` to `z` (`U+0061`–`U+007A`) | `0` to `25` in alphabetical order |
-| `0` to `9` (`U+0030`–`U+0039`) | `27`, the digit symbol |
-| anything else              | `26`, the separator symbol |
+| Code points                     | Symbol |
+|---------------------------------|--------|
+| `a` to `z` (`U+0061`–`U+007A`)  | `0` to `25` in alphabetical order |
+| `0` to `9` (`U+0030`–`U+0039`)  | `27`, the digit symbol |
+| any other code point below `U+0080` | `26`, the separator symbol |
+| any code point from `U+0080` up | `c` itself |
 
 Step 1 followed by step 2 turns `é` into `e`. Step 3 turns `E` into
-`e`. Step 4 puts all digits in one bucket, and spaces, punctuation, and
-every letter outside the basic Latin alphabet in another. The folding
-is deliberately lossy: several characters may become the same symbol,
-but one character never becomes more than one symbol, so any text that
-contains another as a substring, contains it as a substring after
-folding too. Writers and readers MUST use exactly this procedure; a
-reader that folds differently from the writer loses the guarantee of
-[Section B.7](#b7-query-procedure).
+`e`. Step 4 puts all ASCII digits in one bucket and all ASCII spaces and
+punctuation in another, and keeps every other character distinct: `ß`,
+`ø`, and `ł`, which have no decomposition, and every letter of a
+non-Latin script, are symbols of their own. Symbols `0` to `27` are the
+**Latin symbols**; every other symbol is at least `128`.
 
-### B.3. N-grams and Lists
+The folding is lossy, but one code point never becomes more than one
+symbol, so any text that contains another as a substring contains it as
+a substring after folding too ([Section B.9](#b9-query-procedure)). It
+deliberately uses no Unicode character property beyond normalization
+and case conversion, so that a writer and a reader built against
+different versions of the Unicode Character Database fold the same
+text the same way. Writers and readers MUST use exactly this procedure.
 
-The index holds one bit list per **n-gram**, a run of `n` consecutive
-symbols. `n` is stored in the header and is `1` or `2` in this version.
-There are `L = 28^n` possible n-grams, hence `L` lists: `28` for `n = 1`,
-`784` for `n = 2`.
+### B.3. Trigrams and Lists
 
-The n-gram of symbols `s_0, s_1, ..., s_{n-1}` has **list index**
-
-```
-l = s_0 × 28^(n-1) + s_1 × 28^(n-2) + ... + s_{n-1}
-```
-
-so for `n = 2` the pair `(s_0, s_1)` is list `s_0 × 28 + s_1`.
-
-The n-gram set of a place is the union, over every field of its name
-entry ([Section 7.4](#74-name-entries)), of the n-grams of that field's
-symbol sequence. Each field is folded separately; no n-gram spans the
-`|` between two fields. A field shorter than `n` symbols contributes
+A **trigram** is a run of three consecutive symbols. The trigram set of
+a place is the union, over every field of its name entry
+([Section 7.4](#74-name-entries)), of the trigrams of that field's
+symbol sequence. Each field is folded separately; no trigram spans the
+`|` between two fields. A field shorter than three symbols contributes
 nothing.
 
-### B.4. Bit Lists and Groups
-
-The index covers the `place_count` places with consecutive IDs
-`first_id .. first_id + place_count - 1`. The **position** of a place is
-`p = id - first_id`. Positions are pooled into **groups** of `group_size`
-(written `G`) consecutive positions: group `g` covers positions
-`g × G .. min((g + 1) × G, place_count) - 1`, and there are
+The index has one list per possible **list index**. There are
 
 ```
-bits_per_list  = ceil(place_count / G)
-bytes_per_list = ceil(bits_per_list / 8)
+L = 28^3 + 2^hash_exp = 21952 + 2^hash_exp
 ```
 
-groups. Bit `g` of list `l` is `1` if and only if at least one place in
-group `g` has n-gram `l` in its n-gram set. With `G = 1` every place has
-its own bit. With `G > 1` the bits of `G` places are OR-ed together,
-which divides the file size by `G` at the cost of some places surviving
-the index only because a neighbour in their group matched; these are
-rejected when their names are compared.
+list indices. A trigram `(s0, s1, s2)` whose symbols are all Latin has
+the list index
 
-Each list is `bytes_per_list` bytes. Bit `g` is stored in byte `g >> 3`
-of its list, at bit position `g & 7`, least significant bit first: byte
-`0` holds groups `0` to `7`, with group `0` in bit `0x01`. Bits beyond
-`bits_per_list - 1` in the last byte MUST be `0`.
+```
+l = s0 × 784 + s1 × 28 + s2              (0 <= l < 21952)
+```
 
-### B.5. File Layout
+so every Latin trigram has a list of its own. Any other trigram is
+hashed into one of `2^hash_exp` shared lists: let `bytes` be the nine
+bytes formed by writing `s0`, `s1`, and `s2` each as a `u24`
+([Section 3.1](#31-fixed-width-integers)), let `h` be the 32-bit
+FNV-1a hash [FNV] of `bytes`, and fold `h` to `hash_exp` bits:
 
-The file is one header followed by the lists, with no padding and no
+```
+h = 0x811c9dc5
+for each byte b of bytes, in order:
+    h = h xor b
+    h = (h × 0x01000193) mod 2^32
+l = 21952 + (((h >> hash_exp) xor h) mod 2^hash_exp)
+```
+
+Symbols are code points or smaller, so each fits in a `u24`. Test
+vectors for the 32-bit hash: the empty input hashes to `811c9dc5`, the
+single byte `a` to `e40c292c`, and the ASCII text `foobar` to
+`bf9cf968`. Some trigram list indices with `hash_exp = 15`:
+
+| Text     | Trigram                    | `bytes`                      | `h`        | `l`     |
+|----------|----------------------------|------------------------------|------------|---------|
+| `łód`    | `(0x142, 14, 3)`           | `42 01 00 0e 00 00 03 00 00` | `0702848f` | `24650` |
+| `東京都` | `(0x6771, 0x4eac, 0x90fd)` | `71 67 00 ac 4e 00 fd 90 00` | `574bcbf2` | `47909` |
+| `straße` | `(0, 0xdf, 4)`, from `aße` | `00 00 00 df 00 00 04 00 00` | `e5f8c954` | `22629` |
+
+List `l` holds every place whose trigram set contains a trigram with
+list index `l`. Two hashed trigrams may share a list; that only admits
+more candidates, never fewer.
+
+### B.4. List Encoding
+
+Each list is a strictly increasing set of place IDs, stored in one of
+two encodings:
+
+- **ID list** (encoding `0`): the IDs as a delta-coded list
+  ([Section 3.3](#33-delta-coded-lists)), with no count. The list ends
+  where its stored length ends.
+- **Bitmap** (encoding `1`): `ceil(N / 8)` bytes, one bit per place of
+  the source, where `N` is the number of places. The bit of place `id`
+  is in byte `id >> 3`, at bit position `id & 7`, least significant bit
+  first. Bits for positions `N` and beyond in the last byte MUST be `0`.
+
+Writers MUST use the ID list when its encoded length is at most
+`ceil(N / 8)`, and the bitmap otherwise. The choice is then fixed by the
+set, which keeps the file a pure function of its source. A list that
+would be empty is not stored at all ([Section B.7](#b7-file-layout)).
+
+### B.5. Relevance Order
+
+A reader that returns search results ordered by relevance, rather than
+by ID, SHOULD use this order, and the short-query table
+([Section B.6](#b6-short-query-table)) MUST be built with it.
+
+A place **matches** a query when the lowercase form of at least one
+field of its name entry contains the lowercase form of the query as a
+substring, lowercasing both with the Unicode default case conversion and
+no other normalization. The **quality** of a field that contains the
+query is:
+
+- `4` when the field's lowercase form equals the query's;
+- otherwise `2` when the query's **tokens** occur in the field's tokens
+  as a contiguous run, where the tokens of a text are its lowercase form
+  split at every code point whose General Category is not a letter (`L*`)
+  or a number (`N*`), with empty tokens dropped;
+- otherwise `1`.
+
+A field that does not contain the query has quality `0`. The quality of
+a place is the highest quality of its fields, and its **score** is its
+quality plus a level bonus: `4` for a city, `2` for a region, and `1`
+for a country. Results are ordered by descending score, and places with
+equal scores by ascending ID.
+
+For example, the query `amsterdam` gives the city `Amsterdam` quality
+`4` and score `8`, and the city `Nieuw-Amsterdam` quality `2` (its
+tokens are `nieuw`, `amsterdam`) and score `6`. The query ` amsterdam`
+with a leading space matches neither: token matching only ranks places
+that already match.
+
+Only the ranking depends on Unicode character properties, never whether
+a place matches, so a reader and writer that disagree about a character's
+category can disagree about order but not about the set of results.
+
+### B.6. Short-Query Table
+
+A query of one or two characters has no trigram, and matches so many
+places that comparing every name is the only way to rank them. The
+short-query table instead stores, for every such query that has any
+match, the first `top_count` places in relevance order
+([Section B.5](#b5-relevance-order)).
+
+The table's **keys** are every string of one or two consecutive code
+points that occurs in the lowercase form (as in Section B.5, without
+folding) of some field of some name entry. The table MUST contain every
+key and no other. The **entry** of a key is the list of the places that
+match it, in relevance order, truncated to its first `top_count`
+places. A key always has at least one match, so an entry is never empty;
+it has fewer than `top_count` places only when fewer places match. A
+query whose lowercase form is one or two code points long and is not a
+key matches no place at all.
+
+Entries are sorted by the UTF-8 bytes of their key, compared bytewise
+(which equals comparing code points), and grouped into **table blocks**
+of `2^top_block_exp` consecutive entries; the last block MAY be shorter.
+A table block is the concatenation of its entries, each stored as:
+
+| Field   | Type          | Description |
+|---------|---------------|-------------|
+| `key`   | bytes, `NUL`  | The key in UTF-8, followed by a `NUL` byte. |
+| `count` | varint        | The number of places in the entry, from `1` to `top_count`. |
+| `ids`   | `count` varints | The places, in relevance order. Not delta-coded: relevance order is not ID order. |
+
+The **table directory** lists, for each block, the key of its first
+entry, so that a reader finds the block of a key by binary search over
+the directory and then reads that block alone:
+
+| Field           | Type          | Description |
+|-----------------|---------------|-------------|
+| `key_count`     | varint        | `Q`, the number of keys. There are `ceil(Q / 2^top_block_exp)` blocks. |
+| for each block: `first_key` | bytes, `NUL` | The key of the block's first entry, in UTF-8, followed by `NUL`. |
+| for each block: `block_length` | varint | The byte length of the block. |
+
+Blocks are stored consecutively in block order, so block `b` starts at
+the sum of the lengths of blocks `0` to `b - 1`.
+
+### B.7. File Layout
+
+The file is a header followed by four sections, with no padding and no
 trailer.
 
-| Field             | Type                       | Description |
-|-------------------|----------------------------|-------------|
-| `signature`       | 8 bytes                    | The ASCII bytes `CGEODATA`, as in [Section 5](#5-header). |
-| `version`         | varint                     | Kind and version as defined in Section 5. This appendix specifies kind `1`, version `0`, so the value is `16` (`10`). |
-| `source_checksum` | u64                        | Checksum of the source file's place table ([Section B.6](#b6-source-checksum)). |
-| `ngram`           | u8                         | `n`, the n-gram length. MUST be `1` or `2`; other values are reserved. |
-| `group_size`      | varint                     | `G`, the number of places per bit. MUST be at least `1`. |
-| `first_id`        | varint                     | The ID of the first indexed place. |
-| `place_count`     | varint                     | The number of indexed places. |
-| `lists`           | `L × bytes_per_list` bytes | List `0`, then list `1`, and so on up to list `L - 1`, each `bytes_per_list` bytes ([Section B.4](#b4-bit-lists-and-groups)). |
+| Field                   | Type    | Description |
+|-------------------------|---------|-------------|
+| `signature`             | 8 bytes | The ASCII bytes `CGEODATA`, as in [Section 5](#5-header). |
+| `version`               | varint  | Kind and version as defined in Section 5. This appendix specifies kind `1`, version `1`, so the value is `17` (`11`). |
+| `source_checksum`       | u64     | Checksum of the source file's place table ([Section B.8](#b8-source-checksum)). |
+| `place_count`           | varint  | `N`, the number of places in the source. |
+| `hash_exp`              | u8      | The number of hashed lists is `2^hash_exp` ([Section B.3](#b3-trigrams-and-lists)). MUST be from `1` to `24`. |
+| `top_count`             | u8      | The number of places per short-query entry ([Section B.6](#b6-short-query-table)). `0` means the file has no short-query table. |
+| `top_block_exp`         | u8      | Each table block holds `2^top_block_exp` entries. MUST be at most `24`. |
+| `list_directory_length` | varint  | Byte length of `list_directory`. |
+| `lists_length`          | varint  | Byte length of `lists`. |
+| `table_directory_length`| varint  | Byte length of `table_directory`. |
+| `list_directory`        | bytes   | See below. |
+| `lists`                 | bytes   | The stored lists, in increasing list index, each in its encoding ([Section B.4](#b4-list-encoding)). |
+| `table_directory`       | bytes   | The table directory of Section B.6. Empty when `top_count` is `0`. |
+| `table_blocks`          | bytes   | The table blocks of Section B.6, in block order. They run to the end of the file. Empty when `top_count` is `0`. |
 
-The file length MUST be exactly the header length plus
-`L × bytes_per_list`. `L`, `bits_per_list`, and `bytes_per_list` are not
-stored; they follow from `ngram`, `group_size`, and `place_count`.
+The list directory records which lists are stored and how long each
+one is:
 
-Writers SHOULD index exactly the cities, that is `first_id = C + R` and
-`place_count = N - C - R` in the terms of
-[Section 7.1](#71-identifiers-and-hierarchy). Countries and regions are
-few enough that scanning them linearly costs nothing measurable, and
-leaving them out keeps the index a single contiguous ID range. A reader
-MUST NOT assume this choice, and MUST compare the names of every place
-outside `first_id .. first_id + place_count - 1` without the index.
+| Field      | Type                  | Description |
+|------------|-----------------------|-------------|
+| `presence` | `ceil(L / 8)` bytes   | Bit `l` is `1` if list `l` is stored, that is, if it is not empty. Bit `l` is in byte `l >> 3`, at bit position `l & 7`, least significant bit first. Bits for `L` and beyond in the last byte MUST be `0`. |
+| `entries`  | one varint per stored list | In increasing list index: `length × 2 + encoding`, where `length` is the byte length of the stored list and `encoding` is `0` for an ID list and `1` for a bitmap. |
 
-### B.6. Source Checksum
+List `l`, if stored, starts at the sum of the lengths of the stored
+lists with a smaller index. A reader computes all offsets with one pass
+over `entries`. A list that is not stored is empty: no place has a
+trigram with that list index.
+
+Version `0` of kind `1` (value `16`) was an earlier bigram layout of
+this index. Readers MUST reject it.
+
+### B.8. Source Checksum
 
 `source_checksum` binds an index to the place table it was built from.
 It is the 64-bit FNV-1a hash [FNV] of exactly the `place_table_length`
@@ -1025,7 +1171,8 @@ Only the place table is covered, not the whole source file, for two
 reasons. The index depends on nothing else, so a source rebuilt with
 different chunk parameters, or with some chunks left empty, keeps the
 same index valid. And verifying the checksum then reads only the place
-table, which stays small (about 1.3 MiB for the worldwide file), rather
+table, which stays small (about 2 MiB for the worldwide file at the
+recommended `keyframe_exp` of [Section 7.3](#73-name-blocks)), rather
 than every chunk.
 
 Readers SHOULD compute the checksum of the source's place table when
@@ -1035,8 +1182,7 @@ build pipeline guarantees the pairing, but it then has no protection
 against a stale index, which silently misses places whose names were
 added or changed after the index was built. The checksum detects
 accidental mismatches; it is not a defence against a deliberately
-crafted index, which is unnecessary because the index cannot add
-results ([Section B.8](#b8-robustness)).
+crafted index ([Section B.10](#b10-robustness)).
 
 FNV-1a was chosen over a cryptographic hash because it is a dozen lines
 of integer arithmetic in any language and needs no library. In
@@ -1045,140 +1191,189 @@ convenient to implement on two 32-bit halves: because the prime is
 `2^40 + 0x1b3`, `h × prime` is `(h << 40) + h × 0x1b3`, and `h << 40`
 only ever contributes `low32(h) << 8` to the high half.
 
-### B.7. Query Procedure
+### B.9. Query Procedure
 
-To search for a query text with an index whose parameters are `n`, `G`,
-`first_id`, and `place_count`:
+To search for a query text:
 
-1. **Fold the query** with the procedure of
+1. **Short queries.** Let `q` be the lowercase form of the query (as
+   in [Section B.5](#b5-relevance-order)). If `q` is one or two code
+   points long, the search asks for results in relevance order with a
+   limit of at most `top_count` and no restriction by level or parent,
+   and `top_count` is not `0`, then look `q` up in the short-query
+   table: find the last block whose `first_key` is at most `q`, read
+   that block, and scan it for `q`. The result is the first `limit`
+   places of its entry, or nothing if `q` is not a key. Stop.
+2. **Fold the query** with the procedure of
    [Section B.2](#b2-symbol-folding) into a symbol sequence
-   `s_0 .. s_{m-1}`.
-2. **Decide whether the index applies.** If `m < n`, the query has no
-   n-gram and the index cannot help; compare every name without it and
-   stop.
-3. **Collect the distinct n-grams** of the query, and their list
-   indices as defined in [Section B.3](#b3-n-grams-and-lists).
-4. **AND the lists.** Copy the first list into a buffer of
-   `bytes_per_list` bytes, then AND each remaining list into it byte by
-   byte. Readers MUST NOT modify the stored lists in place: a buffer
-   obtained by memory-mapping or by viewing a larger buffer is shared
-   with the next query. If any list is entirely zero, the result is
-   entirely zero, and a reader MAY stop early.
-5. **Expand the groups.** Every bit `g` that is still set in the buffer
-   makes the places at positions `g × G .. min((g + 1) × G, place_count) - 1`
-   candidates, with IDs `first_id + position`.
-6. **Confirm each candidate** by comparing its names with the query, as
+   `s_0 .. s_{m-1}`. If `m < 3`, the query has no trigram and the lists
+   cannot help: compare every name without the index, and stop.
+3. **Collect the distinct list indices** of the query's trigrams
+   ([Section B.3](#b3-trigrams-and-lists)). If any of them is not
+   stored, no place can match: the result is empty.
+4. **Intersect the lists.** The candidates are the places present in
+   every one of them. A reader SHOULD start from the shortest stored
+   list and MAY stop as soon as the intersection is empty. An ID list
+   is intersected by merging two sorted sequences; a bitmap by testing
+   one bit per remaining candidate.
+5. **Confirm each candidate** by comparing its names with the query, as
    the reader would without the index, and report the confirmed ones.
-7. **Scan the rest.** Compare the names of every place outside the
-   indexed ID range without the index, and report the matches. A
-   reader that reports results in ID order emits these in their place
-   among the others.
+   Candidates come out in increasing ID order, which is the order of a
+   search without relevance ranking.
 
-The index never loses a match, under the following condition. Say a
+The lists never lose a match, under the following condition. Say a
 reader matches a name against a query when the name contains the query
 as a substring after both have been folded as in Section B.2. Then a
-matching name contains every n-gram of the folded query, so the place
-survives step 4 and is examined in step 6. A reader whose comparison is
-stricter than folded substring containment, for example one that keeps
-accents or case distinct, inherits the guarantee, since everything it
-accepts is also accepted by the folded comparison. A reader whose
-comparison is looser, for example one that tolerates a missing or
-transposed character, or that matches across the `|` between fields,
-does not, and MUST NOT use the index for such queries. A plain
-case-insensitive substring comparison, such as lowercasing both sides
-with the default Unicode case mapping, satisfies the condition for all
-practical text; the exotic cases in which lowercasing and
-decomposition do not commute are not known to affect any place name.
+matching name contains every trigram of the folded query, so the place
+is present in every list of step 4 and is examined in step 5. A reader
+whose comparison is stricter than folded substring containment, for
+example the case-insensitive but accent-sensitive substring match of
+Section B.5, inherits the guarantee, since everything it accepts is
+also accepted by the folded comparison. A reader whose comparison is
+looser, for example one that tolerates a missing or transposed
+character, or that matches across the `|` between fields, does not, and
+MUST NOT use the index for such queries. In particular, a reader that
+ranks by tokens MUST only rank places that match as a substring, as
+Section B.5 requires; ranking a place whose tokens match but whose names
+do not contain the query as a substring would make results depend on
+the index. The exotic cases in which lowercasing and decomposition do
+not commute are not known to affect any place name.
 
-Step 4 dominates a query's cost and is independent of the query's
-selectivity: it reads and combines one list of `bytes_per_list` bytes
-per distinct n-gram. Step 6 costs one name-block access per candidate,
-so the index pays off when the candidates are a small fraction of the
-indexed places, which is the case for nearly all queries of three or
-more characters ([Section B.9](#b9-choosing-parameters)).
+The short-query table of step 1 is exact rather than an
+over-approximation: its entries are the answer. A reader SHOULD still
+confirm that each place of an entry matches `q`, which costs at most
+`top_count` name lookups, and drop any that do not.
 
-### B.8. Robustness
+### B.10. Robustness
 
 A search index file may come from an untrusted source, or may be stale.
 Readers MUST NOT assume that it is well formed or that it matches its
 source.
 
 - Readers MUST verify the signature, kind, and version before
-  interpreting any other field, and MUST reject `ngram` values other
-  than `1` and `2`, and `group_size` values of `0`.
-- Readers MUST check that the file length is exactly the header length
-  plus `L × bytes_per_list` before reading any list.
-- Readers MUST check that `first_id + place_count` is at most `N`, the
-  number of places in the source, so that no candidate ID falls outside
-  the place table.
-- Readers MUST confirm every candidate by comparing its names. Given
-  this, a malformed or mismatched index can cause missed results and
-  wasted work, but never a wrong result.
-- The lists are stored raw, so there is no decompression to bound. The
-  only allocation a query needs is one buffer of `bytes_per_list`
-  bytes, which is bounded by the file length.
+  interpreting any other field, and MUST reject `hash_exp` outside `1`
+  to `24` and `top_block_exp` above `24`.
+- Readers MUST check that the header's section lengths add up to at
+  most the file length, and that `list_directory_length` equals
+  `ceil(L / 8)` plus the length of `entries`, where the number of
+  entries is the number of `1` bits in `presence`.
+- Readers MUST check that the lengths in `entries` add up to
+  `lists_length`, that every bitmap is exactly `ceil(N / 8)` bytes, and
+  that every block length in the table directory lies within
+  `table_blocks`.
+- Readers MUST check that `place_count` equals `N`, the number of places
+  in the source, and MUST reject any place ID in a list or table entry
+  that is not less than `N`, and any ID list that is not strictly
+  increasing.
+- Readers MUST confirm every trigram candidate by comparing its names.
+  Given this, a malformed or mismatched list can cause missed results
+  and wasted work, but never a wrong result. A malformed short-query
+  table can reorder or omit results; confirming its places, as
+  Section B.9 recommends, keeps it from adding a wrong one.
+- Nothing in the file is compressed, so there is no decompression to
+  bound. The allocations a query needs are bounded by the lengths of the
+  sections and lists it reads, which are bounded by the file length.
 
-### B.9. Choosing Parameters
+### B.11. Choosing Parameters
 
-This section is informative.
+This section is informative. The measurements were taken on the
+worldwide file (239 countries, 5,469 regions, 313,732 cities), with a
+reader that opens the source afresh for every query, as a search box
+queried only occasionally would: nothing is cached except by the
+operating system. Each query asks for the top five places in relevance
+order and resolves them to their parents.
 
-**Group size.** Measured on a worldwide place table of roughly 245,000
-cities, the bigram index (`n = 2`) has these sizes:
+**Hashed lists.** With `hash_exp = 15` the file holds 32,768 hashed
+lists beside the 21,952 Latin ones; the presence bitmap is 6.7 KiB, and
+a query of a script other than Latin leaves about as few candidates as
+a Latin one of the same length. With the 28-symbol folding of the
+earlier bigram version, which mapped every non-Latin letter to the
+separator, a three-letter Cyrillic, Arabic, or Chinese query left every
+place with a non-Latin name, over 36,000 cities, as candidates.
+`hash_exp = 15` is RECOMMENDED.
 
-| `G`  | File size |
-|------|-----------|
-| 1    | 23 MiB    |
-| 2    | 12 MiB    |
-| 4    | 5.8 MiB   |
-| 8    | 2.9 MiB   |
-| 16   | 1.5 MiB   |
-| 32   | 740 KiB   |
-| 64   | 372 KiB   |
+**Size.** The worldwide index is 4.2 MiB: 3.8 MiB of lists (36,317
+stored), a 49 KiB list directory, and 362 KiB of short-query table.
+Every trigram list turned out smaller as an ID list than as a bitmap:
+an ID list costs about a byte per place, so a bitmap only wins for a
+trigram shared by more than about one place in eight, which the
+worldwide data does not have, but a small file (such as the example
+below) does. The index is built in under three seconds.
 
-Against a set of typical search-box queries, `G = 4` gave the best mean
-query time, `G = 8` was close behind, and from `G = 16` on the common
-bigrams (`an`, `er`, `st`, ...) leave so many groups set that queries
-built from them degrade towards the linear scan. With `G = 4`, queries
-of three or more characters typically leave under 3% of the cities as
-candidates and run 50 to 200 times faster than the scan. `G = 4` is
-RECOMMENDED for general use; a size-constrained reader loses little at
-`G = 8`.
+**Speed.** How long a query takes depends far more on the source's
+`keyframe_exp` ([Section 7.3](#73-name-blocks)) than on the index,
+because confirming a candidate means inflating the name block it is in.
+Mean times for random substrings of real city names, with and without
+the index; every query opens the source and the index afresh, including
+verifying the checksum (about 10 ms of each indexed query):
 
-**N-gram length.** A unigram index (`n = 1`, 28 lists) is about 28 times
-smaller than a bigram index at the same `G`, but each list is far
-denser: almost every name contains an `a`, and a two-letter query leaves
-most of the table as candidates. It only outperformed the bigram index
-on one-character queries, which the bigram index cannot serve at all.
-`n = 2` is RECOMMENDED. Longer n-grams are not defined in this version:
-`28^3 = 21952` lists would make the file larger than a `G = 1` bigram
-index for any realistic place count, and would not serve two-character
+| `keyframe_exp` | Index | 1 character | 2 characters | 3 characters | 5 characters | 8 characters | 95th percentile |
+|----------------|-------|-------------|--------------|--------------|--------------|--------------|-----------------|
+| `13`           | yes   | 15 ms       | 13 ms        | 67 ms        | 24 ms        | 15 ms        | 88 ms           |
+| `13`           | no    | 155 ms      | 127 ms       | 124 ms       | 123 ms       | 122 ms       | 169 ms          |
+| `7`            | yes   | 11 ms       | 10 ms        | 26 ms        | 13 ms        | 12 ms        | 34 ms           |
+| `7`            | no    | 181 ms      | 141 ms       | 138 ms       | 136 ms       | 135 ms       | 200 ms          |
+
+The one- and two-character rows are answered by the short-query table.
+Intersecting the lists takes well under a millisecond in every case; the
+rest of a three-character query is confirming its candidates, of which
+there are thousands for the commonest trigrams.
+
+**Short-query table.** With `top_count = 5` the worldwide table has
+25,497 keys and takes 365 KiB. It replaces the whole-table
+scan that one- and two-character queries otherwise need, for the
+common case of a search box that shows the top few matches.
+`top_count = 5` and `top_block_exp = 6` (blocks of 64 keys, roughly
+1 KiB each) are RECOMMENDED. A reader asked for more results, or for
+results restricted by level or parent, falls back to the scan for these
 queries.
 
-**Separators and digits.** Folding all punctuation and whitespace to one
-symbol means a query containing a space eliminates names in which the
-two words are not adjacent in the same order, at no extra cost, while a
-hyphen and a space in a name still match each other's query. Digits
-share one bucket because names containing digits are rare enough that
-distinguishing them would not pay for the extra lists.
+**Why trigrams.** Bigrams (the earlier version of this index) are
+common enough that a query leaves several times more candidates than
+with trigrams, and with bigrams pooled into groups of places to keep
+the file small, more again: for Latin queries of three or more
+characters with on average 530 true matches among the cities, the
+earlier layout left 3,500 cities as candidates, where trigrams leave
+650. Longer n-grams would narrow queries of four or more characters
+further, but these are already fast, and would serve no query of
+three.
 
-### B.10. Worked Example
+### B.12. Worked Example
 
 This example indexes the source file of
-[Appendix A](#appendix-a-worked-example) with `n = 2` and `G = 1`, so
-that each of the three cities has its own bit. The indexed places are
-IDs `4` (`Amsterdam`), `5` (`Zaandam`), and `6` (`Antwerpen|Antwerp`),
-at positions `0`, `1`, and `2`. The file is `21 + 784 = 805` bytes.
+[Appendix A](#appendix-a-worked-example) with `hash_exp = 4`,
+`top_count = 2`, and `top_block_exp = 4`: small parameters, so that
+the example is short but still has several table blocks. The seven
+places and their name fields are:
 
-#### B.10.1. Header (21 bytes)
+| ID | Level   | Fields                        |
+|----|---------|-------------------------------|
+| 0  | country | `Nederland`, `The Netherlands` |
+| 1  | country | `België`, `Belgium`           |
+| 2  | region  | `Noord-Holland`               |
+| 3  | region  | `Antwerpen`, `Antwerp`        |
+| 4  | city    | `Amsterdam`                   |
+| 5  | city    | `Zaandam`                     |
+| 6  | city    | `Antwerpen`, `Antwerp`        |
+
+`L = 21952 + 2^4 = 21968`, so `presence` is `2746` bytes. `N = 7`, so a
+bitmap is `1` byte, and any list of two or more places is stored as a
+bitmap, since its ID list would take two bytes or more. The file is
+`3207` bytes: a 25-byte header, a `2793`-byte list directory, `47` bytes
+of lists, a `16`-byte table directory, and `326` bytes of table blocks.
+
+#### B.12.1. Header (25 bytes)
 
 ```
 43 47 45 4f 44 41 54 41   signature "CGEODATA"
-10                        version 16 -> kind 1 (text search index), version 0
+11                        version 17 -> kind 1 (text search index), version 1
 9f e6 00 b9 37 18 dc 77   source_checksum 0x77dc1837b900e69f
-02                        ngram 2  -> L = 784 lists
-01                        group_size 1
-04                        first_id 4
-03                        place_count 3  -> bits_per_list 3, bytes_per_list 1
+07                        place_count 7
+04                        hash_exp 4 -> 16 hashed lists, L = 21968
+02                        top_count 2
+04                        top_block_exp 4 -> 16 entries per table block
+e9 15                     list_directory_length 2793
+2f                        lists_length 47
+10                        table_directory_length 16
 ```
 
 The checksum is the FNV-1a 64 hash of the 109 bytes of the place table
@@ -1186,78 +1381,154 @@ in [Section A.3](#a3-place-table-109-bytes), that is the bytes at file
 offsets `22` to `130` of the Appendix A file, from the `02` of
 `country_count` to the `6c` that ends block `1`.
 
-#### B.10.2. Lists (784 bytes)
+#### B.12.2. Lists
 
-Every list is one byte. Bit `0x01` is Amsterdam, `0x02` is Zaandam, and
-`0x04` is Antwerpen. The bigram sets are:
+Every name folds to Latin symbols only (`België` becomes `belgie`), so
+no hashed list is used. The 47 stored lists, in list index order, are
+below; `-` stands for the separator symbol `26`. "Bit" is the `presence`
+byte and bit that mark the list as stored, "Entry" is its varint in
+`entries`, and "Stored" is the list itself.
 
-| ID | Names                | Bigrams |
-|----|----------------------|---------|
-| 4  | `Amsterdam`          | `am ms st te er rd da` |
-| 5  | `Zaandam`            | `za aa an nd da am` |
-| 6  | `Antwerpen`, `Antwerp` | `an nt tw we er rp pe en` |
+| Trigram | `l`   | Bit          | Entry | Stored      | Places |
+|---------|-------|--------------|-------|-------------|--------|
+| `aan`   | 13    | 1: `20`      | `02`  | IDs `05`    | 5 |
+| `ams`   | 354   | 44: `04`     | `02`  | IDs `04`    | 4 |
+| `and`   | 367   | 45: `80`     | `03`  | bitmap `25` | 0, 2, 5 |
+| `ant`   | 383   | 47: `80`     | `03`  | bitmap `48` | 3, 6 |
+| `bel`   | 907   | 113: `08`    | `02`  | IDs `01`    | 1 |
+| `dam`   | 2364  | 295: `10`    | `03`  | bitmap `30` | 4, 5 |
+| `der`   | 2481  | 310: `02`    | `02`  | IDs `00`    | 0 |
+| `d-h`   | 3087  | 385: `80`    | `02`  | IDs `02`    | 2 |
+| `ede`   | 3224  | 403: `01`    | `02`  | IDs `00`    | 0 |
+| `elg`   | 3450  | 431: `04`    | `02`  | IDs `01`    | 1 |
+| `erd`   | 3615  | 451: `80`    | `02`  | IDs `04`    | 4 |
+| `erl`   | 3623  | 452: `80`    | `02`  | IDs `00`    | 0 |
+| `erp`   | 3627  | 453: `08`    | `03`  | bitmap `48` | 3, 6 |
+| `eth`   | 3675  | 459: `08`    | `02`  | IDs `00`    | 0 |
+| `e-n`   | 3877  | 484: `20`    | `02`  | IDs `00`    | 0 |
+| `gie`   | 4932  | 616: `10`    | `02`  | IDs `01`    | 1 |
+| `giu`   | 4948  | 618: `10`    | `02`  | IDs `01`    | 1 |
+| `her`   | 5617  | 702: `02`    | `02`  | IDs `00`    | 0 |
+| `he-`   | 5626  | 703: `04`    | `02`  | IDs `00`    | 0 |
+| `hol`   | 5891  | 736: `08`    | `02`  | IDs `02`    | 2 |
+| `ium`   | 6844  | 855: `10`    | `02`  | IDs `01`    | 1 |
+| `lan`   | 8637  | 1079: `20`   | `03`  | bitmap `05` | 0, 2 |
+| `lgi`   | 8800  | 1100: `01`   | `02`  | IDs `01`    | 1 |
+| `lla`   | 8932  | 1116: `10`   | `02`  | IDs `02`    | 2 |
+| `mst`   | 9931  | 1241: `08`   | `02`  | IDs `04`    | 4 |
+| `nda`   | 10276 | 1284: `10`   | `02`  | IDs `05`    | 5 |
+| `nds`   | 10294 | 1286: `40`   | `02`  | IDs `00`    | 0 |
+| `ned`   | 10307 | 1288: `08`   | `02`  | IDs `00`    | 0 |
+| `net`   | 10323 | 1290: `08`   | `02`  | IDs `00`    | 0 |
+| `noo`   | 10598 | 1324: `40`   | `02`  | IDs `02`    | 2 |
+| `ntw`   | 10746 | 1343: `04`   | `03`  | bitmap `48` | 3, 6 |
+| `oll`   | 11295 | 1411: `80`   | `02`  | IDs `02`    | 2 |
+| `oor`   | 11385 | 1423: `02`   | `02`  | IDs `02`    | 2 |
+| `ord`   | 11455 | 1431: `80`   | `02`  | IDs `02`    | 2 |
+| `pen`   | 11885 | 1485: `20`   | `03`  | bitmap `48` | 3, 6 |
+| `rda`   | 13412 | 1676: `10`   | `02`  | IDs `04`    | 4 |
+| `rd-`   | 13438 | 1679: `40`   | `02`  | IDs `02`    | 2 |
+| `rla`   | 13636 | 1704: `10`   | `02`  | IDs `00`    | 0 |
+| `rpe`   | 13752 | 1719: `01`   | `03`  | bitmap `48` | 3, 6 |
+| `ste`   | 14648 | 1831: `01`   | `02`  | IDs `04`    | 4 |
+| `ter`   | 15025 | 1878: `02`   | `02`  | IDs `04`    | 4 |
+| `the`   | 15096 | 1887: `01`   | `02`  | IDs `00`    | 0 |
+| `twe`   | 15516 | 1939: `10`   | `03`  | bitmap `48` | 3, 6 |
+| `wer`   | 17377 | 2172: `02`   | `03`  | bitmap `48` | 3, 6 |
+| `zaa`   | 19600 | 2450: `01`   | `02`  | IDs `05`    | 5 |
+| `-ho`   | 20594 | 2574: `04`   | `02`  | IDs `02`    | 2 |
+| `-ne`   | 20752 | 2594: `01`   | `02`  | IDs `00`    | 0 |
 
-`Antwerp` adds no bigram beyond those of `Antwerpen`. Seventeen lists
-are non-zero; the other 767 are `00`:
+All other `presence` bytes are `00`. The entries and the lists are the
+"Entry" and "Stored" columns concatenated: `entries` is 47 bytes, one
+varint per list, and `lists` is 47 bytes, since every stored list here
+is one byte long. The ID list of a single place is its ID, since the
+first delta is taken from `0`. The place table's `The Netherlands` and
+`Noord-Holland` contribute the separator trigrams `e-n`, `he-`, `-ne`,
+`d-h`, `rd-`, and `-ho`.
 
-| Bigram | List index      | Byte | Places |
-|--------|-----------------|------|--------|
-| `aa`   | `0 × 28 + 0 = 0`   | `02` | Zaandam |
-| `am`   | `0 × 28 + 12 = 12` | `03` | Amsterdam, Zaandam |
-| `an`   | `13`            | `06` | Zaandam, Antwerpen |
-| `da`   | `3 × 28 + 0 = 84`  | `03` | Amsterdam, Zaandam |
-| `en`   | `125`           | `04` | Antwerpen |
-| `er`   | `129`           | `05` | Amsterdam, Antwerpen |
-| `ms`   | `354`           | `01` | Amsterdam |
-| `nd`   | `367`           | `02` | Zaandam |
-| `nt`   | `383`           | `04` | Antwerpen |
-| `pe`   | `424`           | `04` | Antwerpen |
-| `rd`   | `479`           | `01` | Amsterdam |
-| `rp`   | `491`           | `04` | Antwerpen |
-| `st`   | `523`           | `01` | Amsterdam |
-| `te`   | `536`           | `01` | Amsterdam |
-| `tw`   | `554`           | `04` | Antwerpen |
-| `we`   | `620`           | `04` | Antwerpen |
-| `za`   | `25 × 28 + 0 = 700` | `02` | Zaandam |
+#### B.12.3. Short-Query Table
 
-List `l` is at file offset `21 + l`.
+The names contain 64 distinct strings of one or two lowercase code
+points, so the table has four blocks of 16 entries. The table directory
+(16 bytes) is:
 
-#### B.10.3. Queries
+```
+40                        key_count 64 -> 4 blocks
+20 00  50                 block 0: first_key " ", block_length 80
+65 20 00  52              block 1: first_key "e ", block_length 82
+6c 67 00  52              block 2: first_key "lg", block_length 82
+72 64 00  52              block 3: first_key "rd", block_length 82
+```
 
-**`dam`.** Folds to symbols `3, 0, 12`; bigrams `da` (list `84`) and
-`am` (list `12`). `03 AND 03 = 03`: candidates are positions `0` and
-`1`, IDs `4` and `5`. Both `Amsterdam` and `Zaandam` contain `dam`, so
-both are confirmed.
+The entries, key followed by its places in relevance order:
 
-**`dams`.** Bigrams `da` (`84`), `am` (`12`), `ms` (`354`).
-`03 AND 03 AND 01 = 01`: the only candidate is `Amsterdam`. Its names
-do not contain `dams`, so it is rejected and the search reports
-nothing. The index passed it because a bigram set discards the order
-in which the bigrams occur: `Amsterdam` has all three, just not
-consecutively.
+```
+block 0   " " 0      " n" 0     "-" 2      "-h" 2     "a" 4 5    "aa" 5
+          "am" 4 5   "an" 5 6   "b" 1      "be" 1     "d" 4 5    "d-" 2
+          "da" 4 5   "de" 0     "ds" 0     "e" 4 6
+block 1   "e " 0     "ed" 0     "el" 1     "en" 6 3   "er" 4 6   "et" 0
+          "g" 1      "gi" 1     "h" 2 0    "he" 0     "ho" 2     "i" 1
+          "iu" 1     "ië" 1     "l" 2 0    "la" 2 0
+block 2   "lg" 1     "ll" 2     "m" 4 5    "ms" 4     "n" 5 6    "nd" 5 2
+          "ne" 0     "no" 2     "nt" 6 3   "o" 2      "ol" 2     "oo" 2
+          "or" 2     "p" 6 3    "pe" 6 3   "r" 4 6
+block 3   "rd" 4 2   "rl" 0     "rp" 6 3   "s" 4 0    "st" 4     "t" 4 6
+          "te" 4     "th" 0     "tw" 6 3   "u" 1      "um" 1     "w" 6 3
+          "we" 6 3   "z" 5      "za" 5     "ë" 1
+```
 
-**`antwerp`.** Bigrams `an`, `nt`, `tw`, `we`, `er`, `rp`, lists `13`,
-`383`, `554`, `620`, `129`, `491`. `06 AND 04 AND 04 AND 04 AND 05 AND
-04 = 04`: the only candidate is ID `6`, which is confirmed. Note that
-`an` alone would also have admitted `Zaandam`, and `er` alone
-`Amsterdam`.
+Block 0 is stored as these 80 bytes:
 
-**`Zaan-dam`.** Folds to `za aa an n- -d da am`, where `-` stands for
-the separator symbol `26`. Lists `390` (`n-`) and `731` (`-d`) are
-zero, so the AND is zero: no candidates, nothing to confirm. This is
-correct, since no name contains `zaan-dam`.
+```
+20 00 01 00  20 6e 00 01 00  2d 00 01 02  2d 68 00 01 02  61 00 02 04 05
+61 61 00 01 05  61 6d 00 02 04 05  61 6e 00 02 05 06  62 00 01 01
+62 65 00 01 01  64 00 02 04 05  64 2d 00 01 02  64 61 00 02 04 05
+64 65 00 01 00  64 73 00 01 00  65 00 02 04 06
+```
 
-**`a`.** One symbol, fewer than `n = 2`. The index does not apply and
-every name is compared; all three cities match.
+Some entries worked through Section B.5:
 
-#### B.10.4. The Same Index with `G = 4`
+- `en`: the region `Antwerpen` (ID 3) and the city `Antwerpen` (ID 6)
+  are both substring matches, quality `1`; the city's level bonus gives
+  it score `5` against the region's `3`, so the entry is `6 3`, not in
+  ID order.
+- `h`: `Noord-Holland` (ID 2) scores `1 + 2 = 3`, `Nederland` /
+  `The Netherlands` (ID 0) scores `1 + 1 = 2`: the entry is `2 0`.
+- `ë` is a key of its own, `België`'s. `e` is a separate key whose
+  entry does not include ID 1, since `belgië` does not contain `e` as a
+  substring: step 1 of Section B.9 does not fold.
+- `nl` is not a key, so a search for `nl` matches nothing, without
+  reading any block beyond the one that would hold it.
 
-With `group_size = 4` the header's `01` becomes `04`, and all three
-positions fall in group `0`, so `bits_per_list = 1` and every non-zero
-list byte becomes `01`. The file is still 805 bytes. The query `aa`
-now yields `01`, making all three cities candidates; comparing their
-names confirms only `Zaandam`. The result is the same as with `G = 1`,
-after two more name comparisons.
+#### B.12.4. Queries
+
+**`dam`.** Folds to symbols `3, 0, 12`: the one trigram `dam`, list
+`2364`, a bitmap `30`, places `4` and `5`. Both `Amsterdam` and
+`Zaandam` contain `dam`, so both are confirmed.
+
+**`dams`.** Trigrams `dam` (list `2364`, places `4`, `5`) and `ams`
+(list `354`, place `4`). The intersection is place `4`, `Amsterdam`,
+whose names do not contain `dams`: it is rejected and the search
+reports nothing. The lists passed it because a trigram set discards
+where the trigrams occur: `Amsterdam` has both, just not overlapping as
+in `dams`.
+
+**`antwerp`.** Trigrams `ant`, `ntw`, `twe`, `wer`, `erp`, all with
+bitmap `48` (places `3` and `6`). Both are confirmed, and in relevance
+order the city (score `4 + 4 = 8`, an exact match of the field
+`Antwerp`) comes before the region (score `4 + 2 = 6`).
+
+**`Zaan-dam`.** Folds to `z a a n - d a m`. The trigrams `an-`
+(list `390`), `n-d` (`10923`), and `-da` (`20468`) are not stored, so
+nothing can match and no list needs to be read at all: step 3 of
+Section B.9 ends the search. This is correct, since no name contains
+`zaan-dam`.
+
+**`a`, sorted, limit 2.** One code point, so step 1 applies: `a` is in
+block 0 (the last block whose first key, `" "`, is at most `a`), and its
+entry is `4 5`, `Amsterdam` and `Zaandam`. A search for `a` in ID order,
+or with a limit above 2, instead compares every name.
 
 ## Appendix C. Place Location Index
 
@@ -1447,14 +1718,14 @@ The file length MUST be exactly the header length plus
 `header_length + id × entry_width`.
 
 `source_checksum` is the 64-bit FNV-1a hash
-([Section B.6](#b6-source-checksum)) of the first bytes of the source
+([Section B.8](#b8-source-checksum)) of the first bytes of the source
 file up to, but not including, the first chunk: the header, the
 directory, and the place table, that is file offsets `0` to
 `chunks_start - 1` ([Section 6.3](#63-locating-a-chunk)). It is stored
 least significant byte first.
 
 The index depends on the chunks as well as on the place table, so the
-checksum of [Section B.6](#b6-source-checksum), which covers only the
+checksum of [Section B.8](#b8-source-checksum), which covers only the
 place table, would not do. Hashing the chunks themselves would make
 loading an index read the whole source file. The directory is a
 compromise: it holds the length of every compressed chunk, which
@@ -1518,7 +1789,7 @@ source.
 This section is informative.
 
 **Measurements.** On a worldwide file of 319,440 places with a
-`64 × 64` chunk grid and `max_depth = 8` (9.2 MiB), entries are 4 bytes
+`64 × 64` chunk grid and `max_depth = 8` (9.5 MiB), entries are 4 bytes
 and the index is 1.2 MiB. Building it decodes the chunks two or three
 times, since places are processed a batch of countries at a time to
 bound memory, and takes about 11 seconds. Without the index, one representative cell

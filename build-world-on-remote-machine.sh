@@ -79,9 +79,12 @@ for f in "${REQUIRED_DATA_FILES[@]}"; do
 done
 
 echo "== syncing repo to $REMOTE_HOST:$REMOTE_DIR_WIN =="
+# '/.git', not '.git/': in a git worktree .git is a file, not a
+# directory, and a directory-only pattern let --delete replace the remote
+# checkout's .git directory with it (2026-09-26). Building needs no git.
 rsync -avz --delete \
   --rsync-path="$REMOTE_RSYNC_PATH" \
-  --exclude='.git/' \
+  --exclude='/.git' \
   --exclude='cgeodata-demo.tar.gz' \
   --exclude='node_modules/' \
   --exclude='*/node_modules/' \
@@ -118,7 +121,7 @@ echo "== running compressor build on remote (default workers = os.availableParal
 # deliberately omitted: the CLI's own default is
 # os.availableParallelism(), which is exactly "the default amount of
 # workers" on whichever machine actually runs it.
-ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR_WIN && set NODE_OPTIONS=--max-old-space-size=$REMOTE_MAX_OLD_SPACE_MB && node node_modules\\tsx\\dist\\cli.mjs compressor\\src\\cli.ts data\\world-hierarchy.json data\\world-cities-filtered.geojsonseq data\\world.bin --regions data\\world-regions.geojson --countries data\\world-country-polygons.geojson --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 13 --attribution \"[OpenStreetMap](https://openstreetmap.org/copyright)\" $*"
+ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR_WIN && set NODE_OPTIONS=--max-old-space-size=$REMOTE_MAX_OLD_SPACE_MB && node node_modules\\tsx\\dist\\cli.mjs compressor\\src\\cli.ts data\\world-hierarchy.json data\\world-cities-filtered.geojsonseq data\\world.bin --regions data\\world-regions.geojson --countries data\\world-country-polygons.geojson --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 7 --attribution \"[OpenStreetMap](https://openstreetmap.org/copyright)\" $*"
 
 echo "== syncing data/world.bin back =="
 rsync -avz \
