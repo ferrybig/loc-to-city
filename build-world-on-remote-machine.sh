@@ -78,6 +78,11 @@ for f in "${REQUIRED_DATA_FILES[@]}"; do
   fi
 done
 
+# until ping 192.168.2.8; do
+#   wakeonlan 00-FF-81-A8-ED-B5
+#   sleep 1
+# done
+
 echo "== syncing repo to $REMOTE_HOST:$REMOTE_DIR_WIN =="
 # '/.git', not '.git/': in a git worktree .git is a file, not a
 # directory, and a directory-only pattern let --delete replace the remote
