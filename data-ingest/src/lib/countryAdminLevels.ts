@@ -123,6 +123,22 @@ export interface CountryAdminLevels {
  *   (distinct from the Land); city [8, 6] gap-fills it in. Berlin and
  *   Hamburg have no relation below level 4 at all -- no level choice
  *   fixes those two, see README's "Open" list.
+ * - UZ, LA: the generated region pick (level 6) was a district tier --
+ *   Uzbekistan's 204 tumani/shahri, Laos's 148 muang -- not the real
+ *   province tier, because `region`'s candidate scan only ever considered
+ *   level 6 for these two (a country's own `region` array gates which
+ *   levels even get measured, see `selectRegionLevels`/`isRegionLevel` in
+ *   adminBoundaryIndex.ts/adminLevelDetection.ts) and level 6 alone
+ *   cleared the tie-break by being the only level in range. Measured
+ *   directly against the real OSM extract: level 4 is Uzbekistan's 13
+ *   viloyats (62.9%) and Laos's 18 provinces (100.7%), matching their
+ *   actual administrative geography. Region 4 also frees level 6 to be
+ *   the city tier -- previously city landed on a near-empty level (UZ
+ *   8 at 1.3%, LA 7 at 0.2%) purely because region had already claimed
+ *   6; as a real city tier, 6 covers 99.9%/100.8% with real district
+ *   names (e.g. Xiva Tumani, ເມືອງປາກເຊ), fixing a country that
+ *   previously had almost no city tier at all, not just the region
+ *   granularity.
  *
  * Entries whose comment shows a coverage figure far over 100% (e.g. small
  * multi-island nations like the Maldives or Cook Islands) reflect
@@ -247,7 +263,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   KW: { region: [4], city: [6] }, // region 114.0%, city 93.4%
   KY: { region: [], city: [8] }, // region 0.0%, city 85.8%
   KZ: { region: [4], city: [6] }, // region 101.4%, city 100.4%
-  LA: { region: [6], city: [7] }, // region 100.8%, city 0.2%
+  LA: { region: [4], city: [6] }, // region 100.7%, city 100.8%
   LB: { region: [4], city: [7] }, // region 101.6%, city 63.2%
   LC: { region: [4], city: [] }, // region 99.6%, city 0.0%
   LI: { region: [6], city: [8] }, // region 116.9%, city 105.3%
@@ -359,7 +375,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
     overrides: { "New York": [8, 7] },
   },
   UY: { region: [4], city: [8] }, // region 99.7%, city 1.3%
-  UZ: { region: [6], city: [8] }, // region 99.9%, city 1.3%
+  UZ: { region: [4], city: [6] }, // region 62.9%, city 99.9%
   VC: { region: [6], city: [] }, // region 106.2%, city 0.0%
   VE: { region: [4], city: [7] }, // region 103.6%, city 101.9%
   VG: { region: [4], city: [] }, // region 107.1%, city 0.0%

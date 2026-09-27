@@ -694,15 +694,6 @@ section, since those are spec decisions rather than pipeline work.
   everywhere in this class of country: Niamey (Niger) and Nouakchott
   (Mauritania) resolve all the way to city despite their countries' low
   national percentages.
-- **Some region tiers look finer than a province.** Fixing the region
-  drop below surfaced regions that were previously hidden, and a few
-  countries' `COUNTRY_ADMIN_LEVELS` region level turns out to be a
-  district tier: Uzbekistan (`region: [6]`, 195 regions recovered) and
-  Laos (`[6]`, 147 -- it has 18 provinces). Afghanistan had the same
-  problem and is fixed (see "Resolved"). Points there now resolve to a district-sized
-  region instead of no region at all, strictly better than before, but
-  those entries likely want the province level instead. Not yet
-  investigated.
 - **Capitals that are themselves a region resolve to a city district.**
   Astana (51.142310, 71.433792) returns `region: Астана, city: Алматы
   ауданы`, and Sana'a returns `region: أمانة العاصمة, city: مديرية
@@ -719,7 +710,14 @@ section, since those are spec decisions rather than pipeline work.
   resolve to `region: Berlin` / `region: Hamburg`, `city: -`. Unlike
   Bremen (see "Resolved"), confirmed there is no second, lower-level
   relation for either city anywhere in the German extract -- nothing to
-  gap-fill in.
+  gap-fill in. Tashkent is the same pattern: fixing Uzbekistan's region
+  level (see "Resolved") means it now returns `region: Toshkent shahri,
+  city: Chilonzor Tumani` (a real Tashkent district) instead of no city
+  at all -- an improvement, but the capital itself only exists as the
+  level-4 relation `region` already resolves to, confirmed by scanning
+  every "Toshkent"/"Tashkent"-named relation in the extract, so no city
+  tier can ever name the capital itself the way it names every other
+  Uzbek city.
 - **Towns mapped only as place points can't be returned.** Shire (14.083301,
   38.281860) and Yebokile (10.447974, 37.896309) in Ethiopia have no
   boundary relation in OSM -- the whole of Ethiopia has two polygons
@@ -763,6 +761,38 @@ section, since those are spec decisions rather than pipeline work.
   later.
 
 ### Resolved
+
+- **Uzbekistan and Laos's region tier was a district level, not a
+  province level.** Both picked up `region: [6]` from the generated
+  table, because `region`'s candidate-level scan only ever measures
+  levels a country's own entry already lists (`selectRegionLevels` in
+  `adminLevelDetection.ts`, gated by `isRegionLevel` in
+  `adminBoundaryIndex.ts`) -- with only level 6 listed, it trivially won
+  by being the sole candidate in range, not by beating a real province
+  level. Uzbekistan's level 6 is 204 tumani/shahri (districts/cities);
+  Laos's is 148 muang (districts) -- both roughly the size the "Some
+  region tiers look finer than a province" entry above flagged as
+  suspicious for Afghanistan before its own fix. Measured directly
+  against the real OSM extract (`asia-260918-admin.geojson`): level 4 is
+  Uzbekistan's 13 viloyats (62.9% coverage) and Laos's 18 provinces
+  (100.7%), matching each country's actual top-level administrative
+  geography. `region: [4]` for both now resolves e.g. Samarkand's region
+  to `Samarqand Viloyati` and Vientiane's to `Vientiane Prefecture`
+  instead of a district name.
+
+  Freeing level 6 from region duty also gave both countries a real city
+  tier for the first time: `city` had previously been forced onto a
+  near-empty level purely because 6 was already claimed (Uzbekistan
+  landed on level 8 at 1.3% coverage, Laos on level 7 at 0.2%). With
+  region moved to 4, `city: [6]` covers 99.9%/100.8% with real district
+  names -- Samarkand resolves to `city: Samarqand shahri`, Pakse to
+  `ເມືອງປາກເຊ` (Pak Sé District) -- so this is a bigger fix than the
+  region-granularity framing suggests: both countries went from almost
+  no city tier at all to one covering effectively the whole country. The
+  one gap this doesn't close is each capital resolving to one of its own
+  districts rather than to itself (see "Capitals that are themselves a
+  region resolve to a city district" above) -- same root cause as
+  Berlin/Hamburg, not fixable by a level choice.
 
 - **Libya, Egypt, Chad and Eritrea had no city tier -- fixed with a
   Voronoi fallback synthesized from GeoNames, not an OSM admin_level.**
