@@ -139,6 +139,21 @@ export interface CountryAdminLevels {
  *   names (e.g. Xiva Tumani, ເມືອງປາກເຊ), fixing a country that
  *   previously had almost no city tier at all, not just the region
  *   granularity.
+ * - GB (Wales, Northern Ireland): the country-wide city pick (level 10,
+ *   parishes) is right for England/Scotland but wrong for these two --
+ *   Cardiff has its own level-6 relation ("Cardiff") and Belfast its own
+ *   level-7 ("Belfast City District"), both real town-level units, but
+ *   both lost their own cell to a co-located level-10 sub-town unit
+ *   ("Castle", "Town Parks") because gap-fill only reaches cells no
+ *   *primary* (level 10) already covers, and 10 does cover these --
+ *   just with the wrong grain. Region-scoped `overrides` fixes this the
+ *   New York way: `"Cymru / Wales": [6, 10]` and `"Northern Ireland /
+ *   Tuaisceart Éireann": [7, 10]` make 6/7 primary only inside their own
+ *   region (58.4%/74.1% coverage there -- below the national 60% bar 10
+ *   clears, but the correct administrative tier regardless), gap-filling
+ *   10 for the rest. Level 6/7 stay unavailable everywhere else in GB,
+ *   so rural England/Scotland (where 10 is the right grain) is
+ *   unaffected.
  *
  * Entries whose comment shows a coverage figure far over 100% (e.g. small
  * multi-island nations like the Maldives or Cook Islands) reflect
@@ -219,7 +234,23 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   FO: { region: [6], city: [9] }, // region 105.3%, city 101.1%
   FR: { region: [4], city: [8] }, // region 100.2%, city 100.1%
   GA: { region: [4], city: [6] }, // region 109.1%, city 101.2%
-  GB: { region: [4], city: [6, 8, 10] }, // region 166.0%, city 64.7% (10) + gap-fill 8/6 -- see override note above
+  GB: {
+    region: [4],
+    city: [6, 8, 10], // region 166.0%, city 64.7% (10) + gap-fill 8/6 -- see override note above
+    // Wales and Northern Ireland's real town tier sits one level coarser
+    // than the rest of GB: Cardiff (level 6, "Cardiff") and Belfast
+    // (level 7, "Belfast City District") both lose their own cell to a
+    // co-located level-10 sub-town unit ("Castle", "Town Parks") under
+    // the plain country-wide list, since 10 clears the national 60%
+    // threshold and gap-fill only reaches cells no primary already
+    // covers. `[primary, ...gapFill]` scopes this to each region only --
+    // level 6/7 stay unavailable everywhere else in GB, where 10 (parishes)
+    // is the right grain. Coverage within-region: Wales level 6 58.4%,
+    // NI level 7 74.1% -- both well below the country-wide 60% bar 10
+    // clears, but the better real administrative tier regardless (same
+    // tradeoff as GB's own level 10 pick, or US counties vs. places).
+    overrides: { "Cymru / Wales": [6, 10], "Northern Ireland / Tuaisceart Éireann": [7, 10] },
+  },
   GD: { region: [6], city: [] }, // region 101.8%, city 0.0%
   GE: { region: [6], city: [8] }, // region 102.9%, city 4.3%
   GG: { region: [4], city: [8] }, // region 107.6%, city 88.2%

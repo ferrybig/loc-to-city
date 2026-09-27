@@ -725,11 +725,6 @@ section, since those are spec decisions rather than pipeline work.
   zone (`Semien Mi'irabawi Zone`, `East Gojjam`). A fix would mean adding
   `place=*` nodes as a nearest-point fallback, which is a design change
   rather than a level pick.
-- **Wales and Northern Ireland resolve to sub-town units.** With GB's
-  level-10 primary, central Cardiff returns `city: Castle` (a Welsh
-  community) and central Belfast returns `Town Parks` (a townland) --
-  both finer than the town. Found while verifying the GB fix below, not
-  yet investigated.
 - **Brazil: major cities missing despite 66.6% city coverage.** Neither
   São Paulo nor Rio de Janeiro (the city, not the state) resolve --
   `lookup` at each city's own coordinates returns `city: -`. 66.6%
@@ -761,6 +756,30 @@ section, since those are spec decisions rather than pipeline work.
   later.
 
 ### Resolved
+
+- **Wales and Northern Ireland resolved to sub-town units instead of the
+  town.** GB's country-wide city pick (level 10, civil parishes) is right
+  for England/Scotland but wrong for these two: Cardiff has its own
+  level-6 relation ("Cardiff") and Belfast its own level-7 ("Belfast City
+  District"), both real town-level units, but both lost their own cell to
+  a co-located level-10 sub-town unit ("Castle", a Welsh community;
+  "Town Parks", a townland) -- gap-fill only reaches cells no *primary*
+  (level 10) already covers, and 10 does cover Cardiff/Belfast, just with
+  the wrong grain; widening GB's country-wide `city` list can't fix this
+  without also breaking rural England, where 10 is the right grain.
+
+  Fixed the New York way: a region-scoped `overrides` entry --
+  `"Cymru / Wales": [6, 10]` and `"Northern Ireland / Tuaisceart Éireann":
+  [7, 10]` -- makes level 6/7 primary only inside their own region
+  (measured coverage there: Wales level 6 58.4%, NI level 7 74.1% --
+  below the national 60% bar level 10 clears, but the correct
+  administrative tier regardless, the same tradeoff as GB's own level-10
+  pick or the US's counties-vs-places one), gap-filling level 10 for
+  whatever it doesn't cover. Level 6/7 stay unavailable everywhere else in
+  GB, so England/Scotland (Westminster, Guildford, ...) are unaffected --
+  verified on `data/world.bin`: Cardiff now resolves to `city: Cardiff`,
+  Belfast to `city: Belfast City District`, London and parished towns
+  unchanged.
 
 - **Uzbekistan and Laos's region tier was a district level, not a
   province level.** Both picked up `region: [6]` from the generated
