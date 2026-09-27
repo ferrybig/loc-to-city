@@ -26,6 +26,7 @@
 import { createWriteStream, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import bbox from "@turf/bbox";
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from "geojson";
 import type { CityProperties, HierarchyCountry } from "@loc-to-city/compressor";
 import { discoverAdminGeoJsonFiles } from "./lib/osmFiles.js";
@@ -43,9 +44,11 @@ import type { PrimaryLevelResult } from "./lib/adminLevelDetection.js";
 import { buildRegionIndex, assignCityRegion } from "./lib/regionPolygons.js";
 import { streamCities500 } from "./lib/cities500.js";
 import type { Cities500Row } from "./lib/cities500.js";
-import { buildCityFallback } from "./lib/voronoiFallback.js";
-import { VORONOI_CITY_FALLBACK } from "./lib/countryAdminLevels.js";
+import { loadAdmin1Names } from "./lib/admin1Codes.js";
+import { buildCityFallback, buildRegionFallback } from "./lib/voronoiFallback.js";
+import { VORONOI_CITY_FALLBACK, VORONOI_REGION_FALLBACK } from "./lib/countryAdminLevels.js";
 import type { LonLat } from "./lib/geo.js";
+import type { RegionCandidate } from "./lib/adminBoundaryIndex.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -53,6 +56,7 @@ const REPO_ROOT = path.resolve(__dirname, "../..");
 const WORK_DIR = path.join(REPO_ROOT, "data-ingest/work-world");
 const COUNTRIES_SOURCE = path.join(REPO_ROOT, "agent-resources/ne_10m_admin_0_countries.geojson");
 const CITIES500_SOURCE = path.join(REPO_ROOT, "agent-resources/cities500.txt");
+const ADMIN1_CODES_SOURCE = path.join(REPO_ROOT, "agent-resources/admin1CodesASCII.txt");
 
 const HIERARCHY_OUT = path.join(REPO_ROOT, "data/world-hierarchy.json");
 const CITIES_OUT = path.join(REPO_ROOT, "data/world-cities-filtered.geojsonseq");
@@ -129,6 +133,54 @@ async function main(): Promise<void> {
   const finalRegions = new Map(
     [...index.regionsByCountryName].filter(([, r]) => region.regionLevelByCountry.get(r.country) === r.level),
   );
+
+  // README's "Voronoi-from-cities500" fallback, region half
+  // (VORONOI_REGION_FALLBACK's doc comment has the full rationale): for a
+  // country with no usable OSM region tier at all, synthesize one from
+  // cities500.txt grouped by admin1 code. Must run before regionIndex is
+  // built below -- every downstream region assignment (real OSM
+  // candidates, the region-override routing, and the city Voronoi
+  // fallback later) depends on finalRegions already being complete.
+  if (VORONOI_REGION_FALLBACK.size > 0) {
+    console.error(`Voronoi fallback: synthesizing regions for ${[...VORONOI_REGION_FALLBACK].join(", ")}...`);
+    const admin1Names = await loadAdmin1Names(ADMIN1_CODES_SOURCE);
+    const regionPointsByCountry = new Map<string, Cities500Row[]>();
+    for await (const row of streamCities500(CITIES500_SOURCE)) {
+      if (!VORONOI_REGION_FALLBACK.has(row.countryCode)) continue;
+      let points = regionPointsByCountry.get(row.countryCode);
+      if (!points) {
+        points = [];
+        regionPointsByCountry.set(row.countryCode, points);
+      }
+      points.push(row);
+    }
+    let voronoiRegionCount = 0;
+    for (const [countryCode, points] of regionPointsByCountry) {
+      const countryPolygon = countries.simplifiedFeatureByCode.get(countryCode);
+      if (!countryPolygon) continue;
+      const candidates = buildRegionFallback(countryPolygon, points, admin1Names);
+      for (const candidate of candidates) {
+        const key = `${candidate.country} voronoi ${candidate.name}`;
+        const feature: Feature<Polygon | MultiPolygon, { name: string }> = {
+          type: "Feature",
+          properties: { name: candidate.name },
+          geometry: candidate.geometry,
+        };
+        const regionCandidate: RegionCandidate = {
+          id: `voronoi:${candidate.country}.${candidate.name}`,
+          name: candidate.name,
+          nameEn: undefined,
+          country: candidate.country,
+          level: -1, // not a real OSM admin_level -- never matched against COUNTRY_ADMIN_LEVELS
+          bbox: bbox(feature),
+          feature,
+        };
+        finalRegions.set(key, regionCandidate);
+        voronoiRegionCount++;
+      }
+    }
+    console.error(`Voronoi fallback: ${voronoiRegionCount.toLocaleString()} synthesized regions added`);
+  }
 
   console.error("Pass 2/4: selecting primary admin levels...");
   const regionIndex = buildRegionIndex(finalRegions);

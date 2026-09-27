@@ -378,8 +378,8 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
 /** Countries with a genuine, confirmed absence of city-tier administrative
  * *polygon* data in OSM (per this file's own `city` coverage comments --
  * Libya 0%, Egypt 0.1%, Chad 0.7%, Eritrea 0%; see README's "Libya, Egypt,
- * Chad, Sudan (and similar) have no city tier"), not a wrong level pick --
- * there is no OSM admin_level that would fix these, at any level.
+ * Chad and Eritrea had no city tier"), not a wrong level pick -- there is
+ * no OSM admin_level that would fix these, at any level.
  * `voronoiFallback.ts`'s `buildCityFallback` synthesizes a city polygon
  * per `cities500.txt` point instead, via a Voronoi diagram clipped to the
  * country outline. Explicit opt-in list, not automatic: a country only
@@ -394,3 +394,15 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
  * first could paper over a second, different bug the way Slovenia's
  * region gap once did for its city tier. */
 export const VORONOI_CITY_FALLBACK: ReadonlySet<string> = new Set(["LY", "EG", "TD", "ER"]);
+
+/** Countries with `region: []` -- no usable region tier in OSM at all --
+ * where `voronoiFallback.ts`'s `buildRegionFallback` synthesizes one from
+ * `cities500.txt`, grouped by GeoNames admin1 code (see that function's
+ * doc comment for why cities500 rather than `admin1CodesASCII.txt`
+ * directly). Slovenia is the one confirmed case so far: its real regional
+ * tier, OSM `admin_level=7` ("Upravna Enota"), only covers 17.6% of the
+ * country -- not a full tessellation, so no `region` level fixes it (see
+ * README's "Slovenia has zero cities"). Same opt-in philosophy as
+ * `VORONOI_CITY_FALLBACK`: added only after confirming no real OSM region
+ * tier exists, not automatically. */
+export const VORONOI_REGION_FALLBACK: ReadonlySet<string> = new Set(["SI"]);

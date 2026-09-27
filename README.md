@@ -667,18 +667,21 @@ section, since those are spec decisions rather than pipeline work.
   discarded by `adminBoundaryIndex.ts`'s `PLAUSIBLE_ADMIN_LEVELS` prefilter
   (levels 4-11 only). This and the item above both want the same new OSM
   `admin_level=2` country source, so they're natural to tackle together.
-- **Slovenia has zero cities: another Ireland/Estonia/Portugal-shaped
-  region gap.** `SI: { region: [], city: [8] }` -- city coverage is fine
-  (101.9%, real municipalities: Bled, Solčava, Mežica confirmed present in
-  the source extract), but there is no usable region candidate at all, so
-  every Slovenian city is dropped by the same `emitCity` "no region ->
-  drop the city too" rule documented below (confirmed: Bled and Maribor,
-  Slovenia's 2nd-largest city, are both entirely absent from
-  `data/world.bin`). Slovenia's nearest thing to a regional tier is OSM
-  `admin_level=7` ("Upravna Enota" / administrative unit), but that's only
-  17.6% coverage -- not a full tessellation, so it wouldn't cleanly fix
-  this the way e.g. Ireland's `admin_level=6` counties did. Not fixed
-  here; flagged so it doesn't need rediscovering.
+- **A handful of Slovenian cities land in the wrong synthesized region.**
+  Residue of the Voronoi region fallback below: `assignCityRegion` places
+  a real OSM city by its `repPoint` (`pointOnFeature`, roughly a bbox
+  midpoint), and a large or off-center municipal polygon's `repPoint` can
+  end up geometrically closer to a *neighboring* cities500 site's Voronoi
+  cell than to its own. Confirmed on Ljubljana (the capital; its own OSM
+  polygon spans 14.41-14.76 lon, wide enough that its `repPoint` lands in
+  the "Dol pri Ljubljani" cell instead of "Ljubljana") and Puconci (same
+  shape, lands in "Grad"). Counted across all 271 Slovenian cities: 2 look
+  like real misassignments this way; the other ~95 whose city/region name
+  differ are legitimate (an ordinary village correctly inside a
+  same-region municipality named after its own, different, seat town).
+  Not fixed -- a real fix would need either using each city's own centroid
+  instead of `pointOnFeature`, or biasing Voronoi sites by known city
+  extent, neither attempted here.
 - **Sudan has no city tier, and its zero-region-drop root cause is still
   unexplained.** Khartoum resolves to neither region nor city despite
   `countryAdminLevels.ts` recording 100.5% region coverage -- the same
@@ -807,6 +810,42 @@ section, since those are spec decisions rather than pipeline work.
   coordinate resolved to Būlāq Abū al 'Ilā, a real, separate Cairo
   district also present in cities500 -- expected Voronoi nearest-site
   behavior, not a bug).
+
+- **Slovenia had zero regions (and so zero cities) -- fixed with the
+  same Voronoi machinery, region half.** `SI: { region: [], city: [8] }`
+  -- city coverage was already fine (101.9%, real municipalities: Bled,
+  Solčava, Mežica confirmed present in the source extract), but there was
+  no usable region candidate at all, so every Slovenian city was dropped
+  by `emitCity`'s "no region -> drop the city too" rule (confirmed: Bled
+  and Maribor, Slovenia's 2nd-largest city, were both entirely absent
+  from `data/world.bin`). Slovenia's nearest thing to a regional tier is
+  OSM `admin_level=7` ("Upravna Enota"), but that's only 17.6%
+  coverage -- not a full tessellation, so no `region` level choice would
+  have cleanly fixed this the way e.g. Ireland's `admin_level=6` counties
+  did for the same class of bug.
+
+  Fixed by `voronoiFallback.ts`'s `buildRegionFallback`: groups a
+  country's cities500 points by GeoNames admin1 code (the same
+  `${countryCode}.${admin1Code}` join key `admin1CodesASCII.txt` itself
+  uses -- read purely for display names here, since it has no
+  coordinates in this repo), computes one Voronoi diagram over every
+  point in the country together (not one per group -- that would leave
+  gaps/overlaps at a shared group boundary), then `@turf/union`s each
+  group's individual cells into one region polygon. Slovenia's 602
+  cities500 points fall into exactly 212 distinct admin1 codes, matching
+  `admin1CodesASCII.txt`'s own 212 real Slovenian municipalities exactly;
+  the 212 synthesized region polygons' combined area matches the
+  country's own area exactly (both ~20,277 km²), confirming no gaps or
+  overlaps. Runs before `finalRegions`/`regionIndex` are built, since
+  every downstream region assignment (real OSM cities, the region-
+  override routing, and the city Voronoi fallback) depends on it already
+  being complete.
+
+  Opt-in via `VORONOI_REGION_FALLBACK`, same philosophy as
+  `VORONOI_CITY_FALLBACK`. Verified end-to-end on a scoped Europe build:
+  Ljubljana's real OSM city polygon now resolves to a real region (though
+  not always the *correct* one -- see "Open" above), and Maribor and Bled
+  both resolve fully correctly at region and city level.
 
 - **Ethiopia, Afghanistan, Saudi Arabia, Taiwan and the UK used the wrong
   city (and in some cases region) level.** Verified on a scoped Africa+

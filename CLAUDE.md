@@ -263,18 +263,30 @@ contains at their shared boundary cells once both are eligible for the
 same cell; `[primary, ...gapFill]` order is what prevents that.
 
 **Voronoi-from-cities500 fallback** (`voronoiFallback.ts`, `cities500.ts`,
-`countryAdminLevels.ts`'s `VORONOI_CITY_FALLBACK`): for a country with a
-genuine, confirmed absence of OSM city-tier admin polygons (Libya, Egypt,
-Chad, Eritrea — 0–0.7% coverage, not fixable by any `admin_level` choice,
-unlike every per-country override above), synthesizes a city polygon per
-`agent-resources/cities500.txt` point instead: `d3-delaunay` builds the
+`admin1Codes.ts`, `countryAdminLevels.ts`'s `VORONOI_CITY_FALLBACK`/
+`VORONOI_REGION_FALLBACK`): for a country with a genuine, confirmed
+absence of OSM admin polygons at the city tier (Libya, Egypt, Chad,
+Eritrea — 0–0.7% coverage) or region tier (Slovenia — `region: []`), not
+fixable by any `admin_level` choice unlike every per-country override
+above, synthesizes polygons from `agent-resources/cities500.txt` points
+instead. Both share `computeClippedCells`: `d3-delaunay` builds the
 Voronoi diagram (clipped to a bbox), `@turf/intersect` re-clips each cell
-to the country's real outline. `prepare-world.ts` routes a synthesized
-candidate through the same `assignCityRegion`/`emitCity` path as a real
-OSM one — it isn't a separate output shape, just an extra `city`
-candidate source, opt-in per country (see README's "Libya, Egypt, Chad
-and Eritrea" entry for the full rationale and why a fixed-radius buffer
-per point was rejected in favor of a real tessellation).
+to the country's real outline. `buildCityFallback` emits one candidate
+per point directly; `buildRegionFallback` groups points by GeoNames
+admin1 code first (the `${countryCode}.${admin1Code}` join key
+`admin1CodesASCII.txt` itself uses, read here purely for display names
+since it has no coordinates in this repo) and `@turf/union`s each group's
+cells into one region. `prepare-world.ts` routes a synthesized city
+through the same `assignCityRegion`/`emitCity` path as a real OSM one —
+it isn't a separate output shape, just an extra candidate source. The
+region fallback must run *before* `finalRegions`/`regionIndex` are built
+(every downstream region assignment depends on it), the city fallback
+runs after everything else. Both opt-in per country (see README's "Libya,
+Egypt, Chad and Eritrea" and "Slovenia" entries for the full rationale,
+why a fixed-radius buffer per point was rejected in favor of a real
+tessellation, and a known residual limitation: a real OSM city's
+`repPoint` can land in a neighboring region's Voronoi cell when that
+city's own polygon is large or off-center — confirmed on Ljubljana).
 
 **Multi-file country handling.** OSM relations for a single country (e.g.
 Russia, Turkey) can be split across multiple continent extract files with

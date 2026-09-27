@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import area from "@turf/area";
 import type { Feature, Polygon } from "geojson";
-import { buildCityFallback } from "../src/lib/voronoiFallback.js";
+import { buildCityFallback, buildRegionFallback } from "../src/lib/voronoiFallback.js";
 import type { Cities500Row } from "../src/lib/cities500.js";
 
 function square(minX: number, minY: number, maxX: number, maxY: number): Feature<Polygon> {
@@ -97,4 +97,64 @@ test("buildCityFallback: two adjacent points split the country roughly in half, 
 test("buildCityFallback: no points produces no candidates", () => {
   const country = square(0, 0, 10, 10);
   assert.deepEqual(buildCityFallback(country, []), []);
+});
+
+test("buildRegionFallback: points sharing an admin1 code merge into one region", () => {
+  // Slovenia's real shape: many points, few admin1 groups -- here two
+  // points on the west side share code "01" (named region "West"), two
+  // on the east side share "02" ("East").
+  const country = square(0, 0, 10, 10);
+  const points = [
+    point("1", "Nw", 2, 8, "01"),
+    point("2", "Sw", 2, 2, "01"),
+    point("3", "Ne", 8, 8, "02"),
+    point("4", "Se", 8, 2, "02"),
+  ];
+  const names = new Map([
+    ["XX.01", "West"],
+    ["XX.02", "East"],
+  ]);
+  const candidates = buildRegionFallback(country, points, names);
+  assert.equal(candidates.length, 2);
+  const west = candidates.find((c) => c.name === "West")!;
+  const east = candidates.find((c) => c.name === "East")!;
+  assert.ok(west);
+  assert.ok(east);
+  // Every one of the 4 original points must fall inside its own group's
+  // merged region, and never inside the other group's.
+  assert.ok(booleanPointInPolygon([2, 8], west.geometry) && booleanPointInPolygon([2, 2], west.geometry));
+  assert.ok(booleanPointInPolygon([8, 8], east.geometry) && booleanPointInPolygon([8, 2], east.geometry));
+  assert.ok(!booleanPointInPolygon([8, 8], west.geometry));
+  assert.ok(!booleanPointInPolygon([2, 2], east.geometry));
+  // The two regions must tile the whole country between them, same as
+  // the city fallback's cells do individually.
+  const combinedArea =
+    area({ type: "Feature", properties: {}, geometry: west.geometry }) +
+    area({ type: "Feature", properties: {}, geometry: east.geometry });
+  assert.ok(Math.abs(combinedArea - area(country)) < area(country) * 0.01, "the two regions must tile the whole country");
+});
+
+test("buildRegionFallback: a point whose admin1 code has no name in the lookup is dropped, not left unnamed", () => {
+  const country = square(0, 0, 10, 10);
+  const points = [point("1", "Known", 3, 5, "01"), point("2", "Unknown", 7, 5, "99")];
+  const names = new Map([["XX.01", "Known Region"]]);
+  const candidates = buildRegionFallback(country, points, names);
+  assert.deepEqual(
+    candidates.map((c) => c.name),
+    ["Known Region"],
+  );
+});
+
+test("buildRegionFallback: a point with no admin1 code at all is excluded from every region", () => {
+  const country = square(0, 0, 10, 10);
+  const points = [point("1", "Grouped", 3, 5, "01"), point("2", "Loose", 7, 5, "")];
+  const names = new Map([["XX.01", "Known Region"]]);
+  const candidates = buildRegionFallback(country, points, names);
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]?.name, "Known Region");
+});
+
+test("buildRegionFallback: no points produces no candidates", () => {
+  const country = square(0, 0, 10, 10);
+  assert.deepEqual(buildRegionFallback(country, [], new Map()), []);
 });
