@@ -5,7 +5,7 @@ node_modules/
 
 # Large data files - only world.bin is needed at runtime
 data/
-!data/world.bin
+!data/03-final/world.bin
 
 # OSM extracts and intermediate working files
 data-ingest/osm/

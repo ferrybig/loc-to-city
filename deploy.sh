@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh -e
 docker build -t cgeodata-demo .
 docker save cgeodata-demo | gzip > cgeodata-demo.tar.gz
 rsync --progress cgeodata-demo.tar.gz fernando@geodata.ferrybig.nl:docker/geocode/
