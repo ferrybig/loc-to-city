@@ -53,8 +53,8 @@ async function main(): Promise<void> {
 	console.error(`Loading ${datasetPath}...`);
 	const pool = new Piscina({
 		filename: path.resolve(__dirname, "worker.js"),
-		minThreads: 1,
-		idleTimeout: 60000,
+		minThreads: 0,
+		idleTimeout: 6000,
 		maxQueue: 256,
 		taskQueue: new LaneTaskQueue(),
 		stricterFIFO: true,
