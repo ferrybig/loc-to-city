@@ -447,12 +447,15 @@ the same class of gap Europe has in Ireland/Estonia/Portugal: those places
 still resolve at country level, and the count is reported per country
 rather than silently swallowed.
 
-**The full 8-file worldwide build is done and committed:** `data/03-final/world.bin`
-(8.3MB), built from `data/02-resolved/world/hierarchy.json`,
-`data/02-resolved/world/regions.geojson` and
-`data/02-resolved/world/country-polygons.geojson`, all also committed --
-`data/02-resolved/world/cities-filtered.geojsonseq` (4.0GB) is the only
-intermediate output, gitignored like its Europe equivalent.
+**The full 8-file worldwide build works end to end**, producing
+`data/03-final/world.bin` from `data/02-resolved/world/hierarchy.json`,
+`regions.geojson`, and `country-polygons.geojson`. As of the 2026-09-28
+history rewrite, none of `data/` is committed to git any more except
+`data/00-raw/orphan/README.md` and `data/03-final/appendix-a-example.bin`
+(see `data-ingest/PIPELINE-STAGES.md`) -- `world.bin` and its inputs,
+including the 4.0GB `cities-filtered.geojsonseq`, are all local,
+reproducible build output, rebuilt via `data-ingest/scripts/build-world.sh`
+rather than tracked in git.
 
 Ingest deduplicated 922,077 unique relations across all 8 files (29,781
 cross-file duplicates dropped -- Russia and Turkey's transcontinental

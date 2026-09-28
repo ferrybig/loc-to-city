@@ -3,18 +3,26 @@
 This documents the `data/` directory layout and file dependency graph
 across the three build datasets (Zuid-Holland, Europe, World), so it
 doesn't need to be re-derived from scratch next time it comes up. It
-reflects the repo as of `filter-by-scope.ts` replacing
-`prepare-zuid-holland.ts`/`prepare-europe.ts` (2026-09-28).
+reflects the repo as of a full history rewrite (`git filter-repo`) that
+dropped every generated `data/` artifact from git tracking, keeping only
+documentation and the one hand-crafted spec fixture (2026-09-28).
 
 ## tl;dr
 
-`data/` is organized into four numbered stages:
+**Almost nothing under `data/` is tracked in git any more.** Every stage
+is a local, reproducible build artifact -- raw downloads, osmium
+extractions, resolved hierarchy/geometry, and all three `.bin` files are
+gitignored. The only two tracked files under `data/` are
+`data/00-raw/orphan/README.md` (documentation) and
+`data/03-final/appendix-a-example.bin` (a hand-extracted `binary-format.md`
+spec fixture, not pipeline output). A fresh clone has an essentially
+empty `data/` and must run the download + build scripts to populate it.
 
 ```
 data/00-raw/          external downloads + one orphan Python-prototype
-                       output (nl_cities.geojson, see "Orphan inputs" below)
-data/01-extracted/    osmium-exported admin boundaries (World only, now --
-                       see "History" below for why nl/eu/ still exist on disk)
+                       output (nl_cities.geojson, gitignored -- see
+                       "Orphan inputs" below)
+data/01-extracted/    osmium-exported admin boundaries (World only, now)
 data/02-resolved/     resolved hierarchy + geometry (per dataset: nl/eu/world)
 data/03-final/        the final .bin files + reader sidecar indexes
 ```
@@ -50,9 +58,8 @@ survives and is documented below rather than fixed:
 - `data/00-raw/orphan/nl_cities.geojson` looks like mid-pipeline output
   but is actually **irreplaceable raw input** from a deleted Python
   prototype — nothing in the current repo can regenerate it, though it is
-  no longer load-bearing for any build (see "Orphan inputs" below; it's
-  kept only because deleting a still-committed file needs its own
-  decision, not because anything still reads it).
+  no longer load-bearing for any build (see "Orphan inputs" below). It's
+  gitignored, kept on disk only as a reference sample.
 
 ## Why `prepare-zuid-holland.ts`/`prepare-europe.ts` were deleted
 
@@ -98,8 +105,8 @@ data/00-raw/
                               inputs" below (eu_cities.geojson used to
                               live here too; deleted along with
                               prepare-europe.ts, the only thing that read it)
-        (all of data/00-raw/ is gitignored except orphan/, which is committed
-        -- see "Gitignore quick reference")
+        (all of data/00-raw/ is gitignored, including orphan/'s data file --
+        only orphan/README.md is committed -- see "Gitignore quick reference")
 
         │ Dockerfile.tools (repo root) + osmium, via
         │ data-ingest/scripts/extract-boundaries.sh
@@ -115,30 +122,32 @@ data/01-extracted/           osmium-exported admin boundaries (gitignored)
 
         │ prepare-world.ts
         ▼
-data/02-resolved/world/       committed except cities-filtered.geojsonseq
+data/02-resolved/world/       gitignored, entirely local build output
 ├── hierarchy.json
 ├── regions.geojson
 ├── country-polygons.geojson
-└── cities-filtered.geojsonseq   gitignored (4.4GB)
+└── cities-filtered.geojsonseq   (4.4GB)
 
         │ filter-by-scope.ts --only-country NL / --only-continent Europe
         ▼
-data/02-resolved/{nl,eu}/     committed except the cities file
+data/02-resolved/{nl,eu}/     gitignored, entirely local build output
 ├── hierarchy.json
 ├── regions.geojson
 ├── country-polygons.geojson
-├── nl/cities-filtered.geojson       committed (38MB)
-└── eu/cities-filtered.geojsonseq    gitignored (2.1GB)
+├── nl/cities-filtered.geojson       (38MB)
+└── eu/cities-filtered.geojsonseq    (2.1GB)
 
         │ compressor/src/cli.ts (cgeodata-compress)
         ▼
-data/03-final/                 final .bin (all three primary outputs committed)
-├── zuid-holland.bin           committed
-├── europe.bin                 committed
-├── world.bin                  committed
-├── world_high_res.bin         gitignored, on-demand exploratory build
-└── world_no_chunk.bin         gitignored, on-demand (deliberately
-                                un-committed -- goes stale instantly)
+data/03-final/                 gitignored, entirely local build output --
+                                see appendix-a-example.bin below, the one
+                                exception
+├── zuid-holland.bin
+├── europe.bin
+├── world.bin
+├── world_high_res.bin         on-demand exploratory build
+└── world_no_chunk.bin         on-demand (deliberately never committed --
+                                goes stale instantly)
 
         │ reader/src/cli.ts (build-search-index / build-locate-index)
         ▼
@@ -196,17 +205,18 @@ prototype (see README's "Historical record" section and this repo's
 `CLAUDE.md`, which explicitly forbids resurrecting `scripts/`/`webapp/`).
 Nothing in the current TypeScript pipeline regenerates it, and — since
 `prepare-zuid-holland.ts`'s deletion — nothing reads it either any more.
-It's kept committed rather than deleted only because that's its own
-separate decision; `data/00-raw/orphan/README.md` (kept as the historical
-record of the investigation) documents why it's safe to eventually
-remove.
+Gitignored (2026-09-28, alongside a full history rewrite that dropped it
+from git entirely -- it isn't recoverable from this repo's git history
+any more, only from a pre-rewrite backup); kept on disk purely as a
+reference sample. `data/00-raw/orphan/README.md` (the one file this
+directory still commits) has the full investigation history.
 
 `eu_cities.geojson` (313MB, produced by the equivalent
-`scripts/extract_boundaries_europe.py`) was deleted along with
-`prepare-europe.ts`, the only thing that ever read it — see git history
-around the `filter-by-scope.ts` commit if the file itself is needed
-again (it was gitignored, so it isn't recoverable from git; only from
-whatever local/backup copies exist outside this repo).
+`scripts/extract_boundaries_europe.py`) was deleted from disk entirely
+along with `prepare-europe.ts`, the only thing that ever read it -- it
+was gitignored even before the history rewrite, so it was never
+recoverable from git; only from whatever local/backup copies exist
+outside this repo.
 
 Both were OSM `admin_level=10`-equivalent polygons, spatially resolved to
 their containing municipality/region — see README.md's "Data source"
@@ -236,21 +246,19 @@ or `demo/`) and the redundant `cities500.zip` (only the unzipped
 
 ## Gitignore quick reference
 
-Root `.gitignore`:
+`data/*` is gitignored wholesale; only two paths are explicitly
+un-ignored (root `.gitignore`, see its own comments for the exact
+negation-pattern mechanics):
 
 ```
-data/00-raw/osm/               gitignored (downloadable)
-data/00-raw/geonames/           gitignored (downloadable)
-data/00-raw/natural-earth/       gitignored (downloadable)
-data/00-raw/orphan/             COMMITTED -- not downloadable, see above
-data/01-extracted/              gitignored (all of it)
-data/02-resolved/eu/cities-filtered.geojsonseq     gitignored (2.1GB)
-data/02-resolved/world/cities-filtered.geojsonseq  gitignored (4.4GB)
-(everything else in data/02-resolved/, including nl/cities-filtered.geojson
- at 38MB, is committed)
-data/03-final/{world_high_res,world_no_chunk}.bin   gitignored, on-demand
-data/03-final/world.{search,locate}-index.bin       gitignored, on-demand
-(zuid-holland.bin, europe.bin, world.bin, appendix-a-example.bin are committed)
+data/00-raw/orphan/README.md         COMMITTED (documentation)
+data/03-final/appendix-a-example.bin COMMITTED (binary-format.md spec fixture)
+
+(everything else under data/ is gitignored, including
+ data/00-raw/orphan/nl_cities.geojson and all of data/02-resolved/ --
+ both were dropped from git entirely by the 2026-09-28 history rewrite,
+ having been briefly re-committed after that rewrite, then removed again
+ once it was confirmed neither is actually needed in git)
 
 agent-resources/                gitignored (whole dir -- reference material)
 data/search-index/  *.pbf  *.pbf.part  .venv/  __pycache__/  *.pyc

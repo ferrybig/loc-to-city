@@ -1,26 +1,27 @@
-data/*.o5m
+# data/ is gitignored wholesale -- it's almost entirely large, reproducible
+# build artifacts (raw downloads, osmium extractions, resolved geojson,
+# rebuildable .bin files). Only a small, explicit allowlist of
+# irreplaceable/spec files is un-ignored below. See
+# data-ingest/PIPELINE-STAGES.md for the full directory layout and how
+# each stage is produced.
+data/*
 
-# Stage 0/1: raw downloads and osmium-extracted boundaries -- entirely
-# gitignored (large, reproducible via download-*.sh / extract-boundaries.sh,
-# except data/00-raw/orphan/ -- see its README). nl_cities.geojson (43MB)
-# is committed despite being in that same NOT-reproducible orphan/
-# directory -- it's unused now (filter-by-scope.ts replaced both
-# prepare-zuid-holland.ts and prepare-europe.ts, see
-# data/00-raw/orphan/README.md), kept only because deleting it is a
-# separate decision.
-data/00-raw/osm/
-data/00-raw/geonames/
-data/00-raw/natural-earth/
-data/01-extracted/
+!data/00-raw/
+data/00-raw/*
+!data/00-raw/orphan/
+data/00-raw/orphan/*
+!data/00-raw/orphan/README.md
 
-# Stage 2: only the two multi-GB filtered-city files are gitignored --
-# everything else in data/02-resolved/ (hierarchy/regions/country-polygons
-# JSON, all small; NL's cities-filtered.geojson is only 38MB, committed)
-# is committed.
-data/02-resolved/eu/cities-filtered.geojsonseq
-data/02-resolved/world/cities-filtered.geojsonseq
+# data/02-resolved/, data/03-final/*.bin (except appendix-a-example.bin)
+# are entirely build artifacts now -- rebuild locally via
+# prepare-world.ts / filter-by-scope.ts / build-world.sh + the compressor
+# CLI rather than tracking them in git. appendix-a-example.bin is the one
+# exception: it's hand-extracted from binary-format.md's own Appendix A
+# hex dump, a reader/ spec fixture, not a rebuildable pipeline output.
+!data/03-final/
+data/03-final/*
+!data/03-final/appendix-a-example.bin
 
-data/search-index/
 *.pbf
 *.pbf.part
 .venv/
@@ -32,11 +33,5 @@ node_modules/
 dist/
 playwright-report/
 test-results/
-
-# Stage 3: on-demand exploratory/sidecar builds, not the primary .bin outputs.
-data/03-final/world_high_res.bin
-data/03-final/world_no_chunk.bin
-data/03-final/world.search-index.bin
-data/03-final/world.locate-index.bin
 
 cgeodata-demo.tar.gz
