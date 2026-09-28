@@ -1,15 +1,17 @@
-// Filters the already-committed data/nl_cities.geojson (the NL-only Python
-// prototype's output) down to a small Zuid-Holland-only test dataset, and
-// writes the hierarchy file that lists all 12 Dutch provinces (Section 7.2
-// allows a region to have 0 cities -- this is what lets that be tested
-// without a full Netherlands build).
+// Filters the already-committed data/00-raw/orphan/nl_cities.geojson (the
+// NL-only Python prototype's output -- see data/00-raw/orphan/README.md
+// for why this file can't be regenerated) down to a small
+// Zuid-Holland-only test dataset, and writes the hierarchy file that
+// lists all 12 Dutch provinces (Section 7.2 allows a region to have 0
+// cities -- this is what lets that be tested without a full Netherlands
+// build).
 //
 // It also extracts real region (province) and country polygons, so points
 // outside any of Zuid-Holland's 187 city polygons but still inside a
 // province -- or inside the Netherlands but outside any known province --
 // resolve to that region/country instead of "unknown" (Section 7.1: "a cell
 // whose most specific known place is a region resolves to that region").
-// Provinces come from data-ingest/work/nl-admin.geojson (the raw osmium
+// Provinces come from data/01-extracted/nl/nl-admin.geojson (the raw osmium
 // export, admin_level=4 -- see README's "Reproducing" section for how it's
 // produced); the country polygon comes from Natural Earth, the same source
 // prepare-europe.ts uses for country resolution.
@@ -24,22 +26,22 @@ import { readGeoJSONSeq } from "./lib/geojsonseq.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
 
-const CITIES_SOURCE = path.join(REPO_ROOT, "data/nl_cities.geojson");
-const PROVINCES_SOURCE = path.join(REPO_ROOT, "data-ingest/work/nl-admin.geojson");
-const COUNTRIES_SOURCE = path.join(REPO_ROOT, "agent-resources/ne_10m_admin_0_countries.geojson");
+const CITIES_SOURCE = path.join(REPO_ROOT, "data/00-raw/orphan/nl_cities.geojson");
+const PROVINCES_SOURCE = path.join(REPO_ROOT, "data/01-extracted/nl/nl-admin.geojson");
+const COUNTRIES_SOURCE = path.join(REPO_ROOT, "data/00-raw/natural-earth/ne_10m_admin_0_countries.geojson");
 
-const HIERARCHY_OUT = path.join(REPO_ROOT, "data/nl-regions.json");
-const CITIES_OUT = path.join(REPO_ROOT, "data/zuid-holland-cities.geojson");
-const PROVINCES_OUT = path.join(REPO_ROOT, "data/nl-provinces.geojson");
-const COUNTRY_OUT = path.join(REPO_ROOT, "data/nl-country.geojson");
+const HIERARCHY_OUT = path.join(REPO_ROOT, "data/02-resolved/nl/regions.json");
+const CITIES_OUT = path.join(REPO_ROOT, "data/02-resolved/nl/zuid-holland-cities.geojson");
+const PROVINCES_OUT = path.join(REPO_ROOT, "data/02-resolved/nl/provinces.geojson");
+const COUNTRY_OUT = path.join(REPO_ROOT, "data/02-resolved/nl/country.geojson");
 
 // Same tolerances (in degrees) the Python prototype settled on for these
 // same two purposes (scripts/extract_boundaries_europe.py).
 const REGION_SIMPLIFY_TOLERANCE = 0.002; // ~220m
 const COUNTRY_SIMPLIFY_TOLERANCE = 0.01; // ~1.1km
 
-// Confirmed by direct inspection of data/nl_cities.geojson's `region`
-// property (12 provinces, alphabetical).
+// Confirmed by direct inspection of data/00-raw/orphan/nl_cities.geojson's
+// `region` property (12 provinces, alphabetical).
 const NL_PROVINCES = [
   "Drenthe",
   "Flevoland",

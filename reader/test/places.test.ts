@@ -92,7 +92,7 @@ test("search({ sort: true }) on the real worldwide dataset: an exact name match 
   // motivated --sort in the first place. Assertions are shaped around
   // that invariant rather than specific ids, since a later data rebuild
   // can renumber places.
-  const path = new URL("../../data/world.bin", import.meta.url);
+  const path = new URL("../../data/03-final/world.bin", import.meta.url);
   const worldReader = CGeoDataReader.open(fileURLToPath(path));
   // Ranking is under test here, not the index: don't depend on whether a
   // (gitignored, possibly stale) world.search-index.bin sits next to it.

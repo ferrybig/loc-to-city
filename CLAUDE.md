@@ -33,10 +33,13 @@ Four npm workspaces (Node >=26, see `.nvmrc`), all TypeScript, ESM
   (`CityProperties`, `HierarchyCountry`, ...) as a package so `data-ingest`
   imports them instead of reaching into `compressor/src/`.
 - **`data-ingest/`** — owns everything OSM-shaped: raw `.osm.pbf` extracts
-  (`data-ingest/osm/`, gitignored) and osmium's exported intermediate
-  GeoJSON (`data-ingest/work*/`, gitignored), plus the scripts that turn
-  those into whatever a specific compressor run needs. Outputs land in
-  `data/`, which is what you point the compressor at.
+  (`data/00-raw/osm/`, gitignored) and osmium's exported intermediate
+  GeoJSON (`data/01-extracted/`, gitignored), plus the scripts that turn
+  those into whatever a specific compressor run needs. See
+  `data-ingest/PIPELINE-STAGES.md` for the full `data/` directory layout
+  (`00-raw` → `01-extracted` → `02-resolved` → `03-final`) and file
+  dependency graph. Outputs land in `data/02-resolved/`, which is what you
+  point the compressor at.
 - **`demo/`** — a click-to-query Leaflet page plus a grid tile overlay.
 
 ## Commands
@@ -60,7 +63,7 @@ npx tsx --test compressor/test/geometry.test.ts
 library; validate it by running a scoped build (see below) and reading its
 diagnostic output.
 
-Demo e2e (spins up its own server against `data/zuid-holland.bin` on
+Demo e2e (spins up its own server against `data/03-final/zuid-holland.bin` on
 :8767, per `demo/playwright.config.ts`):
 
 ```bash
@@ -77,14 +80,14 @@ capability to the reader first, then expose it as a subcommand:
 
 ```bash
 npx tsx reader/src/cli.ts help                              # or help <command>
-npx tsx reader/src/cli.ts info   data/world.bin             # header, counts, byte split, largest chunks
-npx tsx reader/src/cli.ts lookup data/world.bin 52.37,4.9   # no points -> read them from stdin
-npx tsx reader/src/cli.ts list   data/world.bin --level city --country nl --tree
-npx tsx reader/src/cli.ts search data/world.bin amst        # exit 1 when nothing matched (grep-style)
-npx tsx reader/src/cli.ts search data/world.bin amsterdam --sort  # rank by relevance, not id order
-npx tsx reader/src/cli.ts show   data/world.bin 192858      # a place id from any other command
-npx tsx reader/src/cli.ts chunk  data/world.bin 3232        # the chunk index lookup printed
-npx tsx reader/src/cli.ts locate data/world.bin 309463      # a representative lat, lon per place id
+npx tsx reader/src/cli.ts info   data/03-final/world.bin             # header, counts, byte split, largest chunks
+npx tsx reader/src/cli.ts lookup data/03-final/world.bin 52.37,4.9   # no points -> read them from stdin
+npx tsx reader/src/cli.ts list   data/03-final/world.bin --level city --country nl --tree
+npx tsx reader/src/cli.ts search data/03-final/world.bin amst        # exit 1 when nothing matched (grep-style)
+npx tsx reader/src/cli.ts search data/03-final/world.bin amsterdam --sort  # rank by relevance, not id order
+npx tsx reader/src/cli.ts show   data/03-final/world.bin 192858      # a place id from any other command
+npx tsx reader/src/cli.ts chunk  data/03-final/world.bin 3232        # the chunk index lookup printed
+npx tsx reader/src/cli.ts locate data/03-final/world.bin 309463      # a representative lat, lon per place id
 ```
 
 `<file.bin>` may be `-` for stdin. `search` is a linear scan over the
@@ -116,13 +119,13 @@ per-axis median of the cells of the place *and everything under it*
 (a country's regions and cities count), moved to the nearest cell inside
 that area if the median falls outside it -- so `query()` at the point
 always resolves to the place or a descendant. Computing it decodes every
-chunk (~1.6s on `data/world.bin`); a locate index (Appendix C,
+chunk (~1.6s on `data/03-final/world.bin`); a locate index (Appendix C,
 `build-locate-index <file.bin> --output data/<name>.locate-index.bin`,
 ~11s, one fixed-width entry per place id) makes it one small read, and
 is picked up next to the `.bin` and overridden (`useLocateIndex()`,
 `--index`/`--no-index`) exactly like the search index. Index and scan
 must agree -- `reader/test/locateIndex.test.ts` asserts that on every
-place of `data/zuid-holland.bin`, and its builder output byte-for-byte
+place of `data/03-final/zuid-holland.bin`, and its builder output byte-for-byte
 against Appendix C.8. The builder reads chunks with `chunk(i, { cache:
 false })`: cached chunks are `WeakRef`s, whose targets stay alive until
 the current synchronous job ends, so a cached one-pass walk pins every
@@ -131,14 +134,14 @@ chunk in memory.
 Also runnable as `npm run reader -- <subcommand> ...` (the `--` is
 required so npm forwards args instead of eating them).
 
-**Use `lookup`/`show`/`search` against `data/world.bin` to spot-check
+**Use `lookup`/`show`/`search` against `data/03-final/world.bin` to spot-check
 `COUNTRY_ADMIN_LEVELS` changes** (`data-ingest/src/lib/countryAdminLevels.ts`)
 before trusting a coverage-percentage comment: the auto-detected level
 that best tessellates a country by area isn't always the level whose
 *names* are the ones a lookup should return (see the US county-vs-
 incorporated-place and Canada regional-district-vs-city entries in
 README.md's "Known issues and open work" section). A quick loop —
-`npm run reader -- lookup data/world.bin <lat,lon>` against a handful of
+`npm run reader -- lookup data/03-final/world.bin <lat,lon>` against a handful of
 well-known cities in the country just changed — catches a wrong city name
 (or a `city` that's empty because gap-fill couldn't cover it) far faster
 than rebuilding and diffing the full cities500-style match-rate script.
@@ -161,7 +164,7 @@ npx tsx compressor/src/cli.ts <hierarchy.json> <cities.geojson|.geojsonseq> <out
   just skips the (expensive) chunk-compression stage. `--only-chunks ''`
   builds just the place table, useful for inspecting record counts on a
   huge dataset without paying for chunk compression at all (a ~2s local
-  build against the worldwide inputs — `data/world_no_chunk.bin` is a
+  build against the worldwide inputs — `data/03-final/world_no_chunk.bin` is a
   gitignored, regenerate-on-demand artifact, not committed, since it goes
   stale the moment `world-hierarchy.json`/cities/regions change and costs
   nothing to rebuild).
@@ -174,17 +177,17 @@ npx tsx compressor/src/cli.ts <hierarchy.json> <cities.geojson|.geojsonseq> <out
   ordering logic in `quadtree.ts`/`chunkWorkerPool.ts` without rerunning it.
 
 Existing small/medium datasets to build against, in increasing size:
-`data-ingest/src/prepare-zuid-holland.ts` → `data/zuid-holland.bin`,
-`data-ingest/src/prepare-europe.ts` → `data/europe.bin`,
+`data-ingest/src/prepare-zuid-holland.ts` → `data/03-final/zuid-holland.bin`,
+`data-ingest/src/prepare-europe.ts` → `data/03-final/europe.bin`,
 `data-ingest/src/prepare-world.ts` (invoked via
-`data-ingest/scripts/build-world.sh`) → `data/world.bin`. Rerunning the
+`data-ingest/scripts/build-world.sh`) → `data/03-final/world.bin`. Rerunning the
 worldwide build is multi-hour and memory-heavy (see below) — prefer the
 Zuid-Holland or Europe build when iterating on compressor logic.
 
 ### Worldwide extraction/build pipeline
 
 ```bash
-data-ingest/scripts/build-world.sh                          # everything in data-ingest/osm/
+data-ingest/scripts/build-world.sh                          # everything in data/00-raw/osm/
 data-ingest/scripts/build-world.sh australia-oceania-260918  # one continent, end to end
 ```
 
@@ -268,7 +271,7 @@ same cell; `[primary, ...gapFill]` order is what prevents that.
 absence of OSM admin polygons at the city tier (Libya, Egypt, Chad,
 Eritrea — 0–0.7% coverage) or region tier (Slovenia — `region: []`), not
 fixable by any `admin_level` choice unlike every per-country override
-above, synthesizes polygons from `agent-resources/cities500.txt` points
+above, synthesizes polygons from `data/00-raw/geonames/cities500.txt` points
 instead. Both share `computeClippedCells`: `d3-delaunay` builds the
 Voronoi diagram (clipped to a bbox), `@turf/intersect` re-clips each cell
 to the country's real outline. `buildCityFallback` emits one candidate

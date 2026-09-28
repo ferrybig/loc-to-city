@@ -1,18 +1,20 @@
 // Prepares Europe-wide compressor inputs from already-produced data:
 //
-// - data/eu_cities.geojson (327MB, 202,154 features): the Python
-//   prototype's output. Already has region/country resolved per city
-//   (properties: id, name, municipality, region, country) -- reused
-//   as-is, minus the ~1,700 gap-filled features with no name at all
-//   (unlike the NL dataset these have no municipality fallback either;
-//   those areas now correctly fall back to region-level resolution
-//   instead, which the NL dataset didn't have when this data was built).
-// - data/work-eu/eu-admin.geojson (4.3GB, gitignored, still on disk from
-//   the original NL/Europe extraction -- see README's "Reproducing"
-//   section for how to regenerate it): streamed, never fully loaded into
-//   memory, for admin_level=4 region polygons.
-// - agent-resources/ne_10m_admin_0_countries.geojson: country polygons
-//   (already used for country resolution elsewhere in this repo).
+// - data/00-raw/orphan/eu_cities.geojson (327MB, 202,154 features): the
+//   Python prototype's output -- see data/00-raw/orphan/README.md for why
+//   this file can't be regenerated. Already has region/country resolved
+//   per city (properties: id, name, municipality, region, country) --
+//   reused as-is, minus the ~1,700 gap-filled features with no name at
+//   all (unlike the NL dataset these have no municipality fallback
+//   either; those areas now correctly fall back to region-level
+//   resolution instead, which the NL dataset didn't have when this data
+//   was built).
+// - data/01-extracted/eu/eu-admin.geojson (4.3GB, gitignored, still on
+//   disk from the original NL/Europe extraction -- see README's
+//   "Reproducing" section for how to regenerate it): streamed, never
+//   fully loaded into memory, for admin_level=4 region polygons.
+// - data/00-raw/natural-earth/ne_10m_admin_0_countries.geojson: country
+//   polygons (already used for country resolution elsewhere in this repo).
 //
 // The hierarchy itself (which regions exist per country) is derived from
 // the (country, region) pairs actually observed on eu_cities.geojson's
@@ -33,14 +35,14 @@ import { streamGeoJSONSeq } from "./lib/geojsonseqStream.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
 
-const CITIES_SOURCE = path.join(REPO_ROOT, "data/eu_cities.geojson");
-const ADMIN_SOURCE = path.join(REPO_ROOT, "data-ingest/work-eu/eu-admin.geojson");
-const COUNTRIES_SOURCE = path.join(REPO_ROOT, "agent-resources/ne_10m_admin_0_countries.geojson");
+const CITIES_SOURCE = path.join(REPO_ROOT, "data/00-raw/orphan/eu_cities.geojson");
+const ADMIN_SOURCE = path.join(REPO_ROOT, "data/01-extracted/eu/eu-admin.geojson");
+const COUNTRIES_SOURCE = path.join(REPO_ROOT, "data/00-raw/natural-earth/ne_10m_admin_0_countries.geojson");
 
-const HIERARCHY_OUT = path.join(REPO_ROOT, "data/eu-hierarchy.json");
-const CITIES_OUT = path.join(REPO_ROOT, "data/eu-cities-filtered.geojson");
-const REGIONS_OUT = path.join(REPO_ROOT, "data/eu-regions.geojson");
-const COUNTRIES_OUT = path.join(REPO_ROOT, "data/eu-country-polygons.geojson");
+const HIERARCHY_OUT = path.join(REPO_ROOT, "data/02-resolved/eu/hierarchy.json");
+const CITIES_OUT = path.join(REPO_ROOT, "data/02-resolved/eu/cities-filtered.geojson");
+const REGIONS_OUT = path.join(REPO_ROOT, "data/02-resolved/eu/regions.geojson");
+const COUNTRIES_OUT = path.join(REPO_ROOT, "data/02-resolved/eu/country-polygons.geojson");
 
 // Coarser than the Python prototype's tolerances for these same two
 // purposes (scripts/extract_boundaries_europe.py, since removed) --

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { CGeoDataReader, boundingBoxContains } from "@loc-to-city/reader";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BIN_PATH = path.resolve(__dirname, "../../data/zuid-holland.bin");
+const BIN_PATH = path.resolve(__dirname, "../../data/03-final/zuid-holland.bin");
 const skip = !existsSync(BIN_PATH);
 
 // The two known accuracy regressions this whole project exists to fix:

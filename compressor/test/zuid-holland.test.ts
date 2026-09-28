@@ -14,7 +14,7 @@ import {
 } from "@loc-to-city/reader";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BIN_PATH = path.resolve(__dirname, "../../data/zuid-holland.bin");
+const BIN_PATH = path.resolve(__dirname, "../../data/03-final/zuid-holland.bin");
 
 // This dataset is produced by `data-ingest/src/prepare-zuid-holland.ts`
 // followed by the compressor CLI (see README for the exact command).

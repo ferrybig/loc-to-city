@@ -162,7 +162,7 @@ test("containsPoint agrees with turf on real, complex province geometry", () => 
   // holes (a province with a city carved out), MultiPolygons (islands),
   // and enough vertices per ring to exercise the banded ray cast, not
   // just the plain one.
-  const provinces = JSON.parse(readFileSync(path.resolve(__dirname, "../../data/nl-provinces.geojson"), "utf8")) as FeatureCollection<
+  const provinces = JSON.parse(readFileSync(path.resolve(__dirname, "../../data/02-resolved/nl/provinces.geojson"), "utf8")) as FeatureCollection<
     Polygon | MultiPolygon
   >;
   assert.ok(provinces.features.length > 0, "fixture must actually have provinces to test against");

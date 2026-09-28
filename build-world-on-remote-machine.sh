@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Builds data/world.bin on the Windows machine at REMOTE_HOST, which has
-# more RAM/cores than this box but no Docker -- so this script only
-# handles the compressor stage (plain Node/tsx, no Docker needed). The
-# data-ingest stage (extract-boundaries.sh + prepare-world.ts) still has
-# to run HERE first: extraction needs the loc2city-tools Docker image, and
-# prepare-world.ts consumes its output directly. Run that locally, then
-# run this script to sync + build on the remote box.
+# Builds data/03-final/world.bin on the Windows machine at REMOTE_HOST,
+# which has more RAM/cores than this box but no Docker -- so this script
+# only handles the compressor stage (plain Node/tsx, no Docker needed).
+# The data-ingest stage (extract-boundaries.sh + prepare-world.ts) still
+# has to run HERE first: extraction needs the loc2city-tools Docker
+# image, and prepare-world.ts consumes its output directly. Run that
+# locally, then run this script to sync + build on the remote box.
 #
 # Usage:
-#   npx tsx data-ingest/src/prepare-world.ts   # local, produces data/world-hierarchy.json etc.
+#   npx tsx data-ingest/src/prepare-world.ts   # local, produces data/02-resolved/world/hierarchy.json etc.
 #   ./build-world-on-remote-machine.sh                    # full worldwide build, default workers
 #   ./build-world-on-remote-machine.sh --only-chunks 1     # scoped test build (verifies the pipeline works)
 #   ./build-world-on-remote-machine.sh --only-chunks ''    # place-table-only build (seconds, no chunks)
@@ -63,15 +63,15 @@ REMOTE_RSYNC_PATH="C:\\Users\\fernando\\Programs\\bin\\rsync.exe"
 REMOTE_MAX_OLD_SPACE_MB=24576
 
 REQUIRED_DATA_FILES=(
-  data/world-hierarchy.json
-  data/world-cities-filtered.geojsonseq
-  data/world-regions.geojson
-  data/world-country-polygons.geojson
+  data/02-resolved/world/hierarchy.json
+  data/02-resolved/world/cities-filtered.geojsonseq
+  data/02-resolved/world/regions.geojson
+  data/02-resolved/world/country-polygons.geojson
 )
 for f in "${REQUIRED_DATA_FILES[@]}"; do
   if [ ! -f "$f" ]; then
     echo "missing $f -- run 'npx tsx data-ingest/src/prepare-world.ts' locally first" >&2
-    echo "(that step needs data-ingest/work-world/*-admin.geojson, produced by" >&2
+    echo "(that step needs data/01-extracted/world/*-admin.geojson, produced by" >&2
     echo " scripts/extract-boundaries.sh via the loc2city-tools Docker image," >&2
     echo " which is why it can't run on the Docker-less remote machine)" >&2
     exit 1
@@ -94,10 +94,8 @@ rsync -avz --delete \
   --exclude='node_modules/' \
   --exclude='*/node_modules/' \
   --exclude='*/dist/' \
-  --exclude='data-ingest/osm/' \
-  --exclude='data-ingest/work/' \
-  --exclude='data-ingest/work-eu/' \
-  --exclude='data-ingest/work-world/' \
+  --exclude='data/00-raw/osm/' \
+  --exclude='data/01-extracted/' \
   --exclude='agent-resources/' \
   --exclude='data/search-index/' \
   --exclude='*.pbf' \
@@ -126,12 +124,12 @@ echo "== running compressor build on remote (default workers = os.availableParal
 # deliberately omitted: the CLI's own default is
 # os.availableParallelism(), which is exactly "the default amount of
 # workers" on whichever machine actually runs it.
-ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR_WIN && set NODE_OPTIONS=--max-old-space-size=$REMOTE_MAX_OLD_SPACE_MB && node node_modules\\tsx\\dist\\cli.mjs compressor\\src\\cli.ts data\\world-hierarchy.json data\\world-cities-filtered.geojsonseq data\\world.bin --regions data\\world-regions.geojson --countries data\\world-country-polygons.geojson --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 7 --attribution \"[OpenStreetMap](https://openstreetmap.org/copyright)\" $*"
+ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR_WIN && set NODE_OPTIONS=--max-old-space-size=$REMOTE_MAX_OLD_SPACE_MB && node node_modules\\tsx\\dist\\cli.mjs compressor\\src\\cli.ts data\\02-resolved\\world\\hierarchy.json data\\02-resolved\\world\\cities-filtered.geojsonseq data\\03-final\\world.bin --regions data\\02-resolved\\world\\regions.geojson --countries data\\02-resolved\\world\\country-polygons.geojson --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 7 --attribution \"[OpenStreetMap](https://openstreetmap.org/copyright)\" $*"
 
-echo "== syncing data/world.bin back =="
+echo "== syncing data/03-final/world.bin back =="
 rsync -avz \
   --rsync-path="$REMOTE_RSYNC_PATH" \
-  "$REMOTE_HOST:$REMOTE_DIR_CYGWIN/data/world.bin" ./data/world.bin
+  "$REMOTE_HOST:$REMOTE_DIR_CYGWIN/data/03-final/world.bin" ./data/03-final/world.bin
 
-echo "== done: data/world.bin updated from remote build =="
-ls -la data/world.bin
+echo "== done: data/03-final/world.bin updated from remote build =="
+ls -la data/03-final/world.bin

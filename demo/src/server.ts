@@ -8,8 +8,8 @@ import { readFileSync } from "node:fs";
  *
  *   npx tsx src/server.ts [port] [dataset.bin]
  *
- * dataset defaults to data/zuid-holland.bin (see the plan / README for how
- * that's built); pass a different .bin path to point at a later, larger
+ * dataset defaults to data/03-final/zuid-holland.bin (see the plan /
+ * README for how that's built); pass a different .bin path to point at a later, larger
  * build without changing any code. A `<dataset>.search-index.bin` and
  * `<dataset>.locate-index.bin` next to it (from `cgeodata
  * build-search-index` / `build-locate-index`) are picked up automatically.
@@ -48,7 +48,7 @@ async function main(): Promise<void> {
 	const datasetArg = process.argv[3];
 	const datasetPath = datasetArg
 		? path.resolve(datasetArg)
-		: path.join(REPO_ROOT, "data/zuid-holland.bin");
+		: path.join(REPO_ROOT, "data/03-final/zuid-holland.bin");
 
 	console.error(`Loading ${datasetPath}...`);
 	const pool = new Piscina({

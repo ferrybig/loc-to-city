@@ -1,11 +1,27 @@
 data/*.o5m
-data/eu_cities.geojson
-data/eu-cities-filtered.geojson
-data/world-cities-filtered.geojsonseq
+
+# Stage 0/1: raw downloads and osmium-extracted boundaries -- entirely
+# gitignored (large, reproducible via download-*.sh / extract-boundaries.sh,
+# except data/00-raw/orphan/ -- see its README). nl_cities.geojson (43MB)
+# is committed despite being in that same NOT-reproducible orphan/
+# directory; eu_cities.geojson (313MB) is kept gitignored instead, since
+# GitHub rejects pushes containing a 300MB+ blob in history -- see
+# data/00-raw/orphan/README.md for the backup risk this creates and the
+# planned fix (replace it with something derived from the World
+# pipeline's own OSM extracts, or regenerate it some other way).
+data/00-raw/osm/
+data/00-raw/geonames/
+data/00-raw/natural-earth/
+data/00-raw/orphan/eu_cities.geojson
+data/01-extracted/
+
+# Stage 2: only the two multi-GB filtered-city files are gitignored --
+# everything else in data/02-resolved/ (hierarchy/regions/country-polygons
+# JSON, all small) is committed.
+data/02-resolved/eu/cities-filtered.geojson
+data/02-resolved/world/cities-filtered.geojsonseq
+
 data/search-index/
-data-ingest/work/
-data-ingest/work-eu/
-data-ingest/work-world/
 *.pbf
 *.pbf.part
 .venv/
@@ -17,8 +33,11 @@ node_modules/
 dist/
 playwright-report/
 test-results/
-data/world_high_res.bin
-data/world_no_chunk.bin
+
+# Stage 3: on-demand exploratory/sidecar builds, not the primary .bin outputs.
+data/03-final/world_high_res.bin
+data/03-final/world_no_chunk.bin
+data/03-final/world.search-index.bin
+data/03-final/world.locate-index.bin
+
 cgeodata-demo.tar.gz
-data/world.search-index.bin
-data/world.locate-index.bin

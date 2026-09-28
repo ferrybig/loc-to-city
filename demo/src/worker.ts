@@ -46,9 +46,9 @@ function attachIndex(
 
 const { datasetPath } = workerData as WorkerData;
 const reader = CGeoDataReader.open(datasetPath);
-// Optional sidecars next to the dataset: data/world.bin pairs with
-// data/world.search-index.bin (`cgeodata build-search-index`) and
-// data/world.locate-index.bin (`cgeodata build-locate-index`). They only
+// Optional sidecars next to the dataset: data/03-final/world.bin pairs
+// with data/03-final/world.search-index.bin (`cgeodata build-search-index`)
+// and data/03-final/world.locate-index.bin (`cgeodata build-locate-index`). They only
 // speed up search() and locate(); results are the same without them.
 // Attached up front so a stale one is skipped instead of failing every
 // request.

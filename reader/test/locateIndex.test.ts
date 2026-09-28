@@ -333,7 +333,7 @@ test("chunk: cache false parses the same records without caching them", () => {
 
 // Max depth 10 on a 64 × 64 grid: 5-byte entries, and enough places to
 // exercise the builder's batching and every level of the hierarchy.
-const ZH_BIN = fileURLToPath(new URL("../../data/zuid-holland.bin", import.meta.url));
+const ZH_BIN = fileURLToPath(new URL("../../data/03-final/zuid-holland.bin", import.meta.url));
 if (existsSync(ZH_BIN)) {
 	test("zuid-holland.bin: index and scan agree, in any batch size, and every point is inside its place", () => {
 		const scan = CGeoDataReader.open(ZH_BIN);

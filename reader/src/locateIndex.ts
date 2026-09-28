@@ -554,8 +554,8 @@ export class LocateIndex {
 }
 
 /** Where a locate index for `binPath` conventionally lives, and where
- * `CGeoDataReader.open()` looks for one: `data/world.bin` →
- * `data/world.locate-index.bin`. */
+ * `CGeoDataReader.open()` looks for one: `data/03-final/world.bin` →
+ * `data/03-final/world.locate-index.bin`. */
 export function locateIndexPathFor(binPath: string): string {
 	return `${binPath.replace(/\.bin$/, "")}.locate-index.bin`;
 }

@@ -312,8 +312,8 @@ export function buildSearchIndex(reader: CGeoDataReader, options: SearchIndexOpt
 }
 
 /** Where a search index for `binPath` conventionally lives, and where
- * `CGeoDataReader.open()` looks for one: `data/world.bin` →
- * `data/world.search-index.bin`. */
+ * `CGeoDataReader.open()` looks for one: `data/03-final/world.bin` →
+ * `data/03-final/world.search-index.bin`. */
 export function searchIndexPathFor(binPath: string): string {
 	return `${binPath.replace(/\.bin$/, "")}.search-index.bin`;
 }

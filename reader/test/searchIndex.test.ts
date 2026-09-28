@@ -119,7 +119,7 @@ function referenceFnv1a64(data: Uint8Array): bigint {
 	return h;
 }
 
-const ZH_BIN = fileURLToPath(new URL("../../data/zuid-holland.bin", import.meta.url));
+const ZH_BIN = fileURLToPath(new URL("../../data/03-final/zuid-holland.bin", import.meta.url));
 if (existsSync(ZH_BIN)) {
 	test("placeTableChecksum: matches a BigInt reference on zuid-holland.bin", () => {
 		const reader = CGeoDataReader.open(ZH_BIN);

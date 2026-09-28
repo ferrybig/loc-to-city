@@ -135,8 +135,8 @@ below is built from or benchmarked against.
 ## Reproducing
 
 This step is still needed: `data-ingest/src/prepare-zuid-holland.ts` reads
-its output (`data-ingest/work/nl-admin.geojson`) directly, and
-`data-ingest/work/` is gitignored, so a fresh clone has to regenerate it.
+its output (`data/01-extracted/nl/nl-admin.geojson`) directly, and
+`data/01-extracted/` is gitignored, so a fresh clone has to regenerate it.
 For continent-scale extraction the equivalent step is scripted -- see
 [Worldwide build](#worldwide-build-data-ingestscriptsbuild-worldsh).
 
@@ -145,13 +145,12 @@ relations from the `.osm.pbf`).
 
 ```bash
 docker build -t loc2city-tools -f Dockerfile.tools .
-curl -L -o data-ingest/osm/netherlands-latest.osm.pbf \
-  https://download.geofabrik.de/europe/netherlands-latest.osm.pbf
+data-ingest/scripts/download-osm.sh netherlands
 
 docker run --rm -v "$PWD:/work" loc2city-tools bash -c "
-  osmium tags-filter data-ingest/osm/netherlands-latest.osm.pbf r/boundary=administrative \
-    -o data-ingest/work/nl-admin.osm.pbf --overwrite -f pbf &&
-  osmium export data-ingest/work/nl-admin.osm.pbf -o data-ingest/work/nl-admin.geojson \
+  osmium tags-filter data/00-raw/osm/netherlands-latest.osm.pbf r/boundary=administrative \
+    -o data/01-extracted/nl/nl-admin.osm.pbf --overwrite -f pbf &&
+  osmium export data/01-extracted/nl/nl-admin.osm.pbf -o data/01-extracted/nl/nl-admin.geojson \
     --overwrite -f geojsonseq --geometry-types=polygon,multipolygon
 "
 ```
@@ -185,12 +184,14 @@ Four npm workspaces, all TypeScript:
   something Immich would load. Exposes its own types
   (`CityProperties`/`HierarchyCountry`/...) as a package, so `data-ingest`
   can import them instead of reaching into its `src/`.
-- **`data-ingest/`** — owns everything OSM-shaped: the raw `.osm.pbf`
-  extracts (`data-ingest/osm/`, gitignored) and osmium's exported
-  intermediate GeoJSON (`data-ingest/work*/`, also gitignored), plus the
-  scripts that turn those into whatever a specific compressor run needs
-  (`prepare-zuid-holland.ts`, `prepare-europe.ts`). Its outputs land in
-  `data/`, which is what you point the compressor at.
+- **`data-ingest/`** — owns everything OSM-shaped: the scripts that turn
+  raw `.osm.pbf` extracts (`data/00-raw/osm/`, gitignored) and osmium's
+  exported intermediate GeoJSON (`data/01-extracted/`, also gitignored)
+  into whatever a specific compressor run needs (`prepare-zuid-holland.ts`,
+  `prepare-europe.ts`, `prepare-world.ts`). See
+  `data-ingest/PIPELINE-STAGES.md` for the full `data/` directory
+  layout and file dependency graph. Its outputs land in
+  `data/02-resolved/`, which is what you point the compressor at.
 - **`demo/`** — a click-to-query Leaflet page plus a grid tile overlay, the
   JS/TS equivalent of `webapp/`'s demo but for one format with one lookup
   path instead of comparing four approaches.
@@ -204,19 +205,19 @@ npm test -w compressor                     # synthetic-dataset unit tests + (if 
 # Build a small test dataset: 1 country (Netherlands), all 12 provinces
 # with real polygons (11 have 0 cities -- Section 7.2 explicitly allows
 # that), but only the 187 cities in Zuid-Holland, filtered from the
-# already-committed data/nl_cities.geojson. Provinces come from the raw
-# osmium export (data-ingest/work/nl-admin.geojson, see "Reproducing"
-# above); the country polygon comes from the Natural Earth file already
-# used for country resolution elsewhere in this repo.
+# already-committed data/00-raw/orphan/nl_cities.geojson. Provinces come
+# from the raw osmium export (data/01-extracted/nl/nl-admin.geojson, see
+# "Reproducing" above); the country polygon comes from the Natural Earth
+# file already used for country resolution elsewhere in this repo.
 npx tsx data-ingest/src/prepare-zuid-holland.ts
-npx tsx compressor/src/cli.ts data/nl-regions.json data/zuid-holland-cities.geojson \
-  data/zuid-holland.bin --regions data/nl-provinces.geojson --countries data/nl-country.geojson \
+npx tsx compressor/src/cli.ts data/02-resolved/nl/regions.json data/02-resolved/nl/zuid-holland-cities.geojson \
+  data/03-final/zuid-holland.bin --regions data/02-resolved/nl/provinces.geojson --countries data/02-resolved/nl/country.geojson \
   --width-exp 6 --height-exp 6 --max-depth 10 --keyframe-exp 13 \
   --attribution "[OpenStreetMap](https://openstreetmap.org/copyright)"
 
 npm test -w compressor                     # now also runs the Zuid-Holland structural + query tests
 
-npx tsx demo/src/server.ts                 # serves data/zuid-holland.bin on :8766
+npx tsx demo/src/server.ts                 # serves data/03-final/zuid-holland.bin on :8766
 cd demo && npx playwright install chromium && npx playwright test   # click-to-query e2e
 ```
 
@@ -240,7 +241,7 @@ Netherlands, region: Utrecht`. Two separate bugs, found in order:
 1. **The compressor never had region or country geometry at all.** Only
    city polygons were ever fed into the spatial index, even though the
    place table already listed all 12 provinces. There was no OSM boundary
-   data checked into the repo for that -- `data-ingest/work/nl-admin.geojson`
+   data checked into the repo for that -- `data/01-extracted/nl/nl-admin.geojson`
    (the raw osmium export, gitignored, still present locally from the
    earlier NL extraction) has clean `admin_level=4` province polygons; the
    country polygon comes from the Natural Earth file already used elsewhere
@@ -293,10 +294,10 @@ buggy, prematurely-truncated recursion -- worth re-measuring once
 
 ### Europe-wide build
 
-`data-ingest/src/prepare-europe.ts` reuses `data/eu_cities.geojson` (the
-Python prototype's output, still on disk though the script that made it is
-gone), pulls region polygons from a streamed pass over the 4.3GB
-`data-ingest/work-eu/eu-admin.geojson` (peak RSS ~355MB -- this is exactly
+`data-ingest/src/prepare-europe.ts` reuses `data/00-raw/orphan/eu_cities.geojson`
+(the Python prototype's output, still on disk though the script that made
+it is gone), pulls region polygons from a streamed pass over the 4.3GB
+`data/01-extracted/eu/eu-admin.geojson` (peak RSS ~355MB -- this is exactly
 the class of file whose naive full read OOM'd the whole machine earlier in
 this project; streaming it with a hand-rolled RS-delimited reader instead
 of `JSON.parse`-ing it whole was not optional), and country polygons from
@@ -304,8 +305,8 @@ the Natural Earth file already used elsewhere in this repo:
 
 ```bash
 npx tsx data-ingest/src/prepare-europe.ts
-npx tsx compressor/src/cli.ts data/eu-hierarchy.json data/eu-cities-filtered.geojson \
-  data/europe.bin --regions data/eu-regions.geojson --countries data/eu-country-polygons.geojson \
+npx tsx compressor/src/cli.ts data/02-resolved/eu/hierarchy.json data/02-resolved/eu/cities-filtered.geojson \
+  data/03-final/europe.bin --regions data/02-resolved/eu/regions.geojson --countries data/02-resolved/eu/country-polygons.geojson \
   --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 13 \
   --attribution "[OpenStreetMap](https://openstreetmap.org/copyright)" --workers 16
 ```
@@ -404,7 +405,7 @@ An RSS guardrail aborts with an actionable message rather than repeating
 the whole-machine OOM that this project already hit once.
 
 ```bash
-data-ingest/scripts/build-world.sh                    # everything in data-ingest/osm/
+data-ingest/scripts/build-world.sh                    # everything in data/00-raw/osm/
 data-ingest/scripts/build-world.sh australia-oceania-260918   # one continent, end to end
 ```
 
@@ -423,11 +424,12 @@ the same class of gap Europe has in Ireland/Estonia/Portugal: those places
 still resolve at country level, and the count is reported per country
 rather than silently swallowed.
 
-**The full 8-file worldwide build is done and committed:** `data/world.bin`
-(8.3MB), built from `data/world-hierarchy.json`, `data/world-regions.geojson`
-and `data/world-country-polygons.geojson`, all also committed --
-`data/world-cities-filtered.geojsonseq` (4.0GB) is the only intermediate
-output, gitignored like its Europe equivalent.
+**The full 8-file worldwide build is done and committed:** `data/03-final/world.bin`
+(8.3MB), built from `data/02-resolved/world/hierarchy.json`,
+`data/02-resolved/world/regions.geojson` and
+`data/02-resolved/world/country-polygons.geojson`, all also committed --
+`data/02-resolved/world/cities-filtered.geojsonseq` (4.0GB) is the only
+intermediate output, gitignored like its Europe equivalent.
 
 Ingest deduplicated 922,077 unique relations across all 8 files (29,781
 cross-file duplicates dropped -- Russia and Turkey's transcontinental
@@ -461,7 +463,7 @@ stage. Tokyo, São Paulo, New York, Sydney, Den Haag, Paris and Nairobi all
 resolve correctly to city/region/country; mid-ocean points resolve fully
 unknown.
 
-`data/world_no_chunk.bin` is the same build with `--only-chunks ''` -- the
+`data/03-final/world_no_chunk.bin` is the same build with `--only-chunks ''` -- the
 place table alone, no quadtree chunks -- a much smaller way to inspect or
 query country/region/city counts without loading the full chunk data. It
 used to be committed alongside `world.bin`, and is what actually caught
@@ -621,15 +623,15 @@ section, since those are spec decisions rather than pipeline work.
 
 - **Natural Earth's country outlines are too coarse for small
   territories.** Jersey (9km across) is a 47-vertex ring in
-  `agent-resources/ne_10m_admin_0_countries.geojson`; Guernsey is 59 --
+  `data/00-raw/natural-earth/ne_10m_admin_0_countries.geojson`; Guernsey is 59 --
   confirmed by direct inspection, unmodified by anything in this pipeline
   (`COUNTRY_SIMPLIFY_TOLERANCE` is `0`, so these vertex counts come
-  straight from the source file). At `--max-depth 8` (`data/world.bin`)
+  straight from the source file). At `--max-depth 8` (`data/03-final/world.bin`)
   this mostly doesn't show: the max-depth tie-break in `quadtree.ts` picks
   *some* winner for an ambiguous leaf cell even when its sample score is
   `0`, as long as one candidate is the sole one still touching that
   branch, which papers over gaps between the crude outline and the real
-  coastline. At `--max-depth 11` (`data/world_high_res.bin`, gitignored,
+  coastline. At `--max-depth 11` (`data/03-final/world_high_res.bin`, gitignored,
   not committed) subdivision goes fine enough to reach cells the real
   boundary never touches at all, and those correctly resolve to nothing --
   which is what makes the *same* underlying coarse-polygon problem look
@@ -663,7 +665,7 @@ section, since those are spec decisions rather than pipeline work.
   Netherlands` pair would need country geometry/names to come from OSM's
   own `admin_level=2` relations instead of (or alongside) Natural Earth --
   those relations are already extracted (unfiltered) into
-  `data-ingest/work-world/*-admin.geojson` by `extract-boundaries.sh`, but
+  `data/01-extracted/world/*-admin.geojson` by `extract-boundaries.sh`, but
   discarded by `adminBoundaryIndex.ts`'s `PLAUSIBLE_ADMIN_LEVELS` prefilter
   (levels 4-11 only). This and the item above both want the same new OSM
   `admin_level=2` country source, so they're natural to tackle together.
@@ -777,7 +779,7 @@ section, since those are spec decisions rather than pipeline work.
   pick or the US's counties-vs-places one), gap-filling level 10 for
   whatever it doesn't cover. Level 6/7 stay unavailable everywhere else in
   GB, so England/Scotland (Westminster, Guildford, ...) are unaffected --
-  verified on `data/world.bin`: Cardiff now resolves to `city: Cardiff`,
+  verified on `data/03-final/world.bin`: Cardiff now resolves to `city: Cardiff`,
   Belfast to `city: Belfast City District`, London and parished towns
   unchanged.
 
@@ -867,7 +869,7 @@ section, since those are spec decisions rather than pipeline work.
   no usable region candidate at all, so every Slovenian city was dropped
   by `emitCity`'s "no region -> drop the city too" rule (confirmed: Bled
   and Maribor, Slovenia's 2nd-largest city, were both entirely absent
-  from `data/world.bin`). Slovenia's nearest thing to a regional tier is
+  from `data/03-final/world.bin`). Slovenia's nearest thing to a regional tier is
   OSM `admin_level=7` ("Upravna Enota"), but that's only 17.6%
   coverage -- not a full tessellation, so no `region` level choice would
   have cleanly fixed this the way e.g. Ireland's `admin_level=6` counties
@@ -939,7 +941,7 @@ section, since those are spec decisions rather than pipeline work.
 - **Regions with no cities were dropped from the build (Libya, Egypt,
   Chad, Sudan, and 110 other countries).** Tripoli, Cairo, N'Djamena and
   Khartoum all resolved to `region: -` even though
-  `data/world-regions.geojson` had their region polygons (Libya 23, Egypt
+  `data/02-resolved/world/regions.geojson` had their region polygons (Libya 23, Egypt
   27, Chad 23, Sudan 18). Root cause: `prepare-world.ts` built each
   country's hierarchy region list *only* from regions that received at
   least one emitted city, and the compressor only builds regions the
@@ -1096,7 +1098,7 @@ section, since those are spec decisions rather than pipeline work.
   only ever stored as a candidate for a country whose own table row
   actually lists it, not for every country in a shared range.
 
-  **Rebuilt and committed** (`data/world.bin`, `info` command): 239
+  **Rebuilt and committed** (`data/03-final/world.bin`, `info` command): 239
   countries, 3,899 regions (was 2,595), 294,914 cities (was 252,721) --
   matching the dry-run numbers above exactly.
 - **The `touches()`/`fullyContains()` exact-arithmetic bottleneck.**

@@ -1,6 +1,6 @@
 // Prepares worldwide compressor inputs from the outputs of
-// scripts/extract-boundaries.sh (data-ingest/work-world/*-admin.geojson,
-// one per data-ingest/osm/*.osm.pbf continent extract).
+// scripts/extract-boundaries.sh (data/01-extracted/world/*-admin.geojson,
+// one per data/00-raw/osm/*.osm.pbf continent extract).
 //
 // Unlike prepare-europe.ts, there is no pre-computed cities.geojson to
 // reuse -- that file was produced by a deleted Python pipeline that only
@@ -53,15 +53,15 @@ import type { RegionCandidate } from "./lib/adminBoundaryIndex.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
 
-const WORK_DIR = path.join(REPO_ROOT, "data-ingest/work-world");
-const COUNTRIES_SOURCE = path.join(REPO_ROOT, "agent-resources/ne_10m_admin_0_countries.geojson");
-const CITIES500_SOURCE = path.join(REPO_ROOT, "agent-resources/cities500.txt");
-const ADMIN1_CODES_SOURCE = path.join(REPO_ROOT, "agent-resources/admin1CodesASCII.txt");
+const WORK_DIR = path.join(REPO_ROOT, "data/01-extracted/world");
+const COUNTRIES_SOURCE = path.join(REPO_ROOT, "data/00-raw/natural-earth/ne_10m_admin_0_countries.geojson");
+const CITIES500_SOURCE = path.join(REPO_ROOT, "data/00-raw/geonames/cities500.txt");
+const ADMIN1_CODES_SOURCE = path.join(REPO_ROOT, "data/00-raw/geonames/admin1CodesASCII.txt");
 
-const HIERARCHY_OUT = path.join(REPO_ROOT, "data/world-hierarchy.json");
-const CITIES_OUT = path.join(REPO_ROOT, "data/world-cities-filtered.geojsonseq");
-const REGIONS_OUT = path.join(REPO_ROOT, "data/world-regions.geojson");
-const COUNTRIES_OUT = path.join(REPO_ROOT, "data/world-country-polygons.geojson");
+const HIERARCHY_OUT = path.join(REPO_ROOT, "data/02-resolved/world/hierarchy.json");
+const CITIES_OUT = path.join(REPO_ROOT, "data/02-resolved/world/cities-filtered.geojsonseq");
+const REGIONS_OUT = path.join(REPO_ROOT, "data/02-resolved/world/regions.geojson");
+const COUNTRIES_OUT = path.join(REPO_ROOT, "data/02-resolved/world/country-polygons.geojson");
 
 // 115,000 primaries measured at 8.2GB resident, so a batch is sized well
 // under that -- the cost of one extra batch is one more read of the

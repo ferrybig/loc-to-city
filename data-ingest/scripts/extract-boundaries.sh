@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Filters every .osm.pbf in data-ingest/osm/ down to boundary=administrative
+# Filters every .osm.pbf in data/00-raw/osm/ down to boundary=administrative
 # relations and exports them to GeoJSON Text Sequence, via the
 # loc2city-tools Docker image (osmium-tool). Skips a file whose output is
 # already newer than its input, so re-running after swapping in a new/
@@ -12,8 +12,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."   # repo root
 
-OSM_DIR="data-ingest/osm"
-WORK_DIR="data-ingest/work-world"
+OSM_DIR="data/00-raw/osm"
+WORK_DIR="data/01-extracted/world"
 EXCLUDE="netherlands-latest.osm.pbf"
 
 mkdir -p "$WORK_DIR"

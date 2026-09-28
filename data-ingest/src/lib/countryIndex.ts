@@ -120,8 +120,8 @@ function polygonsContain(polygons: IndexedPolygon[], x: number, y: number): bool
 }
 
 /** Worldwide, indexed country resolution from Natural Earth's admin-0
- * countries (`agent-resources/ne_10m_admin_0_countries.geojson`, already
- * worldwide in scope -- no changes needed there). Promoted out of
+ * countries (`data/00-raw/natural-earth/ne_10m_admin_0_countries.geojson`,
+ * already worldwide in scope -- no changes needed there). Promoted out of
  * `prepare-europe.ts`'s inline `loadCountryPolygons` because world-scale
  * admin-boundary resolution runs millions of point tests, not a few
  * hundred, and needs a bbox prefilter to stay fast. */
