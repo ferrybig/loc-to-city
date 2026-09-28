@@ -134,26 +134,20 @@ below is built from or benchmarked against.
 
 ## Reproducing
 
-This step is still needed: `data-ingest/src/prepare-zuid-holland.ts` reads
-its output (`data/01-extracted/nl/nl-admin.geojson`) directly, and
-`data/01-extracted/` is gitignored, so a fresh clone has to regenerate it.
-For continent-scale extraction the equivalent step is scripted -- see
-[Worldwide build](#worldwide-build-data-ingestscriptsbuild-worldsh).
-
-Requires Docker (for `osmium-tool` + `gdal`, used once to extract boundary
-relations from the `.osm.pbf`).
-
-```bash
-docker build -t loc2city-tools -f Dockerfile.tools .
-data-ingest/scripts/download-osm.sh netherlands
-
-docker run --rm -v "$PWD:/work" loc2city-tools bash -c "
-  osmium tags-filter data/00-raw/osm/netherlands-latest.osm.pbf r/boundary=administrative \
-    -o data/01-extracted/nl/nl-admin.osm.pbf --overwrite -f pbf &&
-  osmium export data/01-extracted/nl/nl-admin.osm.pbf -o data/01-extracted/nl/nl-admin.geojson \
-    --overwrite -f geojsonseq --geometry-types=polygon,multipolygon
-"
-```
+**Historical note:** this section originally described extracting
+`data/01-extracted/nl/nl-admin.geojson` via Docker/osmium so
+`prepare-zuid-holland.ts` could build the Zuid-Holland/Europe test
+datasets from it plus the Python prototype's `nl_cities.geojson`/
+`eu_cities.geojson`. Both scripts (`prepare-zuid-holland.ts`,
+`prepare-europe.ts`) were deleted (2026-09-28) once
+`data-ingest/src/filter-by-scope.ts` made them redundant: the worldwide
+pipeline's own per-country `admin_level` resolution already covers the
+Netherlands and Europe more accurately than either script did (see
+`data/00-raw/orphan/README.md` for the investigation), so `zuid-holland.bin`
+and `europe.bin` are now built by filtering the worldwide pipeline's
+already-resolved output down to a country or continent, not by a separate
+extraction pass. No Docker/osmium step is needed for either dataset any
+more -- see the code block below.
 
 ## The CGEODATA format and its JavaScript/TypeScript implementation
 
@@ -187,10 +181,13 @@ Four npm workspaces, all TypeScript:
 - **`data-ingest/`** — owns everything OSM-shaped: the scripts that turn
   raw `.osm.pbf` extracts (`data/00-raw/osm/`, gitignored) and osmium's
   exported intermediate GeoJSON (`data/01-extracted/`, also gitignored)
-  into whatever a specific compressor run needs (`prepare-zuid-holland.ts`,
-  `prepare-europe.ts`, `prepare-world.ts`). See
-  `data-ingest/PIPELINE-STAGES.md` for the full `data/` directory
-  layout and file dependency graph. Its outputs land in
+  into whatever a specific compressor run needs. `prepare-world.ts` does
+  the real per-country resolution once, worldwide;
+  `filter-by-scope.ts --only-country`/`--only-continent` filters its
+  output down to a smaller scope (the Zuid-Holland and Europe test
+  datasets are both built this way now, not by their own separate
+  resolution pass). See `data-ingest/PIPELINE-STAGES.md` for the full
+  `data/` directory layout and file dependency graph. Its outputs land in
   `data/02-resolved/`, which is what you point the compressor at.
 - **`demo/`** — a click-to-query Leaflet page plus a grid tile overlay, the
   JS/TS equivalent of `webapp/`'s demo but for one format with one lookup
@@ -203,15 +200,15 @@ npm test -w reader                         # Appendix A conformance + varint/Mor
 npm test -w compressor                     # synthetic-dataset unit tests + (if built) real-data tests
 
 # Build a small test dataset: 1 country (Netherlands), all 12 provinces
-# with real polygons (11 have 0 cities -- Section 7.2 explicitly allows
-# that), but only the 187 cities in Zuid-Holland, filtered from the
-# already-committed data/00-raw/orphan/nl_cities.geojson. Provinces come
-# from the raw osmium export (data/01-extracted/nl/nl-admin.geojson, see
-# "Reproducing" above); the country polygon comes from the Natural Earth
-# file already used for country resolution elsewhere in this repo.
-npx tsx data-ingest/src/prepare-zuid-holland.ts
-npx tsx compressor/src/cli.ts data/02-resolved/nl/regions.json data/02-resolved/nl/zuid-holland-cities.geojson \
-  data/03-final/zuid-holland.bin --regions data/02-resolved/nl/provinces.geojson --countries data/02-resolved/nl/country.geojson \
+# with real cities in every one of them (unlike the original
+# Python-derived dataset, which only ever had cities in Zuid-Holland --
+# see data/00-raw/orphan/README.md), filtered from the worldwide
+# pipeline's own already-resolved output
+# (data/02-resolved/world/, built by data-ingest/src/prepare-world.ts;
+# see "Worldwide build" below -- a worldwide build must exist first).
+npx tsx data-ingest/src/filter-by-scope.ts --only-country NL --out-dir data/02-resolved/nl
+npx tsx compressor/src/cli.ts data/02-resolved/nl/hierarchy.json data/02-resolved/nl/cities-filtered.geojson \
+  data/03-final/zuid-holland.bin --regions data/02-resolved/nl/regions.geojson --countries data/02-resolved/nl/country-polygons.geojson \
   --width-exp 6 --height-exp 6 --max-depth 10 --keyframe-exp 13 \
   --attribution "[OpenStreetMap](https://openstreetmap.org/copyright)"
 
@@ -294,14 +291,37 @@ buggy, prematurely-truncated recursion -- worth re-measuring once
 
 ### Europe-wide build
 
-`data-ingest/src/prepare-europe.ts` reuses `data/00-raw/orphan/eu_cities.geojson`
-(the Python prototype's output, still on disk though the script that made
-it is gone), pulls region polygons from a streamed pass over the 4.3GB
-`data/01-extracted/eu/eu-admin.geojson` (peak RSS ~355MB -- this is exactly
-the class of file whose naive full read OOM'd the whole machine earlier in
-this project; streaming it with a hand-rolled RS-delimited reader instead
-of `JSON.parse`-ing it whole was not optional), and country polygons from
-the Natural Earth file already used elsewhere in this repo:
+**Historical note:** the build below (41 countries, 642 regions, 138,106
+cities) was produced by `prepare-europe.ts` from
+`data/00-raw/orphan/eu_cities.geojson` (the Python prototype's output)
+plus a streamed pass over `data/01-extracted/eu/eu-admin.geojson`.
+`prepare-europe.ts` was deleted (2026-09-28) in favor of
+`data-ingest/src/filter-by-scope.ts --only-continent Europe`, which
+filters the worldwide pipeline's own already-resolved output instead (see
+`data/00-raw/orphan/README.md`) -- the current `data/03-final/europe.bin`
+covers 51 countries (Natural Earth's `CONTINENT == "Europe"`, a
+different, and differently-bounded, set than `eu_cities.geojson`'s
+Geofabrik-extract-shaped coverage) and 183,970 cities, not the numbers
+measured below. The bugs this section documents (region-drop in Ireland/
+Estonia/Portugal, admin_level variance) were specific to that now-deleted
+pipeline's approach and were independently rediscovered and fixed,
+differently, by the worldwide pipeline's own per-country
+`COUNTRY_ADMIN_LEVELS` table -- kept here as the historical record of how
+that variance problem was first found, not as current build instructions.
+
+**Current build command** (requires a worldwide build to exist first --
+see "Worldwide build" below):
+
+```bash
+npx tsx data-ingest/src/filter-by-scope.ts --only-continent Europe --out-dir data/02-resolved/eu
+npx tsx compressor/src/cli.ts data/02-resolved/eu/hierarchy.json data/02-resolved/eu/cities-filtered.geojsonseq \
+  data/03-final/europe.bin --regions data/02-resolved/eu/regions.geojson --countries data/02-resolved/eu/country-polygons.geojson \
+  --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 13 \
+  --attribution "[OpenStreetMap](https://openstreetmap.org/copyright)" --workers 6
+```
+
+The historical command and result below are kept as a record of the
+original build, not something you can still run:
 
 ```bash
 npx tsx data-ingest/src/prepare-europe.ts
@@ -364,11 +384,14 @@ coarse-polygon issue documented there.)
 
 ### Worldwide build (`data-ingest/scripts/build-world.sh`)
 
-Europe's pipeline only works because `data/eu_cities.geojson` already
-exists -- cities with region and country pre-resolved, produced by the
-Python prototype that has since been deleted. No such file exists for any
-other continent, so going worldwide meant building that step from scratch
-in TypeScript rather than reusing a prepared artifact.
+At the time this section was written, Europe's pipeline only worked
+because `data/eu_cities.geojson` already existed -- cities with region and
+country pre-resolved, produced by the Python prototype that has since
+been deleted. No such file existed for any other continent, so going
+worldwide meant building that step from scratch in TypeScript rather than
+reusing a prepared artifact. (That TypeScript resolution -- Pass 1/1.5/2
+below -- has since become the *only* pipeline for Europe too, see
+"Europe-wide build" above.)
 
 Two things had to be solved that Europe never hit:
 

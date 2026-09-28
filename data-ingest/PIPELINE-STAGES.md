@@ -1,40 +1,87 @@
 # Data pipeline stages
 
 This documents the `data/` directory layout and file dependency graph
-across the three build pipelines (Zuid-Holland, Europe, World), so it
+across the three build datasets (Zuid-Holland, Europe, World), so it
 doesn't need to be re-derived from scratch next time it comes up. It
-reflects the repo as of the `data/` restructuring into numbered stages
-(2026-09-28).
+reflects the repo as of `filter-by-scope.ts` replacing
+`prepare-zuid-holland.ts`/`prepare-europe.ts` (2026-09-28).
 
 ## tl;dr
 
-`data/` is organized into four numbered stages, each stage's script
-reading only from earlier stages:
+`data/` is organized into four numbered stages:
 
 ```
-data/00-raw/          external downloads + the two orphan Python-prototype
-                       outputs (see "Orphan inputs" below) -- nothing here
-                       is produced by any script in data/01-extracted/ or later
-data/01-extracted/    osmium-exported admin boundaries
-data/02-resolved/     resolved hierarchy + geometry (per-pipeline: nl/eu/world)
+data/00-raw/          external downloads + one orphan Python-prototype
+                       output (nl_cities.geojson, see "Orphan inputs" below)
+data/01-extracted/    osmium-exported admin boundaries (World only, now --
+                       see "History" below for why nl/eu/ still exist on disk)
+data/02-resolved/     resolved hierarchy + geometry (per dataset: nl/eu/world)
 data/03-final/        the final .bin files + reader sidecar indexes
 ```
 
-The pipeline is **strictly linear, no cycles** — confirmed by tracing
-every `prepare-*.ts`/`extract-boundaries.sh`/compressor-CLI input and
-output path; nothing in an earlier stage ever reads a later stage's
-output. Two structural quirks survive the restructuring and are
-documented below rather than fixed, since fixing them is a separate,
-larger decision:
+**There is now only one real resolution pipeline: `prepare-world.ts`.**
+It resolves the whole world's per-country region/city hierarchy once, into
+`data/02-resolved/world/`. Both smaller test datasets are built by
+filtering that already-resolved output down to a scope, not by a separate
+extraction + resolution pass:
 
-1. `data/00-raw/orphan/` holds two files (`nl_cities.geojson`,
-   `eu_cities.geojson`) that look like mid-pipeline output but are
-   actually **irreplaceable raw input** from a deleted Python prototype —
-   nothing in the current repo can regenerate them. See "Orphan inputs"
-   below.
-2. Only the World pipeline has a shell wrapper
-   (`data-ingest/scripts/build-world.sh`). Zuid-Holland and Europe exist
-   only as manual commands documented in `README.md`.
+```
+data/01-extracted/world/*-admin.geojson
+        │ prepare-world.ts (full per-country admin_level resolution,
+        │   already correct for every country -- see countryAdminLevels.ts)
+        ▼
+data/02-resolved/world/{hierarchy.json, regions.geojson,
+                        country-polygons.geojson, cities-filtered.geojsonseq}
+        │ filter-by-scope.ts --only-country NL
+        │              --out-dir data/02-resolved/nl
+        │ filter-by-scope.ts --only-continent Europe
+        │              --out-dir data/02-resolved/eu
+        ▼
+data/02-resolved/{nl,eu}/{hierarchy.json, regions.geojson,
+                          country-polygons.geojson, cities-filtered.geojson[seq]}
+        │ compressor/src/cli.ts (cgeodata-compress), same for all three
+        ▼
+data/03-final/{zuid-holland,europe,world}.bin
+```
+
+The pipeline is **strictly linear, no cycles**. One structural quirk
+survives and is documented below rather than fixed:
+
+- `data/00-raw/orphan/nl_cities.geojson` looks like mid-pipeline output
+  but is actually **irreplaceable raw input** from a deleted Python
+  prototype — nothing in the current repo can regenerate it, though it is
+  no longer load-bearing for any build (see "Orphan inputs" below; it's
+  kept only because deleting a still-committed file needs its own
+  decision, not because anything still reads it).
+
+## Why `prepare-zuid-holland.ts`/`prepare-europe.ts` were deleted
+
+Both scripts existed because the Zuid-Holland/Europe test datasets used
+to come from the deleted Python prototype's own output
+(`nl_cities.geojson`, `eu_cities.geojson`) rather than from
+`prepare-world.ts`'s worldwide resolution. Investigating why
+`eu_cities.geojson` (313MB, gitignored, un-backed-up — see "Orphan
+inputs") couldn't be replaced surfaced that it didn't need to be: both
+files are OSM `admin_level=10`-equivalent data resolved per-country, and
+`prepare-world.ts`'s own per-country `COUNTRY_ADMIN_LEVELS` resolution
+already does the same job, more accurately, for every country in the
+world (confirmed: `data/03-final/world.bin`'s NL data resolves real
+cities in every Dutch province, where the old Zuid-Holland fixture only
+ever had cities in Zuid-Holland itself — see "Orphan inputs" below and
+`compressor/test/zuid-holland.test.ts`'s "every province has real cities"
+test).
+
+`data-ingest/src/filter-by-scope.ts` replaces both scripts with one tool:
+given `--only-country <CODE[,CODE...]>` or `--only-continent <name>`
+(Natural Earth's `CONTINENT` field, e.g. `"Europe"` — 51 countries,
+different from `eu_cities.geojson`'s old Geofabrik-extract-shaped
+coverage, which included Turkey/Cyprus), it filters
+`data/02-resolved/world/*` down to that scope and writes the same four
+file shapes the compressor CLI already expects. This deleted the "0
+cities outside Zuid-Holland" property of the old fixture (see the test
+file above) — Section 7.2's "a region MAY have 0 cities" rule is still
+exercised, just by `compressor/test/build.test.ts`'s synthetic fixture
+instead of a real-world one.
 
 ## Stage diagram (current)
 
@@ -46,32 +93,42 @@ data/00-raw/
 │                            download: scripts/download-geonames-naturalearth.sh
 ├── natural-earth/           ne_10m_admin_0_countries.geojson
 │                            download: scripts/download-geonames-naturalearth.sh
-└── orphan/                  nl_cities.geojson, eu_cities.geojson --
-                              NOT downloadable, see "Orphan inputs" below
+└── orphan/                  nl_cities.geojson -- NOT downloadable, not
+                              currently read by anything, see "Orphan
+                              inputs" below (eu_cities.geojson used to
+                              live here too; deleted along with
+                              prepare-europe.ts, the only thing that read it)
         (all of data/00-raw/ is gitignored except orphan/, which is committed
         -- see "Gitignore quick reference")
 
         │ Dockerfile.tools (repo root) + osmium, via
-        │ data-ingest/scripts/extract-boundaries.sh (World, scripted)
-        │ or a manual docker command (NL/EU, see README's "Reproducing")
+        │ data-ingest/scripts/extract-boundaries.sh
         ▼
 data/01-extracted/           osmium-exported admin boundaries (gitignored)
-├── world/*-admin.{osm.pbf,geojson}   scripted (extract-boundaries.sh)
-├── nl/nl-admin.{osm.pbf,geojson}     manual (README's "Reproducing" section)
-└── eu/eu-admin.{osm.pbf,geojson}     LEGACY -- not reproducible by any
-                                       current script (extract-boundaries.sh
-                                       only targets world/); also holds two
-                                       unused leftover experiment files,
-                                       countries.geojson and france-only.*
+└── world/*-admin.{osm.pbf,geojson}   the only stage-1 output any current
+                                       script reads (extract-boundaries.sh
+                                       always targets world/)
 
-        │ prepare-zuid-holland.ts / prepare-europe.ts / prepare-world.ts
+    (data/01-extracted/nl/, data/01-extracted/eu/ may still exist on disk
+    locally -- nothing deletes old gitignored files automatically -- but
+    nothing reads them any more; safe to remove)
+
+        │ prepare-world.ts
         ▼
-data/02-resolved/             resolved hierarchy + geometry, per pipeline
-├── nl/{regions.json, zuid-holland-cities.geojson, provinces.geojson, country.geojson}   committed
-├── eu/{hierarchy.json, regions.geojson, country-polygons.geojson}                        committed
-├── eu/cities-filtered.geojson                                                            gitignored (327MB)
-├── world/{hierarchy.json, regions.geojson, country-polygons.geojson}                     committed
-└── world/cities-filtered.geojsonseq                                                      gitignored (4.4GB)
+data/02-resolved/world/       committed except cities-filtered.geojsonseq
+├── hierarchy.json
+├── regions.geojson
+├── country-polygons.geojson
+└── cities-filtered.geojsonseq   gitignored (4.4GB)
+
+        │ filter-by-scope.ts --only-country NL / --only-continent Europe
+        ▼
+data/02-resolved/{nl,eu}/     committed except the cities file
+├── hierarchy.json
+├── regions.geojson
+├── country-polygons.geojson
+├── nl/cities-filtered.geojson       committed (38MB)
+└── eu/cities-filtered.geojsonseq    gitignored (2.1GB)
 
         │ compressor/src/cli.ts (cgeodata-compress)
         ▼
@@ -132,40 +189,36 @@ that's an intentionally separate, explicit step (currently ~85GB, hours
 to fetch), not something that should happen silently as a side effect of
 every build.
 
-## Orphan inputs: `data/00-raw/orphan/{nl,eu}_cities.geojson`
+## Orphan input: `data/00-raw/orphan/nl_cities.geojson`
 
-These were produced by `scripts/extract_boundaries.py` /
-`scripts/extract_boundaries_europe.py` — the deleted Python prototype
-(see README's "Historical record" section and this repo's `CLAUDE.md`,
-which explicitly forbids resurrecting `scripts/`/`webapp/`). Nothing in
-the current TypeScript pipeline regenerates them; despite living in
-`data/00-raw/` alongside downloadable inputs, there is no download script
-or extraction step that produces them from scratch. If they are ever
-lost, the Zuid-Holland and Europe pipelines (`prepare-zuid-holland.ts`,
-`prepare-europe.ts`) cannot be rebuilt until a replacement is written.
-Full detail in `data/00-raw/orphan/README.md`.
+Produced by `scripts/extract_boundaries.py` — the deleted Python
+prototype (see README's "Historical record" section and this repo's
+`CLAUDE.md`, which explicitly forbids resurrecting `scripts/`/`webapp/`).
+Nothing in the current TypeScript pipeline regenerates it, and — since
+`prepare-zuid-holland.ts`'s deletion — nothing reads it either any more.
+It's kept committed rather than deleted only because that's its own
+separate decision; `data/00-raw/orphan/README.md` (kept as the historical
+record of the investigation) documents why it's safe to eventually
+remove.
 
-Traced further: `nl_cities.geojson` is OSM `admin_level=10` ("woonplaats")
-data, spatially resolved to its containing municipality/province — see
-README.md's "Data source" section. This is **exactly** what
-`countryAdminLevels.ts` already lists for the Netherlands today
-(`NL: { region: [4], city: [10] }`), and exactly what `prepare-world.ts`'s
-generic per-country resolution already does for all 239 countries.
-Spot-checked: `data/03-final/world.bin` already resolves NL at least as
-well as `zuid-holland.bin` does (e.g. Utrecht gets a real city name,
-`Achterveld`, in `world.bin`, where `zuid-holland.bin` has no city data
-there at all — it's scoped to Zuid-Holland province's 187 cities only).
-`eu_cities.geojson` looks like the same idea at European scale (202k
-features, same id/municipality/region/country shape).
+`eu_cities.geojson` (313MB, produced by the equivalent
+`scripts/extract_boundaries_europe.py`) was deleted along with
+`prepare-europe.ts`, the only thing that ever read it — see git history
+around the `filter-by-scope.ts` commit if the file itself is needed
+again (it was gitignored, so it isn't recoverable from git; only from
+whatever local/backup copies exist outside this repo).
 
-This means the Zuid-Holland and Europe pipelines' *raw data problem* may
-already be solved by the World pipeline — but retiring them (or replacing
-their inputs with something derived from World's own extracts) is a
-separate, larger decision than this restructuring's scope, since
-Zuid-Holland and Europe currently serve as the fast, small-scale
-iteration fixtures the worldwide build is too slow/heavy for (`CLAUDE.md`:
-"prefer the Zuid-Holland or Europe build when iterating on compressor
-logic"). Not acted on here — flagged for a future decision.
+Both were OSM `admin_level=10`-equivalent polygons, spatially resolved to
+their containing municipality/region — see README.md's "Data source"
+section for the original NL extraction method. This is **exactly** what
+`prepare-world.ts`'s generic per-country `COUNTRY_ADMIN_LEVELS`
+resolution already does for all 239 countries (confirmed:
+`data/03-final/world.bin` resolves NL at least as well as the old
+Zuid-Holland fixture did — e.g. Utrecht gets a real city name,
+`Achterveld`, where the old fixture had no city data there at all, since
+it only ever had Zuid-Holland's own 187 cities). `filter-by-scope.ts` is
+the tool that made both orphan files unnecessary — see "Why
+prepare-zuid-holland.ts/prepare-europe.ts were deleted" above.
 
 ## `agent-resources/`
 
@@ -191,9 +244,10 @@ data/00-raw/geonames/           gitignored (downloadable)
 data/00-raw/natural-earth/       gitignored (downloadable)
 data/00-raw/orphan/             COMMITTED -- not downloadable, see above
 data/01-extracted/              gitignored (all of it)
-data/02-resolved/eu/cities-filtered.geojson       gitignored (327MB)
+data/02-resolved/eu/cities-filtered.geojsonseq     gitignored (2.1GB)
 data/02-resolved/world/cities-filtered.geojsonseq  gitignored (4.4GB)
-(everything else in data/02-resolved/ is committed)
+(everything else in data/02-resolved/, including nl/cities-filtered.geojson
+ at 38MB, is committed)
 data/03-final/{world_high_res,world_no_chunk}.bin   gitignored, on-demand
 data/03-final/world.{search,locate}-index.bin       gitignored, on-demand
 (zuid-holland.bin, europe.bin, world.bin, appendix-a-example.bin are committed)
@@ -205,20 +259,20 @@ node_modules/  dist/  playwright-report/  test-results/  cgeodata-demo.tar.gz
 
 ## Hardcoded path constants
 
-No script here takes a `--input-dir`/`--output-dir` flag; every stage
-boundary is a literal path constant, so a future move means editing all
-of these together by hand:
+No script here takes a `--input-dir`/`--output-dir` flag (except
+`filter-by-scope.ts`'s own `--out-dir`); every other stage boundary is a
+literal path constant, so a future move means editing all of these
+together by hand:
 
 - `data-ingest/scripts/extract-boundaries.sh` — `OSM_DIR`, `WORK_DIR`
 - `data-ingest/scripts/download-osm.sh` — `OSM_DIR`, the `REGIONS` map
 - `data-ingest/scripts/download-geonames-naturalearth.sh` — `RAW_DIR`
-- `data-ingest/src/prepare-zuid-holland.ts` — `CITIES_SOURCE`,
-  `PROVINCES_SOURCE`, `COUNTRIES_SOURCE`, `HIERARCHY_OUT`, `CITIES_OUT`,
-  `PROVINCES_OUT`, `COUNTRY_OUT`
-- `data-ingest/src/prepare-europe.ts` — same shape
 - `data-ingest/src/prepare-world.ts` — `WORK_DIR`, `COUNTRIES_SOURCE`,
   `CITIES500_SOURCE`, `ADMIN1_CODES_SOURCE`, `HIERARCHY_OUT`, `CITIES_OUT`,
   `REGIONS_OUT`, `COUNTRIES_OUT`
+- `data-ingest/src/filter-by-scope.ts` — `WORLD_DIR` (its four `*_SOURCE`
+  constants), `NATURAL_EARTH_SOURCE`; `--out-dir` is the one genuinely
+  parameterized path in this whole pipeline
 - `demo/src/server.ts`, `demo/playwright.config.ts` — default/test `.bin` path
 - `build-world-on-remote-machine.sh` — `REQUIRED_DATA_FILES`, rsync
   excludes, the remote compressor invocation

@@ -39,8 +39,8 @@ test("51.970738, 4.123725 resolves to Europoort, not Hoek van Holland", { skip }
 test("52.035122, 4.390090 (Den Haag/Nootdorp border) resolves to a city, not just the region", { skip }, () => {
   const reader = CGeoDataReader.open(BIN_PATH);
   const result = reader.query(52.035122, 4.39009);
-  assert.deepEqual(result.country, ["Nederland", "The Netherlands"]);
-  assert.deepEqual(result.region, ["Zuid-Holland"]);
+  assert.deepEqual(result.country, ["Netherlands"]);
+  assert.deepEqual(result.region, ["Zuid-Holland", "South Holland"]);
   assert.ok(result.city?.[0] === "Den Haag" || result.city?.[0] === "Nootdorp", `got city=${result.city}`);
 });
 

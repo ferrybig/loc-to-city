@@ -4,21 +4,20 @@ data/*.o5m
 # gitignored (large, reproducible via download-*.sh / extract-boundaries.sh,
 # except data/00-raw/orphan/ -- see its README). nl_cities.geojson (43MB)
 # is committed despite being in that same NOT-reproducible orphan/
-# directory; eu_cities.geojson (313MB) is kept gitignored instead, since
-# GitHub rejects pushes containing a 300MB+ blob in history -- see
-# data/00-raw/orphan/README.md for the backup risk this creates and the
-# planned fix (replace it with something derived from the World
-# pipeline's own OSM extracts, or regenerate it some other way).
+# directory -- it's unused now (filter-by-scope.ts replaced both
+# prepare-zuid-holland.ts and prepare-europe.ts, see
+# data/00-raw/orphan/README.md), kept only because deleting it is a
+# separate decision.
 data/00-raw/osm/
 data/00-raw/geonames/
 data/00-raw/natural-earth/
-data/00-raw/orphan/eu_cities.geojson
 data/01-extracted/
 
 # Stage 2: only the two multi-GB filtered-city files are gitignored --
 # everything else in data/02-resolved/ (hierarchy/regions/country-polygons
-# JSON, all small) is committed.
-data/02-resolved/eu/cities-filtered.geojson
+# JSON, all small; NL's cities-filtered.geojson is only 38MB, committed)
+# is committed.
+data/02-resolved/eu/cities-filtered.geojsonseq
 data/02-resolved/world/cities-filtered.geojsonseq
 
 data/search-index/

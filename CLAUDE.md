@@ -177,12 +177,16 @@ npx tsx compressor/src/cli.ts <hierarchy.json> <cities.geojson|.geojsonseq> <out
   ordering logic in `quadtree.ts`/`chunkWorkerPool.ts` without rerunning it.
 
 Existing small/medium datasets to build against, in increasing size:
-`data-ingest/src/prepare-zuid-holland.ts` → `data/03-final/zuid-holland.bin`,
-`data-ingest/src/prepare-europe.ts` → `data/03-final/europe.bin`,
-`data-ingest/src/prepare-world.ts` (invoked via
-`data-ingest/scripts/build-world.sh`) → `data/03-final/world.bin`. Rerunning the
-worldwide build is multi-hour and memory-heavy (see below) — prefer the
-Zuid-Holland or Europe build when iterating on compressor logic.
+`data-ingest/src/filter-by-scope.ts --only-country NL` (filtered from the
+worldwide pipeline's own output, see `data-ingest/PIPELINE-STAGES.md`) →
+`data/03-final/zuid-holland.bin`, `filter-by-scope.ts --only-continent
+Europe` → `data/03-final/europe.bin`, `data-ingest/src/prepare-world.ts`
+(invoked via `data-ingest/scripts/build-world.sh`) →
+`data/03-final/world.bin`. A worldwide build (`prepare-world.ts` +
+`data/02-resolved/world/*`) must exist before either scoped one can be
+filtered from it. Rerunning the worldwide build is multi-hour and
+memory-heavy (see below) — prefer the Zuid-Holland or Europe build when
+iterating on compressor logic.
 
 ### Worldwide extraction/build pipeline
 

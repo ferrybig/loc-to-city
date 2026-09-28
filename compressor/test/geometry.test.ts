@@ -157,12 +157,12 @@ function makeRng(seed: number): () => number {
 }
 
 test("containsPoint agrees with turf on real, complex province geometry", () => {
-  // nl-provinces.geojson is real OSM/BAG-derived data with exactly the
-  // shapes that made this worth replacing turf for in the first place:
-  // holes (a province with a city carved out), MultiPolygons (islands),
-  // and enough vertices per ring to exercise the banded ray cast, not
-  // just the plain one.
-  const provinces = JSON.parse(readFileSync(path.resolve(__dirname, "../../data/02-resolved/nl/provinces.geojson"), "utf8")) as FeatureCollection<
+  // regions.geojson (filtered to NL, see filter-by-scope.ts) is real
+  // OSM-derived data with exactly the shapes that made this worth
+  // replacing turf for in the first place: holes (a province with a city
+  // carved out), MultiPolygons (islands), and enough vertices per ring to
+  // exercise the banded ray cast, not just the plain one.
+  const provinces = JSON.parse(readFileSync(path.resolve(__dirname, "../../data/02-resolved/nl/regions.geojson"), "utf8")) as FeatureCollection<
     Polygon | MultiPolygon
   >;
   assert.ok(provinces.features.length > 0, "fixture must actually have provinces to test against");
