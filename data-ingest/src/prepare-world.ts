@@ -23,7 +23,7 @@
 // pieces; this file just orchestrates them and writes the same output
 // shapes prepare-europe.ts already produces, so the compressor CLI needs
 // no changes at all.
-import { createWriteStream, writeFileSync } from "node:fs";
+import { createWriteStream, mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import bbox from "@turf/bbox";
@@ -110,6 +110,8 @@ function planCountryBatches(index: AdminBoundaryIndex, primary: PrimaryLevelResu
 }
 
 async function main(): Promise<void> {
+  mkdirSync(path.dirname(HIERARCHY_OUT), { recursive: true });
+
   const files = discoverAdminGeoJsonFiles(WORK_DIR);
   if (files.length === 0) {
     throw new Error(`no *-admin.geojson files found in ${WORK_DIR} -- run scripts/extract-boundaries.sh first`);
