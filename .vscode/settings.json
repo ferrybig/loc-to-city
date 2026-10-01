@@ -1,5 +1,8 @@
 {
 	"cSpell.words": [
+		"CGEODATA",
+		"geonames",
+		"naturalearth",
 		"varint"
 	],
 	"js/ts.tsdk.path": "node_modules/typescript/lib"
