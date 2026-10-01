@@ -205,12 +205,15 @@ npm test -w compressor                     # synthetic-dataset unit tests + (if 
 # see data/00-raw/orphan/README.md), filtered from the worldwide
 # pipeline's own already-resolved output
 # (data/02-resolved/world/, built by data-ingest/src/prepare-world.ts;
-# see "Worldwide build" below -- a worldwide build must exist first).
-npx tsx data-ingest/src/filter-by-scope.ts --only-country NL --out-dir data/02-resolved/nl
-npx tsx compressor/src/cli.ts data/02-resolved/nl/hierarchy.json data/02-resolved/nl/cities-filtered.geojson \
-  data/03-final/zuid-holland.bin --regions data/02-resolved/nl/regions.geojson --countries data/02-resolved/nl/country-polygons.geojson \
-  --width-exp 6 --height-exp 6 --max-depth 10 --keyframe-exp 13 \
-  --attribution "[OpenStreetMap](https://openstreetmap.org/copyright)"
+# see "Worldwide build" below -- a worldwide build must exist first, and
+# `make netherlands` builds it as a prerequisite automatically).
+make netherlands
+# equivalent to:
+#   npx tsx data-ingest/src/filter-by-scope.ts --only-country NL --out-dir data/02-resolved/nl
+#   npx tsx compressor/src/cli.ts data/02-resolved/nl/hierarchy.json data/02-resolved/nl/cities-filtered.geojsonseq \
+#     data/03-final/zuid-holland.bin --regions data/02-resolved/nl/regions.geojson --countries data/02-resolved/nl/country-polygons.geojson \
+#     --width-exp 6 --height-exp 6 --max-depth 10 --keyframe-exp 13 \
+#     --attribution "[OpenStreetMap](https://openstreetmap.org/copyright)"
 
 npm test -w compressor                     # now also runs the Zuid-Holland structural + query tests
 
@@ -310,14 +313,17 @@ differently, by the worldwide pipeline's own per-country
 that variance problem was first found, not as current build instructions.
 
 **Current build command** (requires a worldwide build to exist first --
-see "Worldwide build" below):
+see "Worldwide build" below, and `make europe` builds it as a prerequisite
+automatically):
 
 ```bash
-npx tsx data-ingest/src/filter-by-scope.ts --only-continent Europe --out-dir data/02-resolved/eu
-npx tsx compressor/src/cli.ts data/02-resolved/eu/hierarchy.json data/02-resolved/eu/cities-filtered.geojsonseq \
-  data/03-final/europe.bin --regions data/02-resolved/eu/regions.geojson --countries data/02-resolved/eu/country-polygons.geojson \
-  --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 13 \
-  --attribution "[OpenStreetMap](https://openstreetmap.org/copyright)" --workers 6
+make europe
+# equivalent to:
+#   npx tsx data-ingest/src/filter-by-scope.ts --only-continent Europe --out-dir data/02-resolved/eu
+#   npx tsx compressor/src/cli.ts data/02-resolved/eu/hierarchy.json data/02-resolved/eu/cities-filtered.geojsonseq \
+#     data/03-final/europe.bin --regions data/02-resolved/eu/regions.geojson --countries data/02-resolved/eu/country-polygons.geojson \
+#     --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 13 \
+#     --attribution "[OpenStreetMap](https://openstreetmap.org/copyright)" --workers 6
 ```
 
 The historical command and result below are kept as a record of the
@@ -382,7 +388,21 @@ both open follow-ups before this is production-scale. (The `touches`/
 pushing depth further worldwide is still blocked on the small-territory
 coarse-polygon issue documented there.)
 
-### Worldwide build (`data-ingest/scripts/build-world.sh`)
+### Worldwide build (`make world`)
+
+**Historical note:** everything below up to the build command was written
+when `data/00-raw/osm/` held one `.osm.pbf` per continent (Geofabrik
+extracts), each fed through `data-ingest/scripts/build-world.sh`. Both have
+since been replaced: `data/00-raw/osm/` now holds a single whole-planet
+`planet-latest.osm.pbf` (`data-ingest/scripts/download-osm.sh`, see
+`data-ingest/PIPELINE-STAGES.md`), and `build-world.sh` was deleted in
+favor of the root `Makefile`'s `make world` target, which chains the same
+steps (download → Docker-based extraction → `prepare-world.ts` →
+compressor) and skips whatever's already up to date. The cross-file
+relation-id dedup and per-country admin-level detection this section
+describes are unaffected by that change -- a single planet file still goes
+through the same merge/dedup/detection logic, it just never has more than
+one file to merge in the first place.
 
 At the time this section was written, Europe's pipeline only worked
 because `data/eu_cities.geojson` already existed -- cities with region and
@@ -428,16 +448,19 @@ An RSS guardrail aborts with an actionable message rather than repeating
 the whole-machine OOM that this project already hit once.
 
 ```bash
-data-ingest/scripts/build-world.sh                    # everything in data/00-raw/osm/
-data-ingest/scripts/build-world.sh australia-oceania-260918   # one continent, end to end
+make world    # download, extract, resolve, compress -- whatever's already
+              # up to date is skipped
 ```
 
-Extraction skips any file whose output is already newer than its input, so
-swapping one `.osm.pbf` and re-running only re-extracts that one. File
-discovery is by glob, not a hardcoded continent list -- dropping in a new
-`africa-*.osm.pbf` needs no code change.
+The historical commands below (`data-ingest/scripts/build-world.sh`, with
+a positional arg to scope extraction to one continent file's basename) are
+no longer runnable -- there's only one `.osm.pbf` now, so there's nothing
+left to scope extraction *to*. Extraction still skips re-work the same
+way: the admin-boundary GeoJSON is only regenerated if it's older than the
+planet file.
 
-Run on `australia-oceania` (30,562 boundary relations): 21 countries get a
+Run on `australia-oceania` (30,562 boundary relations, back when that was
+its own extract file): 21 countries get a
 primary level, 15,800 primary + 147 gap-filled cities, 14,887 kept after
 dropping 5 unnamed and 1,055 with no region. Australia resolves at
 `admin_level=9` (gazetted localities -- Sydney, Melbourne and their
@@ -454,8 +477,8 @@ history rewrite, none of `data/` is committed to git any more except
 `data/00-raw/orphan/README.md` and `data/03-final/appendix-a-example.bin`
 (see `data-ingest/PIPELINE-STAGES.md`) -- `world.bin` and its inputs,
 including the 4.0GB `cities-filtered.geojsonseq`, are all local,
-reproducible build output, rebuilt via `data-ingest/scripts/build-world.sh`
-rather than tracked in git.
+reproducible build output, rebuilt via `make world` rather than tracked in
+git.
 
 Ingest deduplicated 922,077 unique relations across all 8 files (29,781
 cross-file duplicates dropped -- Russia and Turkey's transcontinental

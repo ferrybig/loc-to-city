@@ -32,8 +32,8 @@ export interface CountryAdminLevels {
 
 /**
  * Per-country admin_level choice for the region and city tiers, generated
- * against the real worldwide OSM corpus (see
- * data-ingest/scripts/build-world.sh's Pass 1 output) by picking, per
+ * against the real worldwide OSM corpus (see prepare-world.ts's Pass 1
+ * output, run via `make world`) by picking, per
  * country, whichever admin_level's total candidate area best matches the
  * country's own Natural Earth area -- region levels scanned from [4, 5, 6]
  * (coarsest wins a tie), city levels from [5..11] (finest level clearing

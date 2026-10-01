@@ -19,7 +19,8 @@ spec fixture, not pipeline output). A fresh clone has an essentially
 empty `data/` and must run the download + build scripts to populate it.
 
 ```
-data/00-raw/          external downloads + one orphan Python-prototype
+data/00-raw/          external downloads (including planet-latest.osm.pbf,
+                       fetched via BitTorrent) + one orphan Python-prototype
                        output (nl_cities.geojson, gitignored -- see
                        "Orphan inputs" below)
 data/01-extracted/    osmium-exported admin boundaries (World only, now)
@@ -94,7 +95,8 @@ instead of a real-world one.
 
 ```
 data/00-raw/
-├── osm/                     Geofabrik continent extracts (*.osm.pbf)
+├── osm/                     planet-latest.osm.pbf (whole-planet extract,
+│                            fetched via BitTorrent)
 │                            download: scripts/download-osm.sh
 ├── geonames/                cities500.txt, admin1CodesASCII.txt
 │                            download: scripts/download-geonames-naturalearth.sh
@@ -170,33 +172,27 @@ OUTSIDE ALL PIPELINES:
 
 `data-ingest/scripts/download-geonames-naturalearth.sh` fetches the two
 GeoNames files and Natural Earth's country outlines into
-`data/00-raw/{geonames,natural-earth}/`. `data-ingest/scripts/download-osm.sh`
-fetches every OSM continent extract from Geofabrik into `data/00-raw/osm/`.
-Both:
+`data/00-raw/{geonames,natural-earth}/`, writing atomically (download to
+`<dest>.part`, `mv` into place) and conditionally (`lib/download.sh`'s
+`download_file` stores the server's ETag in a `<dest>.etag` sidecar and
+sends `If-None-Match` on the next run, so re-running when nothing changed
+costs one small request per file instead of re-downloading gigabytes).
 
-- write atomically (download to `<dest>.part`, `mv` into place, so a
-  killed download never leaves a corrupt file);
-- are conditional (`lib/download.sh`'s `download_file` stores the
-  server's ETag in a `<dest>.etag` sidecar and sends `If-None-Match` on
-  the next run, so re-running either script when nothing changed costs
-  one small request per file instead of re-downloading gigabytes).
+`data-ingest/scripts/download-osm.sh` fetches the whole planet as a single
+`planet-latest.osm.pbf` via BitTorrent (`aria2c`, per
+https://wiki.openstreetmap.org/wiki/Planet.osm#Downloading) into
+`data/00-raw/osm/`, replacing the old per-continent Geofabrik extracts (and
+the separate Netherlands-only extract) with one canonical, always-current
+file. It doesn't use `lib/download.sh` -- a torrent client handles its own
+resume/integrity checking, unlike a plain HTTP `curl`.
 
-`download-osm.sh` pins every continent to the most recent first-of-month
-Geofabrik snapshot rather than `-latest` or today's exact date — Geofabrik
-only retains a rolling ~10 days of daily snapshots (a fixed historical
-date like `africa-260918.osm.pbf` stops being fetchable once that window
-passes) but keeps first-of-month snapshots indefinitely. It uses *last*
-month's 1st specifically, to avoid a race in the first few days of a new
-month before that month's snapshot has necessarily been cut. Netherlands
-is the one exception, kept on `-latest`, since its filename is hardcoded
-elsewhere (`extract-boundaries.sh`'s `EXCLUDE`, README's manual docker
-command) and it's a small, manually-run pipeline where exact-snapshot
-reproducibility matters far less than for the multi-hour worldwide build.
-
-Neither script is wired into `build-world.sh` for the OSM download --
-that's an intentionally separate, explicit step (currently ~85GB, hours
-to fetch), not something that should happen silently as a side effect of
-every build.
+Neither script is wired into the root `Makefile`'s `world` target for the
+OSM download -- that's an intentionally separate, explicit step (currently
+~80GB, hours to fetch), not something that should happen silently as a
+side effect of every build. (`make world` does have its own `download-osm.sh`
+file rule, since Make can detect the file's absence cheaply; it's the
+*cost* of the download that's meant to stay an explicit, visible step, not
+the dependency edge itself.)
 
 ## Orphan input: `data/00-raw/orphan/nl_cities.geojson`
 
@@ -273,7 +269,7 @@ literal path constant, so a future move means editing all of these
 together by hand:
 
 - `data-ingest/scripts/extract-boundaries.sh` — `OSM_DIR`, `WORK_DIR`
-- `data-ingest/scripts/download-osm.sh` — `OSM_DIR`, the `REGIONS` map
+- `data-ingest/scripts/download-osm.sh` — `OSM_DIR`
 - `data-ingest/scripts/download-geonames-naturalearth.sh` — `RAW_DIR`
 - `data-ingest/src/prepare-world.ts` — `WORK_DIR`, `COUNTRIES_SOURCE`,
   `CITIES500_SOURCE`, `ADMIN1_CODES_SOURCE`, `HIERARCHY_OUT`, `CITIES_OUT`,

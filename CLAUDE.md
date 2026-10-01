@@ -177,23 +177,32 @@ npx tsx compressor/src/cli.ts <hierarchy.json> <cities.geojson|.geojsonseq> <out
   ordering logic in `quadtree.ts`/`chunkWorkerPool.ts` without rerunning it.
 
 Existing small/medium datasets to build against, in increasing size:
-`data-ingest/src/filter-by-scope.ts --only-country NL` (filtered from the
-worldwide pipeline's own output, see `data-ingest/PIPELINE-STAGES.md`) →
-`data/03-final/zuid-holland.bin`, `filter-by-scope.ts --only-continent
-Europe` → `data/03-final/europe.bin`, `data-ingest/src/prepare-world.ts`
-(invoked via `data-ingest/scripts/build-world.sh`) →
-`data/03-final/world.bin`. A worldwide build (`prepare-world.ts` +
-`data/02-resolved/world/*`) must exist before either scoped one can be
-filtered from it. Rerunning the worldwide build is multi-hour and
-memory-heavy (see below) — prefer the Zuid-Holland or Europe build when
+`make netherlands` (`filter-by-scope.ts --only-country NL`, filtered from
+the worldwide pipeline's own output, see `data-ingest/PIPELINE-STAGES.md`)
+→ `data/03-final/zuid-holland.bin`, `make europe`
+(`filter-by-scope.ts --only-continent Europe`) → `data/03-final/europe.bin`,
+`make world` (`data-ingest/src/prepare-world.ts` +
+`compressor/src/cli.ts`) → `data/03-final/world.bin`. A worldwide build
+(`prepare-world.ts` + `data/02-resolved/world/*`) must exist before either
+scoped one can be filtered from it — `make` builds it as a prerequisite
+automatically. Rerunning the worldwide build is multi-hour and
+memory-heavy (see below) — prefer `make netherlands` or `make europe` when
 iterating on compressor logic.
 
 ### Worldwide extraction/build pipeline
 
 ```bash
-data-ingest/scripts/build-world.sh                          # everything in data/00-raw/osm/
-data-ingest/scripts/build-world.sh australia-oceania-260918  # one continent, end to end
+make world    # download planet.osm.pbf + geonames/natural-earth, build the
+              # Docker extraction image, extract, resolve, and compress --
+              # whatever's already up to date is skipped
 ```
+
+Each stage is also reachable on its own: `make download` (raw inputs only),
+`make extract` (boundary extraction only), `make docker-image` (just the
+`loc2city-tools` image). There's no more per-continent scoping at the
+extraction stage — `data/00-raw/osm/` holds a single whole-planet
+`planet-latest.osm.pbf` now, not per-continent Geofabrik extracts (see
+`data-ingest/PIPELINE-STAGES.md`).
 
 Runs `extract-boundaries.sh` (osmium, via the `loc2city-tools` Docker
 image — `docker build -t loc2city-tools -f Dockerfile.tools .`), then

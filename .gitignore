@@ -30,6 +30,7 @@ __pycache__/
 agent-resources/
 
 node_modules/
+.docker-image-stamp
 dist/
 playwright-report/
 test-results/
