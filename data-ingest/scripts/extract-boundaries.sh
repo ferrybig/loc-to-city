@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
-# Filters every .osm.pbf in data/00-raw/osm/ down to boundary=administrative
-# relations and exports them to GeoJSON Text Sequence, via the
-# loc2city-tools Docker image (osmium-tool). Skips a file whose output is
-# already newer than its input, so re-running after swapping in a new/
-# updated continent extract only redoes that one file -- see README's
-# "Reproducing" section.
+# Filters every .osm.pbf in data/00-raw/osm/ (normally just
+# planet-latest.osm.pbf) down to boundary=administrative relations and
+# exports them to GeoJSON Text Sequence, via the loc2city-tools Docker image
+# (osmium-tool). Skips a file whose output is already newer than its input,
+# so re-running after swapping in an updated planet file only redoes that
+# file -- see README's "Reproducing" section.
 #
 # Usage:
-#   scripts/extract-boundaries.sh                  # every *.osm.pbf except netherlands
-#   scripts/extract-boundaries.sh europe-latest russia-260918   # a subset, by basename
+#   scripts/extract-boundaries.sh                  # every *.osm.pbf
+#   scripts/extract-boundaries.sh planet-latest     # a subset, by basename
 set -euo pipefail
 cd "$(dirname "$0")/../.."   # repo root
 
 OSM_DIR="data/00-raw/osm"
 WORK_DIR="data/01-extracted/world"
-EXCLUDE="netherlands-latest.osm.pbf"
 
 mkdir -p "$WORK_DIR"
 
@@ -34,10 +33,6 @@ for pbf in "${targets[@]}"; do
     continue
   fi
   base="$(basename "$pbf" .osm.pbf)"
-  if [ "$(basename "$pbf")" = "$EXCLUDE" ]; then
-    echo "skip $base (excluded: not part of the worldwide build)"
-    continue
-  fi
 
   admin_pbf="$WORK_DIR/${base}-admin.osm.pbf"
   admin_geojson="$WORK_DIR/${base}-admin.geojson"
