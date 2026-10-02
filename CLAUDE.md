@@ -104,14 +104,25 @@ only the lists a query needs; `useSearchIndex()` (the CLI's `--index` /
 which places get checked, so results must stay identical with and
 without it -- `reader/test/searchIndex.test.ts` asserts that, and
 builds Appendix B.12's worked example byte for byte; compare timings
-against `--no-index`. `--sort` scores each match in Appendix B.5's
-relevance order -- exact name match beats whole-word match beats plain
-substring, city beats region beats country (`reader/src/relevance.ts`,
-shared by the search and the short-query table builder, which must
-rank identically) -- and has to score every match before yielding any,
-since the best one isn't necessarily the first found; plain `search`
-keeps the cheaper early-exit scan when `--limit` is given without
-`--sort`.
+against `--no-index`. Matching and ranking both fold diacritics
+(`foldDiacritics`, NFD + strip combining marks + lowercase -- distinct
+from `foldSymbols`'s heavier, trigram-only folding, which also buckets
+digits/punctuation together and would be too loose for deciding how well
+something matches): `search data/03-final/world.bin munchen` finds
+München. `--sort` scores each match in Appendix B.5's relevance order --
+exact match beats whole-word match beats plain substring, each tier
+further split by whether the query's own spelling (not just its folded
+form) already reached it, then country beats city beats region
+(`reader/src/relevance.ts`, shared by the search and the short-query
+table builder, which must rank identically) -- and has to score every
+match before yielding any, since the best one isn't necessarily the
+first found; plain `search` keeps the cheaper early-exit scan when
+`--limit` is given without `--sort`. A sorted 1-2 character query only
+reads the short-query table when its own text needs no folding (an
+accented short query like `ë` always falls back to a live scan, since
+the table is keyed and scored by each key's own already-folded spelling,
+which can't represent the bonus a differently-spelled live query would
+get -- see Appendix B.6).
 
 `locate` (and `search --locate`) returns the centre of a place's
 representative cell (`binary-format.md` Section C.3): the area-weighted

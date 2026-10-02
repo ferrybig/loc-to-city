@@ -34,7 +34,7 @@ test("buildSearchIndex: reproduces Appendix B.12 byte for byte", () => {
 	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
 	const built = buildSearchIndex(reader, APPENDIX_B_OPTIONS);
 	reader.close();
-	assert.equal(built.length, 3207);
+	assert.equal(built.length, 3201);
 	assert.deepEqual(built, APPENDIX_B_BYTES);
 });
 
@@ -61,14 +61,14 @@ test("candidates: B.12.4's queries", () => {
 
 test("shortQuery: B.12.3's table entries", () => {
 	const index = SearchIndex.open(APPENDIX_B_BYTES);
-	assert.deepEqual(index.shortQuery("a"), [4, 5]);
-	assert.deepEqual(index.shortQuery("A"), [4, 5]); // lowercased, like search()
+	assert.deepEqual(index.shortQuery("a"), [0, 4]); // Nederland outranks Amsterdam/Zaandam
+	assert.deepEqual(index.shortQuery("A"), [0, 4]); // folded, like search()
 	assert.deepEqual(index.shortQuery(" "), [0]); // the first key of block 0
-	assert.deepEqual(index.shortQuery("en"), [6, 3]); // relevance order, not id order
-	assert.deepEqual(index.shortQuery("h"), [2, 0]);
-	assert.deepEqual(index.shortQuery("e"), [4, 6]); // no België: `e` isn't folded
+	assert.deepEqual(index.shortQuery("en"), [6, 3]); // city still outranks region
+	assert.deepEqual(index.shortQuery("h"), [0, 2]); // country now outranks region
+	assert.deepEqual(index.shortQuery("e"), [0, 1]); // both countries, folded: België counts now
 	assert.deepEqual(index.shortQuery("rd"), [4, 2]); // the first key of block 3
-	assert.deepEqual(index.shortQuery("ë"), [1]); // the last key of all
+	assert.deepEqual(index.shortQuery("ë"), [0, 1]); // folds to `e` before lookup, same entry
 	assert.deepEqual(index.shortQuery("nl"), []); // not a key: no match
 	assert.deepEqual(index.shortQuery("!"), []); // sorts before every key
 	assert.equal(index.shortQuery("dam"), undefined); // not 1-2 code points
@@ -162,7 +162,8 @@ test("SearchIndex.open: rejects a bad signature, kind, or version", () => {
 	assert.throws(() => SearchIndex.open(new Uint8Array(5)), /too short/);
 	assert.throws(() => SearchIndex.open(tampered((b) => (b[8] = 0x00))), /kind 0/);
 	assert.throws(() => SearchIndex.open(tampered((b) => (b[8] = 0x10))), /old bigram layout/);
-	assert.throws(() => SearchIndex.open(tampered((b) => (b[8] = 0x12))), /unsupported search index version 2/);
+	assert.throws(() => SearchIndex.open(tampered((b) => (b[8] = 0x11))), /predates diacritic folding/);
+	assert.throws(() => SearchIndex.open(tampered((b) => (b[8] = 0x13))), /unsupported search index version 3/);
 });
 
 test("SearchIndex.open: rejects out-of-range parameters and section lengths", () => {
@@ -269,20 +270,20 @@ for (const [name, options] of [
 }
 
 test("search: a sorted 1-2 character search with a small limit reads the short-query table", () => {
-	// Swap block 0's entry for `a` (`4 5`) to `5 4`: only an answer taken
-	// from the table can come out in that order.
+	// Swap block 0's entry for `a` (`0 4`, Nederland then Amsterdam) to
+	// `4 0`: only an answer taken from the table can come out in that order.
 	const swapped = tampered((b) => {
-		const entry = b.indexOf(0x61, 2881); // "a" NUL 02 04 05
-		assert.deepEqual([...b.subarray(entry, entry + 5)], [0x61, 0x00, 0x02, 0x04, 0x05]);
-		b[entry + 3] = 0x05;
-		b[entry + 4] = 0x04;
+		const entry = b.indexOf(0x61, 2881); // "a" NUL 02 00 04
+		assert.deepEqual([...b.subarray(entry, entry + 5)], [0x61, 0x00, 0x02, 0x00, 0x04]);
+		b[entry + 3] = 0x04;
+		b[entry + 4] = 0x00;
 	});
 	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
 	reader.useSearchIndex(swapped);
-	assert.deepEqual(ids(reader.search("a", { sort: true, limit: 2 })), [5, 4]);
+	assert.deepEqual(ids(reader.search("a", { sort: true, limit: 2 })), [4, 0]);
 	// Anything the table can't answer exactly falls back to the scan.
-	assert.deepEqual(ids(reader.search("a", { sort: true, limit: 3 })), [4, 5, 6]);
-	assert.deepEqual(ids(reader.search("a", { sort: true })).slice(0, 2), [4, 5]);
+	assert.deepEqual(ids(reader.search("a", { sort: true, limit: 3 })), [0, 4, 5]);
+	assert.deepEqual(ids(reader.search("a", { sort: true })).slice(0, 2), [0, 4]);
 	assert.deepEqual(ids(reader.search("a", { sort: true, limit: 2, level: "city" })), [4, 5]);
 	assert.deepEqual(ids(reader.search("a", { limit: 2 })), [0, 2]); // id order: Nederland, Noord-Holland
 	reader.close();
@@ -296,7 +297,7 @@ test("search: short-query places are confirmed, so a corrupt table can't add a w
 	});
 	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
 	reader.useSearchIndex(corrupt);
-	assert.deepEqual(ids(reader.search("a", { sort: true, limit: 2 })), [5]);
+	assert.deepEqual(ids(reader.search("a", { sort: true, limit: 2 })), [4]);
 	reader.close();
 });
 
@@ -451,7 +452,7 @@ test("CLI: search --index exits 1 when nothing matches", () => {
 test("CLI: search --index exits 2 on checksum mismatch", () => {
 	const badIndexBin = path.join(tmpDir, "bad.search-index.bin");
 	const indexBytes = readFileSync(indexBin);
-	// The checksum is at bytes 9–16 (after "CGEODATA" + version byte 0x11).
+	// The checksum is at bytes 9–16 (after "CGEODATA" + version byte 0x12).
 	indexBytes[9]! ^= 0xff;
 	writeFileSync(badIndexBin, indexBytes);
 	const r = run(["search", fixtureBin, "dam", "--index", badIndexBin]);

@@ -40,10 +40,19 @@ export {
 } from "./reader.js";
 export {
 	containsTokenRun,
+	EXACT_SPELLING_BONUS,
+	foldDiacritics,
 	LEVEL_BONUS,
 	nameMatchQuality,
+	type Needle,
 	placeMatchQuality,
+	prepareNeedle,
+	QUALITY_EXACT,
+	QUALITY_MAX,
+	QUALITY_SUBSTRING,
+	QUALITY_WHOLE_WORD,
 	tokenize,
+	tokenizeFolded,
 } from "./relevance.js";
 export {
 	buildSearchIndex,

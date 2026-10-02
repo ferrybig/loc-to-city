@@ -929,9 +929,21 @@ The index has the following properties:
 
 ### B.2. Symbol Folding
 
-Names and queries are reduced to sequences of **symbols**, which are
-non-negative integers, before their trigrams are taken. The procedure
-is:
+Names and queries are reduced in two stages, both used elsewhere in this
+appendix: first to their **folded form**, a plain string that is
+diacritic- and case-insensitive; then, for trigram purposes only, further
+to a sequence of **symbols**, non-negative integers that also collapse
+every ASCII digit together and every other ASCII punctuation/space
+character together. The folded form is what [Section B.5](#b5-relevance-order)
+and [Section B.6](#b6-short-query-table) compare and rank with; the
+symbol sequence is what trigrams ([Section B.3](#b3-trigrams-and-lists))
+are taken from. Keeping them distinct matters: the symbol sequence's
+digit/punctuation bucketing is the right call for keeping the number of
+trigram lists bounded, but it would make `5th` match `9th` as a
+substring, which is too loose for deciding whether, or how well, text
+actually matches a query.
+
+The folded form is produced by:
 
 1. Decompose the text into Unicode Normalization Form D [UAX15].
 2. Remove every code point in the Combining Diacritical Marks block,
@@ -939,7 +951,13 @@ is:
 3. Convert the result to lowercase with the Unicode default case
    conversion (the locale-independent `toLowercase()` of [UNICODE]
    Section 3.13).
-4. Map each remaining code point `c` to one symbol:
+
+Step 1 followed by step 2 turns `é` into `e`. Step 3 turns `E` into `e`.
+`ß`, `ø`, and `ł`, which have no decomposition, and every letter of a
+non-Latin script, pass through unchanged apart from case.
+
+The symbol sequence continues from the folded form with a fourth step,
+mapping each remaining code point `c` to one symbol:
 
 | Code points                     | Symbol |
 |---------------------------------|--------|
@@ -948,20 +966,27 @@ is:
 | any other code point below `U+0080` | `26`, the separator symbol |
 | any code point from `U+0080` up | `c` itself |
 
-Step 1 followed by step 2 turns `é` into `e`. Step 3 turns `E` into
-`e`. Step 4 puts all ASCII digits in one bucket and all ASCII spaces and
+Step 4 puts all ASCII digits in one bucket and all ASCII spaces and
 punctuation in another, and keeps every other character distinct: `ß`,
-`ø`, and `ł`, which have no decomposition, and every letter of a
-non-Latin script, are symbols of their own. Symbols `0` to `27` are the
-**Latin symbols**; every other symbol is at least `128`.
+`ø`, and `ł` and every letter of a non-Latin script are symbols of their
+own, same as in the folded form. Symbols `0` to `27` are the **Latin
+symbols**; every other symbol is at least `128`.
 
-The folding is lossy, but one code point never becomes more than one
-symbol, so any text that contains another as a substring contains it as
-a substring after folding too ([Section B.9](#b9-query-procedure)). It
-deliberately uses no Unicode character property beyond normalization
-and case conversion, so that a writer and a reader built against
-different versions of the Unicode Character Database fold the same
-text the same way. Writers and readers MUST use exactly this procedure.
+Both reductions are lossy, but one code point never becomes more than one
+folded character, and one folded character never becomes more than one
+symbol, so any text that contains another as a substring contains it as a
+substring after folding, and after taking symbols, too
+([Section B.9](#b9-query-procedure)). Step 4's bucketing means the symbol
+sequence is a *further*, coarser folding of the folded form -- so a
+comparison against the folded form alone (Sections B.5, B.6) is stricter
+than, and therefore safe to confirm trigram-index candidates with, a
+comparison against the symbol sequence ([Section B.9](#b9-query-procedure)
+explains why that direction is the one that matters). Neither stage uses
+any Unicode character property beyond normalization and case conversion,
+so that a writer and a reader built against different versions of the
+Unicode Character Database fold the same text the same way. Writers and
+readers MUST use exactly this procedure for both the folded form and the
+symbol sequence.
 
 ### B.3. Trigrams and Lists
 
@@ -1038,30 +1063,68 @@ A reader that returns search results ordered by relevance, rather than
 by ID, SHOULD use this order, and the short-query table
 ([Section B.6](#b6-short-query-table)) MUST be built with it.
 
-A place **matches** a query when the lowercase form of at least one
-field of its name entry contains the lowercase form of the query as a
-substring, lowercasing both with the Unicode default case conversion and
-no other normalization. The **quality** of a field that contains the
-query is:
+A place **matches** a query when the folded form
+([Section B.2](#b2-symbol-folding)) of at least one field of its name
+entry contains the folded form of the query as a substring. Folding
+before comparing means a query need not be typed with the right
+diacritics: `zurich` matches a field spelled `Zürich`.
 
-- `4` when the field's lowercase form equals the query's;
-- otherwise `2` when the query's **tokens** occur in the field's tokens
-  as a contiguous run, where the tokens of a text are its lowercase form
+The **tier** of a field that contains the query, against the folded
+form of both, is:
+
+- `40` when the field's folded form equals the query's;
+- otherwise `20` when the query's **tokens** occur in the field's tokens
+  as a contiguous run, where the tokens of a text are its folded form
   split at every code point whose General Category is not a letter (`L*`)
   or a number (`N*`), with empty tokens dropped;
-- otherwise `1`.
+- otherwise `10`.
 
-A field that does not contain the query has quality `0`. The quality of
-a place is the highest quality of its fields, and its **score** is its
-quality plus a level bonus: `4` for a city, `2` for a region, and `1`
-for a country. Results are ordered by descending score, and places with
-equal scores by ascending ID.
+A field that does not contain the query folded has tier `0` and, with
+it, **quality** `0`: nothing below distinguishes a non-match. A field
+that does contain it gets `1` added to its folded tier -- an **exact
+spelling bonus** -- when the *unfolded* comparison (plain lowercase, no
+decomposition or diacritic stripping) reaches that same tier against the
+*unfolded* query, i.e. when folding was not actually needed to reach it.
+Folding can only ever reach a tier the unfolded comparison also reaches
+or falls short of, never a better one, so "reaches the same tier" is
+exactly "the query's own spelling, as given, was already enough" --
+unlike the folded tier itself, the bonus is evaluated with no
+normalization beyond lowercasing, the same way [Section B.9](#b9-query-procedure)'s
+confirmation step is. A field's **quality** is its folded tier plus this
+bonus, so quality is one of `0`, `10`, `11`, `20`, `21`, `40`, `41`.
+
+The quality of a place is the highest quality of its fields, and its
+**score** is its quality plus a level bonus: `3` for a country, `2` for
+a city, `1` for a region. Results are ordered by descending score, and
+places with equal scores by ascending ID.
+
+The level bonus only ever breaks a tie between two places of equal
+quality: its spread (`3 - 1 = 2`) is kept well under the gap between any
+two quality values that differ in folded tier (`11` to `20` is `9`, `21`
+to `40` is `19`), so a worse tier can never outscore a better one no
+matter which levels are involved, and the exact spelling bonus can never
+promote a field past the next tier either. A country outranks a
+same-quality city or region specifically because a query that exactly
+names a country is a rarer, more deliberate kind of search than one
+that merely happens to match one of the many more numerous cities or
+regions sharing the text -- a plain reversal of city and region was
+deliberately not used instead, since it would equally rank, say, a
+*province* named Antwerpen above the *city* of Antwerp on an identical
+exact match, which is backwards for the far more common case of
+searching a city's own name; a city therefore still outranks a region of
+equal quality, exactly as if countries did not exist in the formula.
 
 For example, the query `amsterdam` gives the city `Amsterdam` quality
-`4` and score `8`, and the city `Nieuw-Amsterdam` quality `2` (its
-tokens are `nieuw`, `amsterdam`) and score `6`. The query ` amsterdam`
-with a leading space matches neither: token matching only ranks places
-that already match.
+`41` (folded tier `40`, an exact match that needed no folding) and score
+`43`, and the city `Nieuw-Amsterdam` quality `21` (folded tier `20`; its
+tokens are `nieuw`, `amsterdam`) and score `23`. The query `belgie`
+(typed without the diaeresis) gives the country `België` folded tier
+`40` (an exact match once both are folded to `belgie`) but quality `40`,
+not `41`: the unfolded comparison, `belgië` against `belgie`, does not
+reach an exact match (or even a substring match) on its own, so the
+spelling bonus does not apply; querying `belgië` instead reaches quality
+`41`. The query ` amsterdam` with a leading space matches neither: token
+matching only ranks places that already match.
 
 Only the ranking depends on Unicode character properties, never whether
 a place matches, so a reader and writer that disagree about a character's
@@ -1076,14 +1139,28 @@ match, the first `top_count` places in relevance order
 ([Section B.5](#b5-relevance-order)).
 
 The table's **keys** are every string of one or two consecutive code
-points that occurs in the lowercase form (as in Section B.5, without
-folding) of some field of some name entry. The table MUST contain every
-key and no other. The **entry** of a key is the list of the places that
-match it, in relevance order, truncated to its first `top_count`
-places. A key always has at least one match, so an entry is never empty;
-it has fewer than `top_count` places only when fewer places match. A
-query whose lowercase form is one or two code points long and is not a
-key matches no place at all.
+points that occurs in the folded form ([Section B.2](#b2-symbol-folding))
+of some field of some name entry. The table MUST contain every key and
+no other. The **entry** of a key is the list of the places that match
+it, in relevance order ([Section B.5](#b5-relevance-order), scoring the
+key itself as the query), truncated to its first `top_count` places. A
+key always has at least one match, so an entry is never empty; it has
+fewer than `top_count` places only when fewer places match. A query
+whose folded form is one or two code points long and is not a key
+matches no place at all.
+
+Because a key is already in folded form, scoring it as a query can never
+need Section B.5's exact spelling bonus to be anything other than
+whatever the key's own, already-folded spelling gives it -- a key never
+carries a diacritic of its own to fold away. A *query* that does,
+though, may need a different bonus than its key would: `e` and `é` both
+fold to the key `e`, but a field spelled with an actual `é` reaches the
+exact spelling bonus against the query `é` and not against the query
+`e`, which the table cannot represent with one entry per key. A reader
+therefore MUST NOT answer a query from this table unless the query's own
+folded form already equals its unfolded (plain lowercase) form, i.e. the
+query itself has no diacritic to fold -- see [Section B.9](#b9-query-procedure)'s
+step 1.
 
 Entries are sorted by the UTF-8 bytes of their key, compared bytewise
 (which equals comparing code points), and grouped into **table blocks**
@@ -1117,7 +1194,7 @@ trailer.
 | Field                   | Type    | Description |
 |-------------------------|---------|-------------|
 | `signature`             | 8 bytes | The ASCII bytes `CGEODATA`, as in [Section 5](#5-header). |
-| `version`               | varint  | Kind and version as defined in Section 5. This appendix specifies kind `1`, version `1`, so the value is `17` (`11`). |
+| `version`               | varint  | Kind and version as defined in Section 5. This appendix specifies kind `1`, version `2`, so the value is `18` (`12`). Version `1` built the short-query table from the unfolded lowercase form and a different level bonus ordering (city highest, not country); a version-1 file is not just an older layout but a different, incompatible relevance order, and nothing in its bytes records which rule built it, since `source_checksum` covers only the place table, not the relevance rule -- a reader MUST reject it rather than answer queries with it. |
 | `source_checksum`       | u64     | Checksum of the source file's place table ([Section B.8](#b8-source-checksum)). |
 | `place_count`           | varint  | `N`, the number of places in the source. |
 | `hash_exp`              | u8      | The number of hashed lists is `2^hash_exp` ([Section B.3](#b3-trigrams-and-lists)). MUST be from `1` to `24`. |
@@ -1195,16 +1272,19 @@ only ever contributes `low32(h) << 8` to the high half.
 
 To search for a query text:
 
-1. **Short queries.** Let `q` be the lowercase form of the query (as
-   in [Section B.5](#b5-relevance-order)). If `q` is one or two code
-   points long, the search asks for results in relevance order with a
-   limit of at most `top_count` and no restriction by level or parent,
-   and `top_count` is not `0`, then look `q` up in the short-query
-   table: find the last block whose `first_key` is at most `q`, read
-   that block, and scan it for `q`. The result is the first `limit`
-   places of its entry, or nothing if `q` is not a key. Stop.
-2. **Fold the query** with the procedure of
-   [Section B.2](#b2-symbol-folding) into a symbol sequence
+1. **Short queries.** Let `q` be the folded form of the query
+   ([Section B.2](#b2-symbol-folding)). If `q` is one or two code points
+   long, the search asks for results in relevance order with a limit of
+   at most `top_count` and no restriction by level or parent, `top_count`
+   is not `0`, and `q` already equals the plain lowercase form of the
+   query (i.e. the query has no diacritic of its own to fold --
+   [Section B.6](#b6-short-query-table) explains why this matters), then
+   look `q` up in the short-query table: find the last block whose
+   `first_key` is at most `q`, read that block, and scan it for `q`. The
+   result is the first `limit` places of its entry, or nothing if `q` is
+   not a key. Stop.
+2. **Fold the query** further, with step 4 of
+   [Section B.2](#b2-symbol-folding), into a symbol sequence
    `s_0 .. s_{m-1}`. If `m < 3`, the query has no trigram and the lists
    cannot help: compare every name without the index, and stop.
 3. **Collect the distinct list indices** of the query's trigrams
@@ -1221,22 +1301,28 @@ To search for a query text:
    search without relevance ranking.
 
 The lists never lose a match, under the following condition. Say a
-reader matches a name against a query when the name contains the query
-as a substring after both have been folded as in Section B.2. Then a
-matching name contains every trigram of the folded query, so the place
-is present in every list of step 4 and is examined in step 5. A reader
-whose comparison is stricter than folded substring containment, for
-example the case-insensitive but accent-sensitive substring match of
-Section B.5, inherits the guarantee, since everything it accepts is
-also accepted by the folded comparison. A reader whose comparison is
-looser, for example one that tolerates a missing or transposed
-character, or that matches across the `|` between fields, does not, and
-MUST NOT use the index for such queries. In particular, a reader that
-ranks by tokens MUST only rank places that match as a substring, as
-Section B.5 requires; ranking a place whose tokens match but whose names
-do not contain the query as a substring would make results depend on
-the index. The exotic cases in which lowercasing and decomposition do
-not commute are not known to affect any place name.
+reader matches a name against a query when the name's symbol sequence
+contains the query's symbol sequence as a (contiguous) subsequence --
+the comparison the trigram lists are actually built from. Then a
+matching name contains every trigram of the query's symbol sequence, so
+the place is present in every list of step 4 and is examined in step 5.
+A reader whose comparison is stricter than this inherits the guarantee,
+since everything it accepts is also accepted by the symbol-sequence
+comparison. The folded-form substring match of
+[Section B.5](#b5-relevance-order) is one such stricter comparison: step
+4 of Section B.2 maps each folded-form code point to one symbol, so a
+folded-form substring relationship survives into the symbol sequence
+unchanged, the same argument Section B.2 makes for why neither folding
+stage ever loses a match the other would find. A reader whose comparison
+is looser, for example one that tolerates a missing or transposed
+character, or that matches across the `|` between fields, does not
+inherit the guarantee, and MUST NOT use the index for such queries. In
+particular, a reader that ranks by tokens MUST only rank places that
+match as a folded substring, as Section B.5 requires; ranking a place
+whose tokens match but whose names do not contain the query as a folded
+substring would make results depend on the index. The exotic cases in
+which lowercasing and decomposition do not commute are not known to
+affect any place name.
 
 The short-query table of step 1 is exact rather than an
 over-approximation: its entries are the answer. A reader SHOULD still
@@ -1358,14 +1444,14 @@ places and their name fields are:
 `L = 21952 + 2^4 = 21968`, so `presence` is `2746` bytes. `N = 7`, so a
 bitmap is `1` byte, and any list of two or more places is stored as a
 bitmap, since its ID list would take two bytes or more. The file is
-`3207` bytes: a 25-byte header, a `2793`-byte list directory, `47` bytes
-of lists, a `16`-byte table directory, and `326` bytes of table blocks.
+`3201` bytes: a 25-byte header, a `2793`-byte list directory, `47` bytes
+of lists, a `16`-byte table directory, and `320` bytes of table blocks.
 
 #### B.12.1. Header (25 bytes)
 
 ```
 43 47 45 4f 44 41 54 41   signature "CGEODATA"
-11                        version 17 -> kind 1 (text search index), version 1
+12                        version 18 -> kind 1 (text search index), version 2
 9f e6 00 b9 37 18 dc 77   source_checksum 0x77dc1837b900e69f
 07                        place_count 7
 04                        hash_exp 4 -> 16 hashed lists, L = 21968
@@ -1449,55 +1535,71 @@ first delta is taken from `0`. The place table's `The Netherlands` and
 
 #### B.12.3. Short-Query Table
 
-The names contain 64 distinct strings of one or two lowercase code
-points, so the table has four blocks of 16 entries. The table directory
-(16 bytes) is:
+The names' folded forms contain 63 distinct strings of one or two code
+points, so the table has four blocks: three of 16 entries and one of
+15. The table directory (16 bytes) is:
 
 ```
-40                        key_count 64 -> 4 blocks
+3f                        key_count 63 -> 4 blocks
 20 00  50                 block 0: first_key " ", block_length 80
-65 20 00  52              block 1: first_key "e ", block_length 82
+65 20 00  51              block 1: first_key "e ", block_length 81
 6c 67 00  52              block 2: first_key "lg", block_length 82
-72 64 00  52              block 3: first_key "rd", block_length 82
+72 64 00  4d              block 3: first_key "rd", block_length 77
 ```
 
 The entries, key followed by its places in relevance order:
 
 ```
-block 0   " " 0      " n" 0     "-" 2      "-h" 2     "a" 4 5    "aa" 5
-          "am" 4 5   "an" 5 6   "b" 1      "be" 1     "d" 4 5    "d-" 2
-          "da" 4 5   "de" 0     "ds" 0     "e" 4 6
-block 1   "e " 0     "ed" 0     "el" 1     "en" 6 3   "er" 4 6   "et" 0
-          "g" 1      "gi" 1     "h" 2 0    "he" 0     "ho" 2     "i" 1
-          "iu" 1     "ië" 1     "l" 2 0    "la" 2 0
-block 2   "lg" 1     "ll" 2     "m" 4 5    "ms" 4     "n" 5 6    "nd" 5 2
+block 0   " " 0      " n" 0     "-" 2      "-h" 2     "a" 0 4    "aa" 5
+          "am" 4 5   "an" 0 5   "b" 1      "be" 1     "d" 0 4    "d-" 2
+          "da" 4 5   "de" 0     "ds" 0     "e" 0 1
+block 1   "e " 0     "ed" 0     "el" 1     "en" 6 3   "er" 0 4   "et" 0
+          "g" 1      "gi" 1     "h" 0 2    "he" 0     "ho" 2     "i" 1
+          "ie" 1     "iu" 1     "l" 0 1    "la" 0 2
+block 2   "lg" 1     "ll" 2     "m" 1 4    "ms" 4     "n" 0 5    "nd" 0 5
           "ne" 0     "no" 2     "nt" 6 3   "o" 2      "ol" 2     "oo" 2
-          "or" 2     "p" 6 3    "pe" 6 3   "r" 4 6
-block 3   "rd" 4 2   "rl" 0     "rp" 6 3   "s" 4 0    "st" 4     "t" 4 6
+          "or" 2     "p" 6 3    "pe" 6 3   "r" 0 4
+block 3   "rd" 4 2   "rl" 0     "rp" 6 3   "s" 0 4    "st" 4     "t" 0 4
           "te" 4     "th" 0     "tw" 6 3   "u" 1      "um" 1     "w" 6 3
-          "we" 6 3   "z" 5      "za" 5     "ë" 1
+          "we" 6 3   "z" 5      "za" 5
 ```
 
 Block 0 is stored as these 80 bytes:
 
 ```
-20 00 01 00  20 6e 00 01 00  2d 00 01 02  2d 68 00 01 02  61 00 02 04 05
-61 61 00 01 05  61 6d 00 02 04 05  61 6e 00 02 05 06  62 00 01 01
-62 65 00 01 01  64 00 02 04 05  64 2d 00 01 02  64 61 00 02 04 05
-64 65 00 01 00  64 73 00 01 00  65 00 02 04 06
+20 00 01 00  20 6e 00 01 00  2d 00 01 02  2d 68 00 01 02  61 00 02 00 04
+61 61 00 01 05  61 6d 00 02 04 05  61 6e 00 02 00 05  62 00 01 01
+62 65 00 01 01  64 00 02 00 04  64 2d 00 01 02  64 61 00 02 04 05
+64 65 00 01 00  64 73 00 01 00  65 00 02 00 01
 ```
 
-Some entries worked through Section B.5:
+Some entries worked through Section B.5 (scores aren't stored, only the
+ID order they produce, but are given here to show why):
 
 - `en`: the region `Antwerpen` (ID 3) and the city `Antwerpen` (ID 6)
-  are both substring matches, quality `1`; the city's level bonus gives
-  it score `5` against the region's `3`, so the entry is `6 3`, not in
-  ID order.
-- `h`: `Noord-Holland` (ID 2) scores `1 + 2 = 3`, `Nederland` /
-  `The Netherlands` (ID 0) scores `1 + 1 = 2`: the entry is `2 0`.
-- `ë` is a key of its own, `België`'s. `e` is a separate key whose
-  entry does not include ID 1, since `belgië` does not contain `e` as a
-  substring: step 1 of Section B.9 does not fold.
+  both reach folded tier `10` (a substring match) and need no folding
+  either, so both get the exact spelling bonus, quality `11`; the
+  city's level bonus (`2`) still beats the region's (`1`), giving scores
+  `13` and `12` -- the entry is `6 3`, not in ID order. (Country beating
+  city and region at equal quality is the point of this version's level
+  bonus; city still beats region here exactly as version 1's did, since
+  neither place in this example is a country.)
+- `h`: the country `Nederland` / `The Netherlands` (ID 0, matching via
+  the `The Netherlands` field) and the region `Noord-Holland` (ID 2)
+  both reach quality `11` the same way `en` does; the country's level
+  bonus (`3`) beats the region's (`1`), giving scores `14` and `12` --
+  the entry is `0 2`. Under version 1's level bonus (city `4`, region
+  `2`, country `1`) this came out the other way, `2 0` -- a region used
+  to outrank a country of equal quality, which this version's bonus
+  ordering specifically fixes.
+- `ie` and `iu` both key on `België`'s folded form alone (`belgium`
+  doesn't contain either as a substring): `ie` only exists in `belgië`
+  after folding (`belgië` does not contain the literal substring `ie`,
+  since its sixth letter is `ë` not `e`), so it reaches quality `10`,
+  no exact spelling bonus, score `13`; `iu` is a literal substring of
+  `belgium` with no folding involved at all, quality `11`, score `14`.
+  Both entries hold only ID `1`, so the difference isn't visible in the
+  stored bytes, only in how each key was reached.
 - `nl` is not a key, so a search for `nl` matches nothing, without
   reading any block beyond the one that would hold it.
 
@@ -1516,8 +1618,26 @@ in `dams`.
 
 **`antwerp`.** Trigrams `ant`, `ntw`, `twe`, `wer`, `erp`, all with
 bitmap `48` (places `3` and `6`). Both are confirmed, and in relevance
-order the city (score `4 + 4 = 8`, an exact match of the field
-`Antwerp`) comes before the region (score `4 + 2 = 6`).
+order the city (quality `41`, an exact match of the field `Antwerp`
+needing no folding, score `41 + 2 = 43`) comes before the region
+(quality `41`, score `41 + 1 = 42`).
+
+**`belgie`, sorted.** Typed without the diaeresis. Trigrams `bel`,
+`elg`, `lgi`, `gie`, all list `België`'s country alone (places `1`'s
+lists -- see B.12.2). `België`'s folded form, `belgie`, equals the
+query exactly: folded tier `40`. The *unfolded* comparison, `belgië`
+against `belgie`, does not reach even a substring match (`belgië`
+does not contain `belgie` literally -- nor does `Belgium`, whose sixth
+letter is `u`, not `e`), so the exact spelling bonus does not apply:
+quality stays `40`, score `43`. A reader with no folding at all (version
+1, or plain case-insensitive matching) would have found nothing here,
+since neither field contains `belgie` literally. Querying `belgië`
+instead (typed correctly) matches `België`'s own field without any
+folding needed, reaching quality `41`, score `44` -- a query a
+non-folding reader would also have found, since it's byte-identical to
+the stored field after lowercasing alone. This reader answers both
+queries, by folding for the first and plain matching for the second,
+and ranks the correctly-spelled one slightly higher.
 
 **`Zaan-dam`.** Folds to `z a a n - d a m`. The trigrams `an-`
 (list `390`), `n-d` (`10923`), and `-da` (`20468`) are not stored, so
@@ -1525,10 +1645,37 @@ nothing can match and no list needs to be read at all: step 3 of
 Section B.9 ends the search. This is correct, since no name contains
 `zaan-dam`.
 
-**`a`, sorted, limit 2.** One code point, so step 1 applies: `a` is in
-block 0 (the last block whose first key, `" "`, is at most `a`), and its
-entry is `4 5`, `Amsterdam` and `Zaandam`. A search for `a` in ID order,
-or with a limit above 2, instead compares every name.
+**`a`, sorted, limit 2.** One code point, and its folded form equals its
+plain lowercase form (step 1 of Section B.9 applies, per Section B.6's
+restriction): `a` is in block 0 (the last block whose first key, `" "`,
+is at most `a`), and its entry is `0 4`, the country `Nederland` (field
+`Nederland` matches `a` at quality `11`, score `11 + 3 = 14`) ahead of
+the city `Amsterdam` (quality `11`, score `11 + 2 = 13` -- `Zaandam`
+ties it but loses the ID tie-break). Under version 1's level bonus this
+entry was `4 5`, `Amsterdam` and `Zaandam`, since a country was worth
+less than either city. A search for `a` in ID order, or with a limit
+above 2, instead compares every name.
+
+**`ë`, sorted, limit 1.** Its folded form, `e`, differs from its plain
+lowercase form, `ë` itself, so step 1 does NOT apply here even though
+`e` is a key (Section B.6) -- comparing against the key `e`'s own
+precomputed entry (`0 1`, from B.12.3 above) would silently drop the
+exact spelling bonus `België`'s own `belgië` field earns against the
+*literal* query `ë`: `belgië` contains `ë`, reaching folded tier `10`
+*and* the bonus (the raw comparison also reaches tier `10`, since
+`belgië` literally contains `ë`), quality `11`, score `11 + 3 = 14`.
+`Nederland` / `The Netherlands` reaches only folded tier `10` with no
+bonus (neither field contains a literal `ë`), quality `10`, score
+`10 + 3 = 13`. Scored this way, `België` (`14`) outranks `Nederland`
+(`13`) outright -- the key `e`'s own precomputed entry, built by
+scoring `e` (not `ë`) as the query, has them the other way around
+(`0 1`, `Nederland` first) precisely because `e` itself, being
+diacritic-free, never earns `België`'s field the bonus the way the
+literal query `ë` does. Trusting the key's entry here would report
+`Nederland` as the top match for `ë`, the wrong answer. The query
+instead falls through to step 2: it folds to one symbol (one short of a
+trigram), so the lists cannot help either, and every name is compared
+directly, correctly placing `België` first.
 
 ## Appendix C. Place Location Index
 

@@ -24,9 +24,10 @@ import {
 	locateIndexPathFor,
 } from "./locateIndex.js";
 import {
+	foldDiacritics,
 	LEVEL_BONUS,
 	placeMatchQuality,
-	tokenize,
+	prepareNeedle,
 } from "./relevance.js";
 import { SearchIndex, searchIndexPathFor } from "./searchIndex.js";
 import { openSource, type RandomAccessSource } from "./source.js";
@@ -473,18 +474,19 @@ export class CGeoDataReader {
 	}
 
 	/**
-	 * Case-insensitive substring match against every name of every place
-	 * (all levels unless filtered). Without a search index this is a plain
-	 * linear scan over the name blocks; with one (`useSearchIndex()`), only
-	 * the places the index can't rule out are compared. Same results
-	 * either way.
+	 * Diacritic- and case-insensitive substring match against every name of
+	 * every place (all levels unless filtered) -- Section B.5's "matches":
+	 * the folded form (`foldDiacritics`) of a name contains the folded form
+	 * of the query. Without a search index this is a plain linear scan over
+	 * the name blocks; with one (`useSearchIndex()`), only the places the
+	 * index can't rule out are compared. Same results either way.
 	 */
 	*search(text: string, options: SearchOptions = {}): IterableIterator<Place> {
 		if (options.sort) {
 			yield* this.searchRanked(text, options);
 			return;
 		}
-		const needle = text.toLowerCase();
+		const needle = foldDiacritics(text);
 		let remaining = options.limit ?? Infinity;
 		if (remaining <= 0) return;
 		const candidates = this.activeSearchIndex()?.candidates(text);
@@ -493,7 +495,7 @@ export class CGeoDataReader {
 			for (const id of this.searchScope(level, options, candidates)) {
 				// Match on the bare names first; resolving parents is only worth
 				// doing for the few that hit.
-				if (!this.names(id).some((name) => name.toLowerCase().includes(needle)))
+				if (!this.names(id).some((name) => foldDiacritics(name).includes(needle)))
 					continue;
 				yield this.place(id);
 				if (--remaining <= 0) return;
@@ -509,15 +511,26 @@ export class CGeoDataReader {
 		text: string,
 		options: SearchOptions,
 	): IterableIterator<Place> {
-		const needle = text.toLowerCase();
+		const needle = foldDiacritics(text);
 		const index = this.activeSearchIndex();
+		// The table is keyed, and was scored, by each key's own folded form
+		// (Section B.6) -- the same needle a live query would use only when
+		// the query itself already equals its folded form, i.e. has no
+		// diacritic of its own to fold away. A query that does (`ë`, say)
+		// would need `nameMatchQuality`'s exact-spelling bonus evaluated
+		// against ITS OWN raw spelling, not the plain, diacritic-free key
+		// ("e") the table was built from -- those can legitimately disagree
+		// (an accented query can give a different field its spelling bonus
+		// than the plain key would). Falling back to the live scan for such
+		// a query is the only way to keep index and no-index results equal.
 		const shortQuery =
 			index !== undefined &&
 			options.limit !== undefined &&
 			options.limit <= index.topCount &&
 			options.level === undefined &&
 			options.country === undefined &&
-			options.region === undefined
+			options.region === undefined &&
+			needle === text.toLowerCase()
 				? index.shortQuery(text)
 				: undefined;
 		if (shortQuery) {
@@ -527,7 +540,7 @@ export class CGeoDataReader {
 			let remaining = options.limit ?? Infinity;
 			for (const id of shortQuery) {
 				if (remaining <= 0) return;
-				if (!this.names(id).some((name) => name.toLowerCase().includes(needle)))
+				if (!this.names(id).some((name) => foldDiacritics(name).includes(needle)))
 					continue;
 				yield this.place(id);
 				remaining--;
@@ -535,13 +548,13 @@ export class CGeoDataReader {
 			return;
 		}
 
-		const needleTokens = tokenize(needle);
+		const parsedNeedle = prepareNeedle(text);
 		const candidates = index?.candidates(text);
 		const scored: Array<{ id: number; score: number }> = [];
 		for (const level of LEVELS) {
 			if (options.level !== undefined && options.level !== level) continue;
 			for (const id of this.searchScope(level, options, candidates)) {
-				const quality = placeMatchQuality(this.names(id), needle, needleTokens);
+				const quality = placeMatchQuality(this.names(id), parsedNeedle);
 				if (quality === 0) continue;
 				scored.push({ id, score: quality + LEVEL_BONUS[level] });
 			}

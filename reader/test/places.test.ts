@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { CGeoDataReader, type Place } from "../src/index.js";
+import { buildSearchIndex, CGeoDataReader, type Place } from "../src/index.js";
 import { APPENDIX_A_BYTES } from "./fixtures/appendixA.js";
 
 // Appendix A.3's identifier table: 0-1 countries, 2-3 regions, 4-6 cities.
@@ -57,6 +57,38 @@ test("search() matches any name of any level, case-insensitively, with limit", (
   assert.deepEqual(ids(reader.search("e", { country: 1 })), [1, 3, 6]);
   assert.deepEqual(ids(reader.search("e", { region: 3 })), [1, 3, 6], "a region filter still yields its country");
   assert.deepEqual(ids(reader.search("nothing here")), []);
+});
+
+test("search() folds diacritics: a plain-ASCII query finds an accented name", () => {
+  assert.deepEqual(ids(reader.search("belgie")), [1], "België, typed without the diaeresis");
+  assert.deepEqual(ids(reader.search("BELGIE")), [1], "case-insensitive too");
+});
+
+test("search({ sort: true }): a country beats a same-quality region or city match", () => {
+  // "e" matches every place's name, but only the two countries reach it
+  // via an exact-spelling, no-fold-needed field match at the finest tier
+  // either of them can ("Nederland"/"the Netherlands" and "België"
+  // (folded)/"Belgium" are all plain substring matches) -- LEVEL_BONUS
+  // should still put both countries ahead of every region and city.
+  const sorted = ids(reader.search("e", { sort: true }));
+  assert.deepEqual(sorted.slice(0, 2).sort((a, b) => a - b), [0, 1], "both countries lead");
+});
+
+test("search: a short, accented query agrees with and without a search index (the folded short-query key can't carry a raw-spelling bonus a live scan would)", () => {
+  // Regression: "ë" folds to the same 1-2-character short-query key as
+  // plain "e", but "België" raw-matches "ë" exactly (it's spelled with
+  // one) while the key "e" itself never does -- searchRanked() must
+  // refuse the table for an accented query and fall back to a live scan,
+  // or index and no-index search would disagree.
+  const indexed = CGeoDataReader.open(APPENDIX_A_BYTES);
+  indexed.useSearchIndex(buildSearchIndex(indexed));
+  const linear = CGeoDataReader.open(APPENDIX_A_BYTES);
+  assert.deepEqual(
+    ids(indexed.search("ë", { sort: true, limit: 1 })),
+    ids(linear.search("ë", { sort: true, limit: 1 })),
+  );
+  indexed.close();
+  linear.close();
 });
 
 test("search({ sort: true }): equal name-match quality is broken by level, then id", () => {

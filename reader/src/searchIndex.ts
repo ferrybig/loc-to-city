@@ -16,7 +16,8 @@
  * reader's name blocks.
  */
 import type { CGeoDataReader, PlaceLevel } from "./reader.js";
-import { containsTokenRun, LEVEL_BONUS, tokenize } from "./relevance.js";
+import { foldDiacritics, LEVEL_BONUS, nameMatchQuality, prepareNeedle, QUALITY_MAX } from "./relevance.js";
+import type { Needle } from "./relevance.js";
 import { openSource, type RandomAccessSource } from "./source.js";
 import { readVarint, writeVarint } from "./varint.js";
 
@@ -86,8 +87,14 @@ export function trigramListIndices(text: string, hashExp: number): number[] {
 // "CGEODATA" -- same signature as the main data file.
 const SIGNATURE = Uint8Array.from([0x43, 0x47, 0x45, 0x4f, 0x44, 0x41, 0x54, 0x41]);
 const KIND_SEARCH_INDEX = 1;
-const FORMAT_VERSION = 1;
-const STORED_VERSION = KIND_SEARCH_INDEX * 16 + FORMAT_VERSION; // 17
+// Version 2: relevance order (Section B.5) folds diacritics and reverses
+// the per-level bonus to favor country over city -- a version-1 file's
+// short-query table was built under the old, un-folded rule and would
+// silently rank or match differently under new code, with nothing in its
+// bytes to tell a reader it's stale (Section B.8's checksum only covers
+// the source place table, not the ranking rule an index was built with).
+const FORMAT_VERSION = 2;
+const STORED_VERSION = KIND_SEARCH_INDEX * 16 + FORMAT_VERSION; // 18
 const ENCODING_ID_LIST = 0;
 const ENCODING_BITMAP = 1;
 const MAX_EXP = 24;
@@ -193,7 +200,7 @@ export function buildSearchIndex(reader: CGeoDataReader, options: SearchIndexOpt
 
 	const postings = new Map<number, number[]>();
 	const table = new Map<string, Ranked[]>();
-	const keyTokens = new Map<string, string[]>();
+	const keyNeedles = new Map<string, Needle>();
 	for (let id = 0; id < N; id++) {
 		const names = reader.placeNames(id);
 		const lists = new Set<number>();
@@ -201,21 +208,23 @@ export function buildSearchIndex(reader: CGeoDataReader, options: SearchIndexOpt
 		for (const name of names) {
 			for (const l of trigramListIndices(name, hashExp)) lists.add(l);
 			if (topCount === 0) continue;
-			// Every 1-2 code point substring of the lowercase name is a key
-			// (Section B.6); grade it as Section B.5's quality would.
-			const lower = name.toLowerCase();
-			const tokens = tokenize(name);
-			const cps = Array.from(lower);
+			// Every 1-2 code point substring of the name's folded form is a
+			// key (Section B.6); grade it exactly as a live query of that key
+			// would be -- `nameMatchQuality` is the same function `search()`
+			// uses, so the table can never rank differently than a live
+			// search over the same data would.
+			const folded = foldDiacritics(name);
+			const cps = Array.from(folded);
 			for (let i = 0; i < cps.length; i++) {
 				for (let len = 1; len <= 2 && i + len <= cps.length; len++) {
 					const key = len === 1 ? cps[i]! : cps[i]! + cps[i + 1]!;
-					if ((keyQuality.get(key) ?? 0) >= 4) continue;
-					let needleTokens = keyTokens.get(key);
-					if (!needleTokens) {
-						needleTokens = tokenize(key);
-						keyTokens.set(key, needleTokens);
+					if ((keyQuality.get(key) ?? 0) >= QUALITY_MAX) continue;
+					let needle = keyNeedles.get(key);
+					if (!needle) {
+						needle = prepareNeedle(key);
+						keyNeedles.set(key, needle);
 					}
-					const quality = lower === key ? 4 : containsTokenRun(tokens, needleTokens) ? 2 : 1;
+					const quality = nameMatchQuality(name, needle);
 					if (quality > (keyQuality.get(key) ?? 0)) keyQuality.set(key, quality);
 				}
 			}
@@ -415,7 +424,9 @@ export class SearchIndex {
 			throw new Error(
 				version === 0
 					? "search index is the old bigram layout (kind 1, version 0); rebuild it with build-search-index"
-					: `unsupported search index version ${version} (expected ${FORMAT_VERSION})`,
+					: version === 1
+						? "search index predates diacritic folding (kind 1, version 1); rebuild it with build-search-index"
+						: `unsupported search index version ${version} (expected ${FORMAT_VERSION})`,
 			);
 		}
 		if (data.length < off + 8) throw new Error("search index file is too short for source checksum");
@@ -506,7 +517,7 @@ export class SearchIndex {
 	 */
 	shortQuery(text: string): number[] | undefined {
 		if (this.topCount === 0) return undefined;
-		const key = text.toLowerCase();
+		const key = foldDiacritics(text);
 		const length = Array.from(key).length;
 		if (length < 1 || length > 2) return undefined;
 		const dir = this.tableDirectory();

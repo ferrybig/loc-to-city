@@ -864,32 +864,56 @@ section, since those are spec decisions rather than pipeline work.
   whose own finer subdivisions already tile its area under different
   names -- just one level down, and no config in the current primary/
   gap-fill model can reach it.
-- **Search has no diacritic folding, and ranks city above country even
-  when the query is a country's own name.** `reader/src/relevance.ts`'s
-  `nameMatchQuality` does a plain substring match on the lowercased name
-  only -- searching `Nederland` won't find `Nederland` if the stored
-  entry happens to carry a diacritic variant, and more immediately,
-  typing a country's exact name unhelped by diacritics still doesn't
-  necessarily surface that country first: `LEVEL_BONUS` (`city: 4,
-  region: 2, country: 1`) outranks every country by level alone, so a
-  city named (or containing) `Nederland` -- e.g. a town in Overijssel --
-  can beat the country `Nederland` itself even on an exact name match,
-  which is backwards for a query that's already a country's full name.
-  Two separate fixes, not one: (1) diacritic-insensitive matching (fold
-  both the query and stored names before comparing, e.g. Unicode NFD +
-  strip combining marks), with an exact-spelling (diacritics as typed)
-  match still ranked above a normalized-only match by some margin --
-  proposed +1, not yet measured against real queries; (2) revisit
-  `LEVEL_BONUS`'s ordering so an exact country-name match outranks a
-  same-named city, likely by folding level into the score differently for
-  an exact match specifically rather than a flat per-level bonus that
-  applies regardless of match quality. Neither changes `search`'s
-  un-sorted (no `--sort`) behavior or the trigram index's candidate set
-  (Appendix B.9) -- both are substring-based already and stay that way;
-  this is purely `nameMatchQuality`/`LEVEL_BONUS` and the short-query
-  table builder that shares them (`binary-format.md` Appendix B.5/B.12).
 
 ### Resolved
+
+- **Search had no diacritic folding, and ranked city above country even
+  when the query was a country's own name.** Fixed in two parts, both in
+  `reader/src/relevance.ts` and specified in `binary-format.md` Appendix
+  B.2/B.5/B.6/B.9 (search-index format bumped to kind 1 version 2, since
+  the short-query table's stored contents depend on the exact relevance
+  rule and nothing in the file format itself records which rule built
+  it): (1) matching and ranking now compare the diacritic-folded form of
+  names (`foldDiacritics` -- NFD, strip combining marks, lowercase;
+  distinct from the trigram index's own, heavier `foldSymbols` folding,
+  which also buckets digits/punctuation together and would be too loose
+  for deciding match quality), so `search data/03-final/world.bin
+  munchen` now finds München -- verified on the real worldwide dataset,
+  not just the spec's synthetic example; a query whose own spelling
+  reaches a tier without folding still ranks above one that needed
+  folding to reach the same tier (an "exact spelling bonus"), so typing
+  a name's diacritics correctly is rewarded, not required. (2)
+  `LEVEL_BONUS` now favors an exact country match over a same-quality
+  city or region (country `3`, city `2`, region `1` -- only country
+  jumps the queue; a plain three-way reversal was tried first and
+  rejected, since it would also rank an exact match on a *region*
+  (Antwerpen the province) above an identically-named *city* (Antwerp),
+  which is backwards for the far more common case of searching a city's
+  own name).
+
+  One real correctness bug was found and fixed during implementation,
+  not anticipated going in: the short-query table precomputes a ranking
+  per *folded* 1-2-character key (e.g. `e`), but the exact spelling bonus
+  depends on the query's own, possibly different, unfolded spelling
+  (`e`, `é`, and `ë` all fold to the same key but don't all earn the same
+  field the same bonus) -- so a reader now only answers a short query
+  from the table when the query's own folded form already equals its
+  plain lowercase form (no diacritic of its own to fold), falling back
+  to a live scan otherwise (Appendix B.12's `ë` query walks through why
+  trusting the table there would have given a wrong answer). Caught by
+  the project's own index-vs-no-index agreement test suite, not
+  discovered by hand.
+
+  The specific `Nederland` example that motivated this fix doesn't yet
+  show the improvement on the real worldwide dataset: Natural Earth's
+  `ne_10m_admin_0_countries.geojson`, the current country source, has no
+  local-name field at all, so the Netherlands' only stored name is the
+  English `Netherlands` -- see "International/local name pairs aren't
+  populated for countries" above, a separate, already-known data gap
+  this fix doesn't touch. Confirmed directly: `search world.bin
+  Nederland --sort` still returns a Dutch *city* literally named
+  Nederland first, because the country has no `Nederland` field to match
+  against at all, exact-match bonus or not.
 
 - **Wales and Northern Ireland resolved to sub-town units instead of the
   town.** GB's country-wide city pick (level 10, civil parishes) is right
