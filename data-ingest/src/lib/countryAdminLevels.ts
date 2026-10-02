@@ -176,6 +176,51 @@ export interface CountryAdminLevels {
  *   All three gap-fill the finer level in rather than replacing the
  *   configured one, since the configured level still correctly names
  *   every settlement the finer level doesn't carry its own relation for.
+ * - SV: same tie-break discovery as CU/MD/NI above. El Salvador's
+ *   configured level 6 is itself `place=district`/`municipality` (the
+ *   real admin tier, 101.3% coverage -- Santa Ana, the second city, is
+ *   `place=district` at level 6, not city/town), and a separate,
+ *   same-named level-7 relation is `place=city`/`town` (Santa Ana itself,
+ *   Acajutla, and 38 others of the 40 the tie-break tool found). San
+ *   Salvador the capital has no level-7 relation at all (only level
+ *   6/4) -- same unfixable-by-level-choice shape as Berlin/Hamburg/Sana'a
+ *   in README's "Open" list, unaffected either way.
+ * - LU: same discovery, verified narrower than SV/CU/MD/NI's scale (409
+ *   level-8 communes vs. only 271 level-9 features nationally, and only
+ *   84 of those are `place=village` -- the rest suburb/hamlet/
+ *   neighbourhood/isolated_dwelling). Confirmed each of the 14 the
+ *   tie-break tool found is a clean same-name pair (e.g. Beckerich,
+ *   Dippach, Mamer all have an untagged level-8 commune and a
+ *   `place=village`-tagged level-9 relation of the identical name
+ *   nested inside it) -- not the Indonesia/Czechia shape below, where
+ *   gap-filling would only ever help an arbitrary, inconsistent subset
+ *   of a much larger, mostly-untagged layer.
+ *
+ * Two countries' tie-break candidates were investigated and deliberately
+ * NOT applied, despite README's place=city/town/village item flagging
+ * them, because the "other" (non-place-tagged) level was already
+ * confirmed correct and the place-tagged level looked like noise rather
+ * than a missing settlement:
+ * - CZ: level 8 (configured, `place=municipality`/`city` where tagged)
+ *   already resolves every sampled case correctly, including Brno
+ *   (`place=city`) and all 6 same-named "Babice" municipalities
+ *   nationally. The place-tagged level-10 candidates (1,065 of 3,307
+ *   level-10 features nationally are `place=village`) look like
+ *   cadastral villages nested *inside* an already-correct municipality,
+ *   the same shape the New York/Arkansas regression (see `overrides`'s
+ *   doc comment above) warns against: gap-filling a finer level into an
+ *   already-correct coarser one risks that finer level contesting cells
+ *   against its own container for no naming benefit.
+ * - ID: the place-tagged level (7, `place=village`) sits two tiers below
+ *   the configured level 5, via an untagged level-6 district in between,
+ *   and covers only ~696 of Indonesia's ~75,000+ real villages
+ *   nationally (confirmed on the real extract: 6,859 level-7 features,
+ *   most untagged or tagged `neighbourhood`/`subdistrict`, not
+ *   `village`). Gap-filling would promote only that arbitrary,
+ *   incompletely-tagged subset to city grain while leaving the rest of
+ *   the country at the regency level -- a patchier result than the
+ *   current, consistent level-5 naming, not a country-wide fix like
+ *   Bremen's.
  *
  * Entries whose comment shows a coverage figure far over 100% (e.g. small
  * multi-island nations like the Maldives or Cook Islands) reflect
@@ -324,7 +369,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   LR: { region: [6], city: [8] }, // region 101.6%, city 0.2%
   LS: { region: [5], city: [10] }, // region 101.5%, city 0.0%
   LT: { region: [5], city: [6] }, // region 100.6%, city 98.1%
-  LU: { region: [6], city: [8] }, // region 99.4%, city 100.8%
+  LU: { region: [6], city: [8, 9] }, // region 99.4%, city 100.8% (8) + gap-fill 9 -- see override note above
   LV: { region: [5], city: [8] }, // region 100.0%, city 98.0%
   LY: { region: [4], city: [] }, // region 106.2%, city 0.0%
   MA: { region: [4], city: [8] }, // region 115.4%, city 102.1%
@@ -395,7 +440,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   SR: { region: [4], city: [6] }, // region 106.0%, city 100.3%
   SS: { region: [4], city: [5] }, // region 102.5%, city 100.7%
   ST: { region: [6], city: [7] }, // region 95.6%, city 82.1%
-  SV: { region: [5], city: [6] }, // region 102.0%, city 101.3%
+  SV: { region: [5], city: [6, 7] }, // region 102.0%, city 101.3% (6) + gap-fill 7 -- see override note above
   SX: { region: [], city: [8] }, // region 0.0%, city 11.7%
   SY: { region: [5], city: [6] }, // region 100.3%, city 100.3%
   SZ: { region: [6], city: [] }, // region 101.5%, city 0.0%
