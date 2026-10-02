@@ -103,6 +103,32 @@ test("findPlaceTagMismatches: a region-scoped country (US, GB) is left unscored 
   assert.equal(result?.isMismatch, false);
 });
 
+test("findPlaceTagMismatches: Brazil -- a place=village level not configured is NOT a mismatch when the same name already resolves at the configured level", () => {
+  // Real shape (Mombuca, SP): the whole municipality is admin_level=8,
+  // place=village -- not configured ([9]) -- but its own single
+  // municipal-seat district carries the identical name at admin_level=9,
+  // the already-configured level, with no place tag at all. The
+  // settlement already resolves correctly today via the district; the
+  // place tag on the municipality relation isn't evidence of anything
+  // broken, so this must NOT be flagged as a mismatch.
+  assert.deepEqual(COUNTRY_ADMIN_LEVELS.BR?.city, [9], "test assumes BR's real table entry is still [9]");
+  const municipality = fakeCandidate({ name: "Mombuca", country: "BR", level: 8, place: "village" });
+  const district = fakeCandidate({ name: "Mombuca", country: "BR", level: 9 });
+  const [result] = findPlaceTagMismatches([municipality, district]);
+  assert.equal(result?.isMismatch, false);
+  assert.equal(result?.alreadyResolvedAtLevel, 9);
+  assert.equal(result?.configuredCityLevel, 9);
+});
+
+test("findPlaceTagMismatches: alreadyResolvedAtLevel is undefined when no same-settlement candidate sits at a configured level", () => {
+  assert.deepEqual(COUNTRY_ADMIN_LEVELS.DE?.city, [8, 6], "test assumes DE's real table entry is still [8, 6]");
+  const land = fakeCandidate({ name: "Bremen", country: "DE", level: 4 });
+  const city = fakeCandidate({ name: "Bremen", country: "DE", level: 9, place: "city" });
+  const [result] = findPlaceTagMismatches([land, city]);
+  assert.equal(result?.alreadyResolvedAtLevel, undefined);
+  assert.equal(result?.isMismatch, true);
+});
+
 test("findPlaceTagMismatches: results are sorted by country then name", () => {
   const groups: PlaceTagCandidate[] = [
     fakeCandidate({ name: "Zeta", country: "FR", level: 6 }),

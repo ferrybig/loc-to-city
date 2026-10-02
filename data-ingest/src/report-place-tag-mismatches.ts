@@ -49,11 +49,19 @@ async function main(): Promise<void> {
   const results = findPlaceTagMismatches(candidates);
   const mismatches = results.filter((r) => r.isMismatch);
   const regionScoped = results.filter((r) => r.configuredCityLevel === undefined);
-  const agreeing = results.filter((r) => r.configuredCityLevel !== undefined && !r.isMismatch);
+  const alreadyResolved = results.filter((r) => r.alreadyResolvedAtLevel !== undefined);
+  const agreeing = results.filter(
+    (r) => r.configuredCityLevel !== undefined && r.alreadyResolvedAtLevel === undefined && !r.isMismatch,
+  );
 
   for (const r of showAll ? results : mismatches) {
-    const tag = r.isMismatch ? "MISMATCH" : "ok";
-    const configured = r.configuredCityLevel === undefined ? "region-scoped, skipped" : `configured=[${r.configuredCityLevel}]`;
+    const tag = r.isMismatch ? "MISMATCH" : r.alreadyResolvedAtLevel !== undefined ? "already-resolved" : "ok";
+    const configured =
+      r.configuredCityLevel === undefined
+        ? "region-scoped, skipped"
+        : r.alreadyResolvedAtLevel !== undefined
+          ? `configured=[${r.configuredCityLevel}], same name already resolves at level ${r.alreadyResolvedAtLevel}`
+          : `configured=[${r.configuredCityLevel}]`;
     console.log(
       `${tag}\t${r.country}\t${r.name}\tplace=${r.place} at level ${r.placeLevel}\tother levels: ${r.otherLevels.join(",")}\t${configured}`,
     );
@@ -61,8 +69,9 @@ async function main(): Promise<void> {
 
   console.error(
     `\n${mismatches.length} mismatches, ${agreeing.length} already agree with current config, ` +
-      `${regionScoped.length} skipped (region-scoped overrides -- needs region geometry this report doesn't ` +
-      `have, review by hand)`,
+      `${alreadyResolved.length} already resolve today via a same-named candidate at a configured level (false ` +
+      `positive from the place tag alone), ${regionScoped.length} skipped (region-scoped overrides -- needs ` +
+      `region geometry this report doesn't have, review by hand)`,
   );
 }
 

@@ -95,10 +95,25 @@ export interface PlaceTagMismatch {
    * region-scoped countries for manual review rather than risk a false
    * mismatch report (see `hasRegionOverrides`). */
   configuredCityLevel: number | undefined;
+  /** A configured city level some *other* same-settlement candidate
+   * already sits at, carrying the identical name -- set when the
+   * settlement already resolves correctly today under that candidate,
+   * regardless of what level the `place` tag itself points to. Common in
+   * Brazil: a small municipality (level 8, `place=village`) and its own
+   * single municipal-seat district (level 9, the already-configured
+   * level, unnamed `place` but the identical name) are the same real
+   * settlement -- the district already resolves fine, so the `place` tag
+   * sitting on the municipality relation isn't evidence of anything
+   * broken. When set, `isMismatch` is always false: this is the
+   * diagnostic's own false-positive guard, not a human judgment call like
+   * the CZ/ID country-level skips in `countryAdminLevels.ts`. */
+  alreadyResolvedAtLevel: number | undefined;
   /** True when `placeLevel` is not among the levels this country's
-   * current config would ever select as a city (primary or gap-fill) --
-   * the actionable case, same shape as the Bremen fix (add placeLevel as
-   * a gap-fill level, or replace configuredCityLevel with it). */
+   * current config would ever select as a city (primary or gap-fill),
+   * AND no same-settlement candidate already resolves the name at a
+   * configured level -- the actionable case, same shape as the Bremen fix
+   * (add placeLevel as a gap-fill level, or replace configuredCityLevel
+   * with it). */
   isMismatch: boolean;
 }
 
@@ -189,7 +204,11 @@ export function findPlaceTagMismatches(candidates: readonly PlaceTagCandidate[])
     const country = settlement.country;
     const configured = hasRegionOverrides(country) ? undefined : configuredCityLevels(country);
     const configuredCityLevel = configured?.[0];
-    const isMismatch = configured !== undefined && !configured.includes(settlement.level);
+    const alreadyResolvedAtLevel = configured
+      ? related.find((c) => c !== settlement && configured.includes(c.level))?.level
+      : undefined;
+    const isMismatch =
+      configured !== undefined && !configured.includes(settlement.level) && alreadyResolvedAtLevel === undefined;
 
     mismatches.push({
       country,
@@ -198,6 +217,7 @@ export function findPlaceTagMismatches(candidates: readonly PlaceTagCandidate[])
       place: settlement.place!,
       otherLevels,
       configuredCityLevel,
+      alreadyResolvedAtLevel,
       isMismatch,
     });
   }
