@@ -195,12 +195,151 @@ export interface CountryAdminLevels {
  *   nested inside it) -- not the Indonesia/Czechia shape below, where
  *   gap-filling would only ever help an arbitrary, inconsistent subset
  *   of a much larger, mostly-untagged layer.
+ * - BF: same discovery -- level 6 is `place=department` nationally (the
+ *   real administrative tier, 67.2% coverage, the lowest of this group
+ *   but still clearing the 60% bar), and a same-named level-8 relation is
+ *   `place=town`/`village` for Koudougou, Tenkodogo, Bagaré, Lankoué and
+ *   Toéni, all five confirmed directly against the extract.
+ * - BY: level 6 holds 9 `place=city` relations nationally (Belarus's
+ *   major cities below the handful at level 4, e.g. Minsk -- level 4,
+ *   same tier as the country's own `region`, unfixable the Berlin/Minsk
+ *   way, see the "TM" entry below for the one case where that shape
+ *   turned out fixable instead). 8 of those 9 already resolve correctly
+ *   today via an identically-named level-8 entry (the false-positive
+ *   guard `placeTagSignal.ts`'s `alreadyResolvedAtLevel` field now
+ *   catches, see that file's doc comment); only Baranavichy
+ *   (Баранавічы, Belarus's 7th-largest city) lacked one, confirmed by
+ *   `data/03-final/world.bin` resolving it to nothing before this fix.
+ * - CA: Guelph, Ontario is `place=city` at level 6, the country's own
+ *   `region` level -- not unfixable like Minsk/Ashgabat, since level 6
+ *   isn't where every Canadian province sits (CA's `region` is level 4);
+ *   level 6 here is specifically Ontario's own regional-municipality
+ *   tier, and Guelph is a single-tier city that happens to also carry a
+ *   `place=city` tag at that level, distinct from the already-configured
+ *   level-8 municipalities. Confirmed unresolved before this fix
+ *   (`search` found no "Guelph" city entry in `data/03-final/world.bin`).
+ * - LV: found by manual investigation, not `report-place-tag-mismatches.ts`
+ *   itself -- Latvia tags its real town tier (`border_type=town`, 72 of
+ *   75 level-7 features nationally) without an OSM `place` value at all,
+ *   so the tie-break tool's own `place`-only filter can't see it; the
+ *   tool's reported level-9 `place=village` candidates (Aizkraukle, Berģi,
+ *   ...) are a real but secondary signal -- confirmed their level-7 town
+ *   polygon (`border_type=town`) geographically contains the smaller
+ *   level-9 village of the same name, e.g. Aizkraukle's level-9 bbox
+ *   sits entirely inside its own level-7 bbox. The configured level 8 is
+ *   `place=civil_parish`/`parish` (511 of 1,678 level-8 features) --
+ *   Latvia's real rural tier, not named towns -- so Aizkraukle/Koknese
+ *   previously resolved to "Aizkraukles pagasts"/"Kokneses pagasts" (the
+ *   parish) instead of the real town; verified fixed on
+ *   `data/03-final/world.bin`. Latvia's 7 "republic cities" (Rīga,
+ *   Daugavpils, Liepāja, Jelgava, Jūrmala, Rēzekne, Ventspils) are
+ *   `border_type=city` at level 5, the country's own `region` level --
+ *   same unfixable-by-level-choice shape as Minsk/Berlin/Hamburg,
+ *   unaffected by this fix.
+ * - TM: Ashgabat (the capital) is `place=city` at level 4, the country's
+ *   own `region` level, *and* carries an identical second relation
+ *   (same Wikidata id, Q23438) at level 8 -- a genuine duplicate of the
+ *   same real-world boundary at two admin_levels, not a smaller district
+ *   the way Astana's/Sana'a's sub-divisions are (see README's "Open"
+ *   list) -- confirmed by comparing every tag on both relations. This is
+ *   the one region-level-capital case in this file that turned out
+ *   fixable, because the duplicate exists; Minsk (BY) and Yerevan (AM,
+ *   `place=city` at AM's own level-4 `region`) were checked the same way
+ *   and have no lower-level duplicate, so they stay unfixable.
+ * - VE: the configured level 7 (101.9% coverage, almost entirely untagged
+ *   by `place`) is Venezuela's parroquia tier; level 8 nationally carries
+ *   267 real settlement tags (147 town + 69 village + 51 city) distinct
+ *   from a much larger (899-feature) layer of untagged/suburb/hamlet
+ *   noise at the same level. A genuine, if partial, improvement verified
+ *   on `data/03-final/world.bin`: most Venezuelan parroquias are already
+ *   named after their own seat town (so e.g. Aguasay already resolved
+ *   before this fix, just displayed as "Parroquia Aguasay"), but a
+ *   smaller number of towns -- confirmed on El Salto, Las Trincheras, San
+ *   Antonio de Los Altos -- now resolve under their own plain name for
+ *   the first time, where their parroquia either has an unrelated name or
+ *   wasn't already primary there. "Los Robles", the one candidate that
+ *   survived `report-place-tag-mismatches.ts`'s stricter false-positive
+ *   filter, turned out to be one of the ones that *doesn't* benefit (its
+ *   own point still resolves under a differently-named, already-primary
+ *   parroquia) -- the same per-settlement coverage nuance EE/MX/PT hit
+ *   nationally, just not universal here. Maracaibo (Venezuela's
+ *   2nd-largest city) was checked separately and found to have *no* admin
+ *   boundary above `place=neighbourhood` at level 9 at all -- a
+ *   different, deeper bug (same shape as Brazil's São Paulo/Rio entry
+ *   above), not something this gap-fill can reach either way.
  *
- * Two countries' tie-break candidates were investigated and deliberately
- * NOT applied, despite README's place=city/town/village item flagging
- * them, because the "other" (non-place-tagged) level was already
- * confirmed correct and the place-tagged level looked like noise rather
- * than a missing settlement:
+ * Several countries' tie-break candidates were investigated and
+ * deliberately NOT applied, because the "other" (non-place-tagged) level
+ * was already confirmed correct and the place-tagged level looked like
+ * noise, a name variant, too sparse/inconsistent to trust, or (EE, MX,
+ * PT) structurally unreachable by gap-fill at all, rather than a missing
+ * settlement:
+ * - EE: Tallinn is `place=city` at level 8, distinct from the configured
+ *   level 9's ~4,821-feature fine tessellation (asustusüksus settlement
+ *   units, 94.6% coverage) -- looked like a clean small-set fix (59
+ *   level-8 features total: 48 `place=civil_parish` + Tallinn itself),
+ *   same shape as every other entry above, and was applied as `city: [9,
+ *   8]` -- but verification on a real rebuild showed it has *no effect*:
+ *   `search` still finds nothing for "Tallinn", only its own internal
+ *   districts (linnaosad, e.g. "Põhja-Tallinna linnaosa") still resolve.
+ *   Root cause, confirmed directly: Tallinn's linnaosad are themselves
+ *   tagged at level 9 -- the same level that's already primary nearly
+ *   everywhere in Estonia -- so Tallinn's own area is already fully
+ *   covered by its own, already-primary districts before the gap-fill
+ *   pass ever runs; `detectGapFill` only promotes a candidate whose
+ *   representative point isn't already covered by a primary, so the
+ *   level-8 whole-city candidate is correctly (if unhelpfully) rejected
+ *   every time. This is the same underlying shape as README's "Capitals
+ *   that are themselves a region resolve to a city district" Open
+ *   issue (Astana, Sana'a, Aden) -- a real settlement whose own finer
+ *   subdivisions already exhaustively tile its area under different
+ *   names -- just one level down (a city resolving to its own district,
+ *   not a region resolving to its own city). No config in this file's
+ *   current primary/gap-fill model can fix this; it would need a
+ *   mechanism this format doesn't have, something like a named polygon
+ *   overriding the label for cells its own already-primary children
+ *   cover. Reverted (`city: [9]`, unchanged from before this
+ *   investigation) rather than left in place doing nothing.
+ * - MX: Ciudad de México (the capital, a federal entity) is `place=state`
+ *   at level 4, the country's own `region` level, but also has a second,
+ *   genuine whole-city `place=city` relation at level 8 (population tag
+ *   9,209,944, matching the real city's population -- confirmed not a
+ *   mere borough/alcaldía). Looked fixable the same way TM turned out to
+ *   be, and was applied as `city: [6, 8]` -- but the same EE-shaped block
+ *   applies here too: Mexico City's own boroughs (alcaldías -- Iztacalco,
+ *   Xochimilco, Milpa Alta, Tláhuac, ... confirmed directly against the
+ *   extract) are themselves tagged at level 6, the country's already-
+ *   primary level, so the capital's own area is already fully covered
+ *   under different names before the level-8 gap-fill candidate is ever
+ *   considered. Reverted (`city: [6]`). Conkal, Espinal, Piedras Negras
+ *   and Tulum (the other four candidates `report-place-tag-mismatches.ts`
+ *   found for MX) already resolve correctly today via an identically-
+ *   named level-6 entry (`alreadyResolvedAtLevel`), so nothing in Mexico
+ *   actually needed this gap-fill in the first place.
+ * - PT: Lisboa is `place=city` at level 7 (Portugal's concelho/
+ *   municipality tier, 292 nationally, matching the country's real
+ *   municipal count), distinct from the configured level 8 (100.7%
+ *   coverage, almost entirely untagged by `place`). Same EE-shaped block:
+ *   Lisbon's own freguesias (civil parishes -- Alvalade, Belém, Benfica,
+ *   Carnide, ... confirmed directly against the extract) are tagged at
+ *   level 8, the country's already-primary level, so Lisbon's own area is
+ *   already fully covered under different names. Applied as `city: [8,
+ *   7]`, verified to have no effect, reverted (`city: [8]`). The other
+ *   291 Portuguese concelhos already resolve correctly today via an
+ *   identically-named level-8 entry; only the capital was ever at stake,
+ *   and it isn't reachable this way.
+ * - AM: Աբովյան (Abovyan) already resolves correctly today -- as "Աբովյան
+ *   համայնք" ("Abovyan community"), the real, already-configured level-5
+ *   entity -- just under a name with an administrative suffix the
+ *   tie-break tool's exact-string grouping doesn't normalize away. Not a
+ *   resolution bug, a display-name variant; no config change needed.
+ * - AR: Acevedo's place-tagged level (8) sits three tiers below the
+ *   configured level 5, and nationally only ~268 of 3,292 level-8
+ *   features carry a real settlement `place` tag (~8%, mostly
+ *   `place=municipality`) -- the same sparse, inconsistent-tagging shape
+ *   as ID below, and the only Argentine candidate to survive the
+ *   stricter false-positive filter, suggesting an isolated gap rather
+ *   than a systemic one worth a country-wide gap-fill.
  * - CZ: level 8 (configured, `place=municipality`/`city` where tagged)
  *   already resolves every sampled case correctly, including Brno
  *   (`place=city`) and all 6 same-named "Babice" municipalities
@@ -210,7 +349,12 @@ export interface CountryAdminLevels {
  *   the same shape the New York/Arkansas regression (see `overrides`'s
  *   doc comment above) warns against: gap-filling a finer level into an
  *   already-correct coarser one risks that finer level contesting cells
- *   against its own container for no naming benefit.
+ *   against its own container for no naming benefit. The one survivor of
+ *   the stricter false-positive filter, Petřkovice, is the same shape at
+ *   a different level still: `place=borough` at level 9 nested inside an
+ *   already-correct level-8 municipality (likely Ostrava, a Czech city
+ *   whose boroughs are administratively significant) -- not a standalone
+ *   settlement either.
  * - ID: the place-tagged level (7, `place=village`) sits two tiers below
  *   the configured level 5, via an untagged level-6 district in between,
  *   and covers only ~696 of Indonesia's ~75,000+ real villages
@@ -263,9 +407,9 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   BS: { region: [], city: [8] }, // region 0.0%, city 759.4%
   BT: { region: [4], city: [8] }, // region 93.0%, city 91.2%
   BW: { region: [4], city: [6] }, // region 99.8%, city 18.1%
-  BY: { region: [4], city: [8] }, // region 100.0%, city 99.5%
+  BY: { region: [4], city: [8, 6] }, // region 100.0%, city 99.5% (8) + gap-fill 6 -- see override note above
   BZ: { region: [4], city: [8] }, // region 115.9%, city 5.3%
-  CA: { region: [4], city: [8] }, // region 128.2%, city 31.4% -- see override note above
+  CA: { region: [4], city: [8, 6] }, // region 128.2%, city 31.4% (8) + gap-fill 6 -- see override note above
   CD: { region: [4], city: [6] }, // region 100.2%, city 42.6%
   CF: { region: [4], city: [8] }, // region 100.1%, city 0.2%
   CG: { region: [4], city: [6] }, // region 99.3%, city 81.4%
@@ -370,7 +514,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   LS: { region: [5], city: [10] }, // region 101.5%, city 0.0%
   LT: { region: [5], city: [6] }, // region 100.6%, city 98.1%
   LU: { region: [6], city: [8, 9] }, // region 99.4%, city 100.8% (8) + gap-fill 9 -- see override note above
-  LV: { region: [5], city: [8] }, // region 100.0%, city 98.0%
+  LV: { region: [5], city: [8, 7] }, // region 100.0%, city 98.0% (8) + gap-fill 7 -- see override note above
   LY: { region: [4], city: [] }, // region 106.2%, city 0.0%
   MA: { region: [4], city: [8] }, // region 115.4%, city 102.1%
   MC: { region: [], city: [8] }, // region 0.0%, city 78.2%
@@ -451,7 +595,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   TH: { region: [4], city: [6] }, // region 121.8%, city 100.1%
   TJ: { region: [4], city: [6] }, // region 99.4%, city 99.3%
   TL: { region: [4], city: [5] }, // region 98.6%, city 98.6%
-  TM: { region: [4], city: [5] }, // region 107.6%, city 107.4%
+  TM: { region: [4], city: [5, 8] }, // region 107.6%, city 107.4% (5) + gap-fill 8 -- see override note above
   TN: { region: [5], city: [6] }, // region 99.4%, city 98.6%
   TO: { region: [4], city: [5] }, // region 1303.8%, city 99.4%
   TR: { region: [4], city: [6] }, // region 109.8%, city 100.0%
@@ -475,7 +619,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   UY: { region: [4], city: [8] }, // region 99.7%, city 1.3%
   UZ: { region: [4], city: [6] }, // region 62.9%, city 99.9%
   VC: { region: [6], city: [] }, // region 106.2%, city 0.0%
-  VE: { region: [4], city: [7] }, // region 103.6%, city 101.9%
+  VE: { region: [4], city: [7, 8] }, // region 103.6%, city 101.9% (7) + gap-fill 8 -- see override note above
   VG: { region: [4], city: [] }, // region 107.1%, city 0.0%
   VI: { region: [4], city: [6] }, // region 536.0%, city 536.0%
   VN: { region: [4], city: [6] }, // region 170.3%, city 99.6%
