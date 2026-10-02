@@ -154,6 +154,28 @@ export interface CountryAdminLevels {
  *   10 for the rest. Level 6/7 stay unavailable everywhere else in GB,
  *   so rural England/Scotland (where 10 is the right grain) is
  *   unaffected.
+ * - CU, MD, NI: found by `report-place-tag-mismatches.ts` (README's
+ *   "place=city/town/village tie-break" item) -- each country's configured
+ *   level already tessellates the country (Cuba's 117 level-6
+ *   municipalities at 97.7%, Moldova's level-8 communes at 100.4%,
+ *   Nicaragua's level-6 municipios at 128.1%), so the area vote alone
+ *   never surfaces these; the bug is grain, not coverage, the same class
+ *   as GB/US/CA above. Confirmed directly against the OSM extract, not
+ *   just the coverage percentage: Santiago de Cuba carries its own
+ *   `place=city` relation at level 8, distinct from and nested inside its
+ *   level-6 `place=municipality` (the big rural municipality the
+ *   unmodified config would otherwise name it); Moldova's Bălți (its
+ *   second city) is `place=city` at level 9 inside an unnamed level-8
+ *   container (Chișinău, the capital, is already `place=city` at level 8
+ *   and unaffected); Nicaragua's León, Matagalpa and Jinotepe each have a
+ *   real `place=city`/`town` relation at level 10 nested inside their
+ *   level-6 `place=municipality`, distinct from the far more numerous
+ *   non-settlement level-10 features in the same country (hamlets,
+ *   isolated dwellings, neighbourhoods -- excluded by the tie-break
+ *   signal's own `place=city/town/village` filter, not by level alone).
+ *   All three gap-fill the finer level in rather than replacing the
+ *   configured one, since the configured level still correctly names
+ *   every settlement the finer level doesn't carry its own relation for.
  *
  * Entries whose comment shows a coverage figure far over 100% (e.g. small
  * multi-island nations like the Maldives or Cook Islands) reflect
@@ -210,7 +232,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   CN: { region: [4], city: [6] }, // region 103.8%, city 102.5%
   CO: { region: [4], city: [6] }, // region 100.3%, city 100.1%
   CR: { region: [4], city: [8] }, // region 157.5%, city 100.0%
-  CU: { region: [4], city: [6] }, // region 211.8%, city 97.7%
+  CU: { region: [4], city: [6, 8] }, // region 211.8%, city 97.7% (6) + gap-fill 8 -- see override note above
   CV: { region: [6], city: [9] }, // region 103.4%, city 6.3%
   CY: { region: [6], city: [8] }, // region 107.9%, city 104.7%
   CZ: { region: [4], city: [8] }, // region 100.1%, city 99.3%
@@ -307,7 +329,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   LY: { region: [4], city: [] }, // region 106.2%, city 0.0%
   MA: { region: [4], city: [8] }, // region 115.4%, city 102.1%
   MC: { region: [], city: [8] }, // region 0.0%, city 78.2%
-  MD: { region: [4], city: [8] }, // region 102.0%, city 100.4%
+  MD: { region: [4], city: [8, 9] }, // region 102.0%, city 100.4% (8) + gap-fill 9 -- see override note above
   ME: { region: [6], city: [8] }, // region 99.5%, city 9.6%
   MF: { region: [], city: [8] }, // region 0.0%, city 78.4%
   MG: { region: [4], city: [6] }, // region 99.9%, city 99.8%
@@ -331,7 +353,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   NE: { region: [6], city: [8] }, // region 100.0%, city 0.0%
   NF: { region: [4], city: [9] }, // region 6022.3%, city 87.2%
   NG: { region: [4], city: [6] }, // region 100.4%, city 100.4%
-  NI: { region: [4], city: [6] }, // region 130.6%, city 128.1%
+  NI: { region: [4], city: [6, 10] }, // region 130.6%, city 128.1% (6) + gap-fill 10 -- see override note above
   NL: { region: [4], city: [10] }, // region 111.1%, city 110.8%
   NO: { region: [4], city: [7] }, // region 164.2%, city 125.3%
   NP: { region: [6], city: [9] }, // region 100.3%, city 92.0%

@@ -780,31 +780,77 @@ section, since those are spec decisions rather than pipeline work.
   São Paulo nor Rio de Janeiro (the city, not the state) resolve --
   `lookup` at each city's own coordinates returns `city: -`. 66.6%
   coverage nationally apparently doesn't guarantee the largest metros are
-  among the covered candidates; not yet investigated further.
-- **`place=city/town/village` was evaluated as an alternative to
-  `admin_level` matching, and rejected for geometry -- but is a real
-  signal worth using differently.** The idea: instead of picking one
-  `admin_level` per country, filter OSM for whatever's tagged
-  `place=city`/`town`/`village` and use those boundaries directly.
-  Tested on the Netherlands extract (`osmium tags-filter ... place=city,town,village`,
-  via `Dockerfile.tools`, same as the boundary extraction already does):
-  8,492 of 8,624 matches (98.5%) are bare nodes -- a single label point,
-  no polygon at all, i.e. exactly the nearest-labeled-point approach this
-  whole project exists to replace (see "Why nearest-point is wrong"). The
-  131 that do carry a polygon are tagged `boundary=place` with no
-  `admin_level`, and are informal settlement-extent outlines drawn
-  separately from the real administrative boundaries already in use, not
-  a richer version of the same geometry. So `place=*` can't replace
-  `admin_level` as the geometry source. What it *can* do: disambiguate
-  which existing `admin_level` relation is "the real city" when a country
-  has more than one plausible candidate at different levels for the same
-  settlement -- this is exactly how Bremen's fix was found (its
-  `admin_level=6` relation, not the `admin_level=4` Land, carries
-  `place=city`; see "Resolved"). Cross-referencing `place=city/town/village`
-  tags onto the existing boundary corpus (already extracted, no new OSM
-  pull needed) as a tie-break/confirmation signal, rather than a
-  standalone geometry source, is the version of this idea worth pursuing
-  later.
+  among the covered candidates. Confirmed distinct from the
+  `place=city/town/village` tie-break item below: both cities' real
+  municipality relation (`place=municipality`) is `admin_level=8` with no
+  competing same-name candidate at Brazil's configured level 9 at all --
+  not a level tie the tie-break tool's (country, name) grouping can
+  disambiguate, a level missing a candidate entirely. The 6 Brazil entries
+  the tie-break tool *did* find (level-8 `place=village`/`town` villages
+  with a real level-9 sibling) are a different, smaller set of Brazilian
+  municipalities, not these two; not yet investigated whether widening
+  `BR`'s `city` list to `[9, 8]` fixes both bugs at once or only the
+  tie-break tool's set.
+- **`place=city/town/village` tie-break: tool built, most countries not
+  yet reviewed.** `place=city/town/village` was evaluated as an
+  alternative to `admin_level` matching and rejected for geometry (tested
+  on the Netherlands extract: 98.5% of matches are bare label nodes with
+  no polygon at all, the same nearest-labeled-point approach this project
+  exists to replace; the rest are informal `boundary=place` outlines, not
+  a richer version of the real administrative geometry) -- but the tag
+  survives as a real disambiguation signal: Bremen's fix was found exactly
+  this way (its `admin_level=6` relation, not the `admin_level=4` Land,
+  carries `place=city`; see "Resolved").
+
+  `data-ingest/src/report-place-tag-mismatches.ts` (library:
+  `data-ingest/src/lib/placeTagSignal.ts`) automates finding more Bremens:
+  its own corpus scan (independent of `COUNTRY_ADMIN_LEVELS`, since
+  filtering by the *current* config would hide exactly the missing levels
+  it's looking for) groups same-`(country, name)` relations across
+  admin_levels and flags any whose `place` tag names a level the
+  country's config doesn't already treat as a city. Read-only -- it never
+  changes build output itself, only prints candidates for hand review and
+  a `countryAdminLevels.ts` edit, the same workflow Bremen's fix came
+  from. A worldwide run found 814 candidates; reviewed and fixed so far:
+  Cuba (`city: [6, 8]`), Moldova (`city: [8, 9]`), Nicaragua
+  (`city: [6, 10]`) -- all three gap-fills, same shape as Bremen's,
+  verified on `data/03-final/world.bin` (Santiago de Cuba, Bălți, León,
+  Matagalpa and Jinotepe all now resolve to `city:` their own name, not
+  their enclosing municipality; a rural point well outside Santiago de
+  Cuba's real urban core now correctly returns `city: -` instead of the
+  whole municipality). None of these three were findable by the area-vote
+  alone -- every one's *configured* level already tessellates the country
+  (Cuba 97.7%, Moldova 100.4%, Nicaragua 128.1%), so the bug is grain, not
+  coverage, the same class as the GB/US/CA entries elsewhere in this file.
+  Remaining from the 814, not yet reviewed: Czechia (44), El Salvador
+  (40), Indonesia (20), Luxembourg (14), Latvia (7), Iran (6), Brazil (6
+  -- likely the same bug as "Brazil: major cities missing" above, though
+  unconfirmed), Mexico (5), Burkina Faso (5), plus roughly 60 scattered
+  one-offs.
+- **Search has no diacritic folding, and ranks city above country even
+  when the query is a country's own name.** `reader/src/relevance.ts`'s
+  `nameMatchQuality` does a plain substring match on the lowercased name
+  only -- searching `Nederland` won't find `Nederland` if the stored
+  entry happens to carry a diacritic variant, and more immediately,
+  typing a country's exact name unhelped by diacritics still doesn't
+  necessarily surface that country first: `LEVEL_BONUS` (`city: 4,
+  region: 2, country: 1`) outranks every country by level alone, so a
+  city named (or containing) `Nederland` -- e.g. a town in Overijssel --
+  can beat the country `Nederland` itself even on an exact name match,
+  which is backwards for a query that's already a country's full name.
+  Two separate fixes, not one: (1) diacritic-insensitive matching (fold
+  both the query and stored names before comparing, e.g. Unicode NFD +
+  strip combining marks), with an exact-spelling (diacritics as typed)
+  match still ranked above a normalized-only match by some margin --
+  proposed +1, not yet measured against real queries; (2) revisit
+  `LEVEL_BONUS`'s ordering so an exact country-name match outranks a
+  same-named city, likely by folding level into the score differently for
+  an exact match specifically rather than a flat per-level bonus that
+  applies regardless of match quality. Neither changes `search`'s
+  un-sorted (no `--sort`) behavior or the trigram index's candidate set
+  (Appendix B.9) -- both are substring-based already and stay that way;
+  this is purely `nameMatchQuality`/`LEVEL_BONUS` and the short-query
+  table builder that shares them (`binary-format.md` Appendix B.5/B.12).
 
 ### Resolved
 

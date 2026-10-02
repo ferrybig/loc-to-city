@@ -23,7 +23,16 @@ function fakeCountries(areaByCode: Record<string, number>): CountryIndex {
 }
 
 function fakeCandidate(country: string, level: number, area: number): CityCandidateMeta {
-  return { id: `${country}-${level}-${area}`, name: "x", country, level, area, repPoint: [0, 0], bbox: [0, 0, 0, 0] };
+  return {
+    id: `${country}-${level}-${area}`,
+    name: "x",
+    nameEn: undefined,
+    country,
+    level,
+    area,
+    repPoint: [0, 0],
+    bbox: [0, 0, 0, 0],
+  };
 }
 
 function fakeIndex(opts: {
