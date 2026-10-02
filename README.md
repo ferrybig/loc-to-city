@@ -791,17 +791,17 @@ section, since those are spec decisions rather than pipeline work.
   municipalities, not these two; not yet investigated whether widening
   `BR`'s `city` list to `[9, 8]` fixes both bugs at once or only the
   tie-break tool's set.
-- **`place=city/town/village` tie-break: tool built, 5 of 814 candidates
-  fixed, most still not reviewed.** `place=city/town/village` was
-  evaluated as an alternative to `admin_level` matching and rejected for
-  geometry (tested on the Netherlands extract: 98.5% of matches are bare
-  label nodes with no polygon at all, the same nearest-labeled-point
-  approach this project exists to replace; the rest are informal
-  `boundary=place` outlines, not a richer version of the real
-  administrative geometry) -- but the tag survives as a real
-  disambiguation signal: Bremen's fix was found exactly this way (its
-  `admin_level=6` relation, not the `admin_level=4` Land, carries
-  `place=city`; see "Resolved").
+- **`place=city/town/village` tie-break: the 814-candidate worldwide
+  report is closed out; a handful of scattered one-offs remain
+  unreviewed.** `place=city/town/village` was evaluated as an alternative
+  to `admin_level` matching and rejected for geometry (tested on the
+  Netherlands extract: 98.5% of matches are bare label nodes with no
+  polygon at all, the same nearest-labeled-point approach this project
+  exists to replace; the rest are informal `boundary=place` outlines, not
+  a richer version of the real administrative geometry) -- but the tag
+  survives as a real disambiguation signal: Bremen's fix was found
+  exactly this way (its `admin_level=6` relation, not the `admin_level=4`
+  Land, carries `place=city`; see "Resolved").
 
   `data-ingest/src/report-place-tag-mismatches.ts` (library:
   `data-ingest/src/lib/placeTagSignal.ts`) automates finding more Bremens:
@@ -812,41 +812,58 @@ section, since those are spec decisions rather than pipeline work.
   country's config doesn't already treat as a city. Read-only -- it never
   changes build output itself, only prints candidates for hand review and
   a `countryAdminLevels.ts` edit, the same workflow Bremen's fix came
-  from. A worldwide run found 814 candidates; reviewed and fixed so far:
-  Cuba (`city: [6, 8]`), Moldova (`city: [8, 9]`), Nicaragua
-  (`city: [6, 10]`), El Salvador (`city: [6, 7]`), Luxembourg
-  (`city: [8, 9]`) -- all five gap-fills, same shape as Bremen's, verified
-  on `data/03-final/world.bin`: Santiago de Cuba, Bălți, León, Matagalpa,
-  Jinotepe, Santa Ana, Acajutla, Beckerich, Dippach and Mamer all now
-  resolve to `city:` their own name, not their enclosing municipality/
-  commune; a rural point well outside Santiago de Cuba's real urban core
-  now correctly returns `city: -`, and rural points near Santa Ana or
-  inside Luxembourg's Canton Redange now resolve to their own distinct
-  neighboring city/village (Candelaria de la Frontera, Chalchuapa,
-  Groussbus-Wal, Préizerdaul) instead of being absorbed into the larger
-  place. None of these five were findable by the area-vote alone -- every
-  one's *configured* level already tessellates the country (Cuba 97.7%,
-  Moldova 100.4%, Nicaragua 128.1%, El Salvador 101.3%, Luxembourg
-  100.8%), so the bug is grain, not coverage, the same class as the
-  GB/US/CA entries elsewhere in this file.
+  from. A worldwide run found 814 candidates, but 773 turned out to be
+  false positives of one shape: a same-named entity already resolving
+  correctly today via a *different*, currently-configured level (Brazil's
+  small municipalities are nearly all single-district, so the district
+  already carries the municipality's own name) -- `findPlaceTagMismatches`
+  now detects and excludes this case (`alreadyResolvedAtLevel`), leaving
+  41 real candidates.
 
-  Two more were investigated and deliberately left unfixed: Czechia's
-  configured level 8 already resolves every sampled case correctly (Brno,
-  Praha, all 6 same-named "Babice" municipalities), and its place-tagged
-  level-10 candidates look like cadastral villages nested inside an
-  already-correct municipality -- gap-filling risks the New York/Arkansas
-  regression shape (a finer level contesting cells against its own,
-  already-correct container). Indonesia's place-tagged level covers only
-  ~696 of its ~75,000+ real villages nationally, two tiers below the
-  configured level via an untagged level in between -- gap-filling would
-  promote only that arbitrary, incompletely-tagged subset, a patchier
-  result than the current consistent naming. Both rationales are recorded
-  in `countryAdminLevels.ts`'s own doc comment.
+  Of those 41, eleven countries got a real gap-fill fix, all the same
+  shape as Bremen's and verified on `data/03-final/world.bin`: Cuba
+  (`city: [6, 8]`), Moldova (`city: [8, 9]`), Nicaragua (`city: [6,
+  10]`), El Salvador (`city: [6, 7]`), Luxembourg (`city: [8, 9]`),
+  Burkina Faso (`city: [6, 8]`), Belarus (`city: [8, 6]`), Canada
+  (`city: [8, 6]`), Latvia (`city: [8, 7]`) and Turkmenistan
+  (`city: [5, 8]`) all now resolve their affected cities under their own
+  name instead of the enclosing municipality/department/parish/region;
+  Venezuela (`city: [7, 8]`) is a partial win -- some towns (El Salto,
+  Las Trincheras, San Antonio de Los Altos) now resolve under their own
+  name, others don't, because Venezuela's parroquias are inconsistently
+  self-named after their own seat town. None of these were findable by
+  the area-vote alone -- every one's *configured* level already
+  tessellates its country, so the bug was always grain, not coverage, the
+  same class as the GB/US/CA entries elsewhere in this file. Latvia's fix
+  came from manual investigation, not the tool itself: Latvia tags its
+  real town tier with `border_type=town`, no OSM `place` value at all.
 
-  Remaining from the 814, not yet reviewed: Latvia (7), Iran (6), Brazil
-  (6 -- likely the same bug as "Brazil: major cities missing" above,
-  though unconfirmed), Mexico (5), Burkina Faso (5), plus roughly 60
-  scattered one-offs.
+  Eight countries' candidates were investigated and deliberately left
+  unfixed, each for a different reason, all recorded in
+  `countryAdminLevels.ts`'s own doc comment: Armenia's one candidate
+  already resolves under a name-variant (`placeTagSignal.ts`'s exact-string
+  grouping doesn't normalize away an administrative suffix); Argentina
+  and Indonesia's place-tagged levels are sparse and inconsistently
+  tagged multiple tiers below the configured level, so a gap-fill would
+  help only an arbitrary subset; Czechia's and Iran's configured levels
+  already resolve correctly, with the place-tagged level either noise
+  (cadastral sub-villages, Tehran neighbourhoods) or the same
+  New York/Arkansas contested-cells risk a gap-fill into an
+  already-correct coarser level creates. Estonia, Mexico and Portugal
+  are the most interesting case: all three looked exactly like the
+  working fixes (Tallinn, Ciudad de México and Lisboa all had a genuine,
+  distinctly-tagged whole-city relation one level below their country's
+  configured primary) and were applied, then reverted after a real
+  rebuild showed zero effect -- each capital's own internal districts
+  (Tallinn's linnaosad, Mexico City's alcaldías, Lisbon's freguesias) are
+  tagged at the very level that's already primary nationwide, so the
+  capital's own area is entirely covered by its own already-primary
+  children before gap-fill ever runs. This is the same underlying shape
+  as this file's "Capitals that are themselves a region resolve to a
+  city district" entry above (Astana, Sana'a, Aden) -- a real settlement
+  whose own finer subdivisions already tile its area under different
+  names -- just one level down, and no config in the current primary/
+  gap-fill model can reach it.
 - **Search has no diacritic folding, and ranks city above country even
   when the query is a country's own name.** `reader/src/relevance.ts`'s
   `nameMatchQuality` does a plain substring match on the lowercased name
