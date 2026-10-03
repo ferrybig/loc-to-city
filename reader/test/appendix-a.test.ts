@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CGeoDataReader, boundingBoxContains } from "../src/index.js";
-import { APPENDIX_A_BYTES } from "./fixtures/appendixA.js";
+import { CGeoDataReader, boundingBoxContains } from "../src/index.ts";
+import { APPENDIX_A_BYTES } from "./fixtures/appendixA.ts";
 
 test("Appendix A fixture is exactly 157 bytes", () => {
   assert.equal(APPENDIX_A_BYTES.length, 157);

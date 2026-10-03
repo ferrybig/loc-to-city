@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readVarint, writeVarint } from "../src/index.js";
+import { readVarint, writeVarint } from "../src/index.ts";
 
 // Section 3.2 worked examples: 0 -> 00; 127 -> 7f; 128 -> 80 01;
 // 300 -> ac 02; 8192 -> 80 40.

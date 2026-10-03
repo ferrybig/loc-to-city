@@ -8,7 +8,7 @@
 
 import type { CGeoDataReader, QueryResult } from "@loc-to-city/reader";
 import { PNG } from "pngjs";
-import { colorKeyToRgb } from "./colors.js";
+import { colorKeyToRgb } from "./colors.ts";
 
 const TILE_SIZE = 256;
 

@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import bbox from "@turf/bbox";
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from "geojson";
-import { loadCountryIndex } from "../src/lib/countryIndex.js";
-import type { LonLat } from "../src/lib/geo.js";
-import { resolvePolygonCountry } from "../src/lib/polygonCountry.js";
+import { loadCountryIndex } from "../src/lib/countryIndex.ts";
+import type { LonLat } from "../src/lib/geo.ts";
+import { resolvePolygonCountry } from "../src/lib/polygonCountry.ts";
 
 // A two-country world in Natural Earth's shape: WEST covers lon [0, 10),
 // EAST covers lon [10, 20), both lat [0, 10]. Everything else is "sea".

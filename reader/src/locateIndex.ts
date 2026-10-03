@@ -15,11 +15,11 @@
  * `locate()` without an index computes exactly the same cell by scanning
  * (`computeLocateCell`). The index is only a precomputed copy of it.
  */
-import type { CGeoDataHeader } from "./header.js";
-import { mortonDecode, mortonEncode, shiftRight } from "./morton.js";
-import type { CGeoDataReader } from "./reader.js";
-import { openSource, type RandomAccessSource } from "./source.js";
-import { readVarint, writeVarint } from "./varint.js";
+import type { CGeoDataHeader } from "./header.ts";
+import { mortonDecode, mortonEncode, shiftRight } from "./morton.ts";
+import type { CGeoDataReader } from "./reader.ts";
+import { openSource, type RandomAccessSource } from "./source.ts";
+import { readVarint, writeVarint } from "./varint.ts";
 
 // "CGEODATA" — same signature as the main data file.
 const SIGNATURE = Uint8Array.from([0x43, 0x47, 0x45, 0x4f, 0x44, 0x41, 0x54, 0x41]);
@@ -474,13 +474,25 @@ const MAX_HEADER_LENGTH = SIGNATURE.length + 8 + 8 + 1 + 8;
  * `useLocateIndex()` does that against the file it's attached to.
  */
 export class LocateIndex {
+	private readonly source: RandomAccessSource;
+	private readonly entriesStart: number;
+	readonly sourceChecksum: bigint;
+	readonly entryWidth: number;
+	readonly placeCount: number;
+
 	private constructor(
-		private readonly source: RandomAccessSource,
-		private readonly entriesStart: number,
-		readonly sourceChecksum: bigint,
-		readonly entryWidth: number,
-		readonly placeCount: number,
-	) {}
+		source: RandomAccessSource,
+		entriesStart: number,
+		sourceChecksum: bigint,
+		entryWidth: number,
+		placeCount: number,
+	) {
+		this.source = source;
+		this.entriesStart = entriesStart;
+		this.sourceChecksum = sourceChecksum;
+		this.entryWidth = entryWidth;
+		this.placeCount = placeCount;
+	}
 
 	/** Opens a locate index from a file path (read on demand) or bytes.
 	 * Validates signature, kind, version, entry width and length. */

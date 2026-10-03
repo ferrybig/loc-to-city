@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import area from "@turf/area";
 import type { Feature, Polygon } from "geojson";
-import { buildCityFallback, buildRegionFallback } from "../src/lib/voronoiFallback.js";
-import type { Cities500Row } from "../src/lib/cities500.js";
+import { buildCityFallback, buildRegionFallback } from "../src/lib/voronoiFallback.ts";
+import type { Cities500Row } from "../src/lib/cities500.ts";
 
 function square(minX: number, minY: number, maxX: number, maxY: number): Feature<Polygon> {
   return {

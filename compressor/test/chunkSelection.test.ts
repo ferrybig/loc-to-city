@@ -2,11 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
 import { openSource, readHeaderAndDirectory, parsePlaceTable, readNameEntry, resolveIdentifier } from "@loc-to-city/reader";
-import { parseChunkSelection } from "../src/chunkSelection.js";
-import { buildCGeoDataFile } from "../src/build.js";
-import { buildCGeoDataFileParallel } from "../src/buildParallel.js";
-import type { HierarchyCountry } from "../src/hierarchy.js";
-import type { CityProperties } from "../src/placeIds.js";
+import { parseChunkSelection } from "../src/chunkSelection.ts";
+import { buildCGeoDataFile } from "../src/build.ts";
+import { buildCGeoDataFileParallel } from "../src/buildParallel.ts";
+import type { HierarchyCountry } from "../src/hierarchy.ts";
+import type { CityProperties } from "../src/placeIds.ts";
 
 test("parseChunkSelection: single index, list, and inclusive ranges", () => {
   assert.deepEqual([...parseChunkSelection("200")], [200]);

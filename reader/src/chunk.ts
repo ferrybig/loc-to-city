@@ -1,5 +1,5 @@
-import { readVarint, readDeltaVarintList } from "./varint.js";
-import { lowBits } from "./morton.js";
+import { readVarint, readDeltaVarintList } from "./varint.ts";
+import { lowBits } from "./morton.ts";
 
 export interface ChunkRecords {
   /** Global place ids referenced by this chunk, indexed 0..P-1. */

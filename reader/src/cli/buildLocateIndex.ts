@@ -1,12 +1,12 @@
 import { writeFileSync } from "node:fs";
-import { buildLocateIndex } from "../locateIndex.js";
+import { buildLocateIndex } from "../locateIndex.ts";
 import {
 	type Command,
 	EXIT_OK,
 	openReader,
 	parse,
 	UsageError,
-} from "./shared.js";
+} from "./shared.ts";
 
 export const buildLocateIndexCmd: Command = {
 	name: "build-locate-index",

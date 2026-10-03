@@ -1,6 +1,6 @@
-import type { IndexedCandidate, CandidateIndex } from "./candidateIndex.js";
-import { chunkBoundsOf } from "./buildCore.js";
-import type { CellBounds } from "./geometry.js";
+import type { IndexedCandidate, CandidateIndex } from "./candidateIndex.ts";
+import { chunkBoundsOf } from "./buildCore.ts";
+import type { CellBounds } from "./geometry.ts";
 
 /** One chunk's worth of work: everything a worker needs to reproduce
  * `buildChunkRecords` + `encodeChunk` for this chunk, with no further

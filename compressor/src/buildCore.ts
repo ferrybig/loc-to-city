@@ -1,11 +1,11 @@
 import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
-import type { HierarchyCountry } from "./hierarchy.js";
-import { buildPlaceIdSpace, type CityProperties, type PlaceIdSpace } from "./placeIds.js";
-import { buildNameBlocks } from "./nameBlocks.js";
-import { CandidateIndex, type CandidateEntry } from "./candidateIndex.js";
-import { writeCGeoDataFile } from "./writer.js";
-import { buildRegionCountryCandidates } from "./regionCountryCandidates.js";
-import type { CellBounds } from "./geometry.js";
+import type { HierarchyCountry } from "./hierarchy.ts";
+import { buildPlaceIdSpace, type CityProperties, type PlaceIdSpace } from "./placeIds.ts";
+import { buildNameBlocks } from "./nameBlocks.ts";
+import { CandidateIndex, type CandidateEntry } from "./candidateIndex.ts";
+import { writeCGeoDataFile } from "./writer.ts";
+import { buildRegionCountryCandidates } from "./regionCountryCandidates.ts";
+import type { CellBounds } from "./geometry.ts";
 
 /** Shared by both the sequential (`build.ts`) and worker-pool
  * (`buildParallel.ts`) paths, so they can't silently drift apart. */

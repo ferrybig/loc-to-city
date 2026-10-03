@@ -3,11 +3,11 @@ export {
 	boundingBoxContains,
 	cellBoundingBox,
 	chunkBoundingBox,
-} from "./cellBounds.js";
-export { type ChunkRecords, parseChunk } from "./chunk.js";
-export { readHeaderAndDirectory } from "./container.js";
-export { type CGeoDataDirectory, parseDirectory } from "./directory.js";
-export { type CGeoDataHeader, parseHeader } from "./header.js";
+} from "./cellBounds.ts";
+export { type ChunkRecords, parseChunk } from "./chunk.ts";
+export { readHeaderAndDirectory } from "./container.ts";
+export { type CGeoDataDirectory, parseDirectory } from "./directory.ts";
+export { type CGeoDataHeader, parseHeader } from "./header.ts";
 export {
 	type BuildLocateIndexOptions,
 	buildLocateIndex,
@@ -17,8 +17,8 @@ export {
 	LocateIndex,
 	locateEntryWidth,
 	locateIndexPathFor,
-} from "./locateIndex.js";
-export { lowBits, mortonDecode, mortonEncode, shiftRight } from "./morton.js";
+} from "./locateIndex.ts";
+export { lowBits, mortonDecode, mortonEncode, shiftRight } from "./morton.ts";
 export {
 	type PlaceTableInfo,
 	parsePlaceTable,
@@ -26,7 +26,7 @@ export {
 	readNameBlock,
 	readNameEntry,
 	resolveIdentifier,
-} from "./placeTable.js";
+} from "./placeTable.ts";
 export {
 	CGeoDataReader,
 	type ChunkRecord,
@@ -37,7 +37,7 @@ export {
 	type PlaceRef,
 	type QueryResult,
 	type SearchOptions,
-} from "./reader.js";
+} from "./reader.ts";
 export {
 	containsTokenRun,
 	EXACT_SPELLING_BONUS,
@@ -53,7 +53,7 @@ export {
 	QUALITY_WHOLE_WORD,
 	tokenize,
 	tokenizeFolded,
-} from "./relevance.js";
+} from "./relevance.ts";
 export {
 	buildSearchIndex,
 	DEFAULT_SEARCH_INDEX_OPTIONS,
@@ -64,13 +64,13 @@ export {
 	searchIndexPathFor,
 	trigramListIndex,
 	trigramListIndices,
-} from "./searchIndex.js";
-export { openSource, type RandomAccessSource } from "./source.js";
+} from "./searchIndex.ts";
+export { openSource, type RandomAccessSource } from "./source.ts";
 export {
 	IncompleteBufferError,
 	readDeltaVarintList,
 	readVarint,
 	readVarintList,
 	writeVarint,
-} from "./varint.js";
-export { safeInflate } from "./zlibUtil.js";
+} from "./varint.ts";
+export { safeInflate } from "./zlibUtil.ts";

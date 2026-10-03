@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline";
-import type { CGeoDataReader, QueryResult } from "../reader.js";
-import { parse, openReader, names, writeLine, UsageError, type Command } from "./shared.js";
+import type { CGeoDataReader, QueryResult } from "../reader.ts";
+import { parse, openReader, names, writeLine, UsageError, type Command } from "./shared.ts";
 
 interface Point {
   lat: number;

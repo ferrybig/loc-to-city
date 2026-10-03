@@ -16,15 +16,15 @@
 // data-ingest/src/lib/countryAdminLevels.ts, the same workflow that
 // already produced every existing override in that file.
 //
-// Usage: npx tsx data-ingest/src/report-place-tag-mismatches.ts [--all]
+// Usage: node data-ingest/src/report-place-tag-mismatches.ts [--all]
 //   --all   also print non-mismatching groups (place tag agrees with the
 //           current config already) -- useful for sanity-checking the
 //           detector itself against known-good entries, not for triage.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { discoverAdminGeoJsonFiles } from "./lib/osmFiles.js";
-import { loadCountryIndex } from "./lib/countryIndex.js";
-import { collectPlaceTagCandidates, findPlaceTagMismatches } from "./lib/placeTagSignal.js";
+import { discoverAdminGeoJsonFiles } from "./lib/osmFiles.ts";
+import { loadCountryIndex } from "./lib/countryIndex.ts";
+import { collectPlaceTagCandidates, findPlaceTagMismatches } from "./lib/placeTagSignal.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");

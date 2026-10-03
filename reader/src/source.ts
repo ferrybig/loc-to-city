@@ -13,7 +13,11 @@ export interface RandomAccessSource {
 }
 
 class BufferSource implements RandomAccessSource {
-  constructor(private readonly buf: Uint8Array) {}
+  private readonly buf: Uint8Array;
+
+  constructor(buf: Uint8Array) {
+    this.buf = buf;
+  }
 
   get size(): number {
     return this.buf.length;

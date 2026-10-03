@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { FeatureCollection, MultiPolygon, Polygon } from "geojson";
 import type { CityProperties, HierarchyCountry } from "@loc-to-city/compressor";
-import { streamGeoJSONSeq } from "./lib/geojsonseqStream.js";
+import { streamGeoJSONSeq } from "./lib/geojsonseqStream.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");

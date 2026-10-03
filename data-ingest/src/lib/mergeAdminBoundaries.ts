@@ -1,5 +1,5 @@
 import type { Feature } from "geojson";
-import { streamGeoJSONSeq } from "./geojsonseqStream.js";
+import { streamGeoJSONSeq } from "./geojsonseqStream.ts";
 
 /** Streams every file in `files`, in order, deduplicating by the id field
  * `osmium export --add-unique-id type_id` adds (observed in practice as

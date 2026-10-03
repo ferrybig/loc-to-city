@@ -3,7 +3,7 @@
  * that lets `CGeoDataReader.search()` confirm only the places whose names
  * could contain the query, instead of scanning every name block.
  *
- * The file is CGEODATA kind 1, version 1 (stored `version` varint 17). It
+ * The file is CGEODATA kind 1, version 2 (stored `version` varint 18). It
  * holds, for every place of its source:
  *   - one list of place ids per trigram of folded symbols (Section B.3):
  *     exact lists for Latin trigrams, hashed ones for the rest, each an
@@ -15,11 +15,11 @@
  * table block a query needs, each cached behind a WeakRef like the
  * reader's name blocks.
  */
-import type { CGeoDataReader, PlaceLevel } from "./reader.js";
-import { foldDiacritics, LEVEL_BONUS, nameMatchQuality, prepareNeedle, QUALITY_MAX } from "./relevance.js";
-import type { Needle } from "./relevance.js";
-import { openSource, type RandomAccessSource } from "./source.js";
-import { readVarint, writeVarint } from "./varint.js";
+import type { CGeoDataReader, PlaceLevel } from "./reader.ts";
+import { foldDiacritics, LEVEL_BONUS, nameMatchQuality, prepareNeedle, QUALITY_MAX } from "./relevance.ts";
+import type { Needle } from "./relevance.ts";
+import { openSource, type RandomAccessSource } from "./source.ts";
+import { readVarint, writeVarint } from "./varint.ts";
 
 // ── Symbol folding (Section B.2) ──────────────────────────────────────────────
 
@@ -27,14 +27,18 @@ import { readVarint, writeVarint } from "./varint.js";
 const SEPARATOR = 26;
 /** Symbol 27: every ASCII digit. */
 const DIGIT = 27;
-const COMBINING = /[\u0300-\u036f]/g;
 
-/** NFD, drop combining diacritics, lowercase, then one symbol per code
- * point: a-z -> 0-25, 0-9 -> 27, other ASCII -> 26, everything from
- * U+0080 up -> its own code point. */
+/** The folded form (`foldDiacritics`: NFD, drop combining diacritics,
+ * lowercase), then one symbol per code point: a-z -> 0-25, 0-9 -> 27,
+ * other ASCII -> 26, everything from U+0080 up -> its own code point.
+ * Section B.2 defines the symbol sequence as *continuing from* the folded
+ * form, so this must reuse `foldDiacritics` rather than repeat it -- two
+ * copies of the first three steps could drift, and the index's
+ * never-lose-a-match guarantee (Section B.9) rests on them being
+ * identical. */
 export function foldSymbols(text: string): number[] {
 	const symbols: number[] = [];
-	for (const ch of text.normalize("NFD").replace(COMBINING, "").toLowerCase()) {
+	for (const ch of foldDiacritics(text)) {
 		const cp = ch.codePointAt(0)!;
 		if (cp >= 0x61 && cp <= 0x7a) symbols.push(cp - 0x61);
 		else if (cp >= 0x30 && cp <= 0x39) symbols.push(DIGIT);
@@ -362,24 +366,54 @@ export class SearchIndex {
 	private tableDirectoryCache: WeakRef<TableDirectory> | undefined;
 	private readonly tableBlockCache = new Map<number, WeakRef<Map<string, number[]>>>();
 
+	private readonly source: RandomAccessSource;
+	readonly sourceChecksum: bigint;
+	/** N, the number of places in the source; every one is indexed. */
+	readonly placeCount: number;
+	readonly hashExp: number;
+	/** Places per short-query entry; 0 when the file has no table. */
+	readonly topCount: number;
+	readonly topBlockExp: number;
+	private readonly listDirectoryStart: number;
+	private readonly listDirectoryLength: number;
+	private readonly listsStart: number;
+	private readonly listsLength: number;
+	private readonly tableDirectoryStart: number;
+	private readonly tableDirectoryLength: number;
+	private readonly tableBlocksStart: number;
+	private readonly tableBlocksLength: number;
+
 	private constructor(
-		private readonly source: RandomAccessSource,
-		readonly sourceChecksum: bigint,
-		/** N, the number of places in the source; every one is indexed. */
-		readonly placeCount: number,
-		readonly hashExp: number,
-		/** Places per short-query entry; 0 when the file has no table. */
-		readonly topCount: number,
-		readonly topBlockExp: number,
-		private readonly listDirectoryStart: number,
-		private readonly listDirectoryLength: number,
-		private readonly listsStart: number,
-		private readonly listsLength: number,
-		private readonly tableDirectoryStart: number,
-		private readonly tableDirectoryLength: number,
-		private readonly tableBlocksStart: number,
-		private readonly tableBlocksLength: number,
-	) {}
+		source: RandomAccessSource,
+		sourceChecksum: bigint,
+		placeCount: number,
+		hashExp: number,
+		topCount: number,
+		topBlockExp: number,
+		listDirectoryStart: number,
+		listDirectoryLength: number,
+		listsStart: number,
+		listsLength: number,
+		tableDirectoryStart: number,
+		tableDirectoryLength: number,
+		tableBlocksStart: number,
+		tableBlocksLength: number,
+	) {
+		this.source = source;
+		this.sourceChecksum = sourceChecksum;
+		this.placeCount = placeCount;
+		this.hashExp = hashExp;
+		this.topCount = topCount;
+		this.topBlockExp = topBlockExp;
+		this.listDirectoryStart = listDirectoryStart;
+		this.listDirectoryLength = listDirectoryLength;
+		this.listsStart = listsStart;
+		this.listsLength = listsLength;
+		this.tableDirectoryStart = tableDirectoryStart;
+		this.tableDirectoryLength = tableDirectoryLength;
+		this.tableBlocksStart = tableBlocksStart;
+		this.tableBlocksLength = tableBlocksLength;
+	}
 
 	/** Opens a search index from a file path (read on demand) or bytes,
 	 * validating its header (Section B.10). */
@@ -513,7 +547,14 @@ export class SearchIndex {
 	 * Section B.9 step 1: the short-query table's entry for `text` -- its
 	 * top `topCount` places in relevance order (Section B.5), or `[]` when
 	 * nothing matches. Undefined when the file has no table or `text`
-	 * isn't one or two code points long once lowercased.
+	 * isn't one or two code points long once folded.
+	 *
+	 * The key is `foldDiacritics(text)`, so an accented query and its
+	 * unaccented spelling land on the same entry -- which is only the
+	 * right answer for a query that needed no folding in the first place.
+	 * Callers MUST therefore apply Section B.9 step 1's own precondition
+	 * (the query's folded form already equals its plain lowercase form)
+	 * before trusting this; `CGeoDataReader.searchRanked` does.
 	 */
 	shortQuery(text: string): number[] | undefined {
 		if (this.topCount === 0) return undefined;

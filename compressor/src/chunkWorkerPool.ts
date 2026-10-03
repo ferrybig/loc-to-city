@@ -1,8 +1,11 @@
 import { Worker } from "node:worker_threads";
 import { fileURLToPath } from "node:url";
-import type { ChunkJob, ChunkWorkerData, WorkerRequest, WorkerResponse } from "./chunkJobs.js";
+import type { ChunkJob, ChunkWorkerData, WorkerRequest, WorkerResponse } from "./chunkJobs.ts";
 
-const WORKER_URL = new URL("./chunkWorker.js", import.meta.url);
+const WORKER_URL = new URL(
+  import.meta.url.endsWith(".ts") ? "./chunkWorker.ts" : "./chunkWorker.js",
+  import.meta.url,
+);
 
 export interface ChunkResult {
   chunkIndex: number;

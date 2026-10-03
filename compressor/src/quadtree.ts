@@ -1,6 +1,6 @@
 import { mortonEncode } from "@loc-to-city/reader";
-import type { IndexedCandidate } from "./candidateIndex.js";
-import { classifyCell, countContainedSamples, type CellBounds } from "./geometry.js";
+import type { IndexedCandidate } from "./candidateIndex.ts";
+import { classifyCell, countContainedSamples, type CellBounds } from "./geometry.ts";
 
 export interface ChunkRecord {
   code: number;

@@ -1,6 +1,6 @@
 import { createReadStream, readFileSync } from "node:fs";
 import type { Feature, FeatureCollection, Polygon, MultiPolygon } from "geojson";
-import type { CityProperties } from "./placeIds.js";
+import type { CityProperties } from "./placeIds.ts";
 
 const RECORD_SEPARATOR = 0x1e;
 

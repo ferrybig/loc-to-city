@@ -5,7 +5,7 @@
  * for both, since the table is only correct if it ranks exactly like the
  * search it stands in for.
  */
-import type { PlaceLevel } from "./reader.js";
+import type { PlaceLevel } from "./reader.ts";
 
 /** Per-level bonus: a query that exactly names a country should surface
  * that country, not a same-named city buried inside it (e.g. "Nederland"

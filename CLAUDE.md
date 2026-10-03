@@ -52,11 +52,12 @@ npm test -w compressor                     # synthetic-dataset unit tests + real
 npm test -w demo                           # unit tests (not e2e)
 ```
 
-Each workspace's test script is `tsx --test test/*.test.ts` (Node's built-in
-test runner, no Jest/Vitest). To run a single test file directly:
+Each workspace's test script is `node --test test/*.test.ts` (Node's built-in
+test runner, no Jest/Vitest; Node >=26 strips TypeScript types natively, no
+`tsx`/`ts-node` dependency). To run a single test file directly:
 
 ```bash
-npx tsx --test compressor/test/geometry.test.ts
+node --test compressor/test/geometry.test.ts
 ```
 
 `npm test -w data-ingest` covers the pure, library-shaped parts only
@@ -81,15 +82,15 @@ consumer (Immich, the demo) can do through the same methods
 capability to the reader first, then expose it as a subcommand:
 
 ```bash
-npx tsx reader/src/cli.ts help                              # or help <command>
-npx tsx reader/src/cli.ts info   data/03-final/world.bin             # header, counts, byte split, largest chunks
-npx tsx reader/src/cli.ts lookup data/03-final/world.bin 52.37,4.9   # no points -> read them from stdin
-npx tsx reader/src/cli.ts list   data/03-final/world.bin --level city --country nl --tree
-npx tsx reader/src/cli.ts search data/03-final/world.bin amst        # exit 1 when nothing matched (grep-style)
-npx tsx reader/src/cli.ts search data/03-final/world.bin amsterdam --sort  # rank by relevance, not id order
-npx tsx reader/src/cli.ts show   data/03-final/world.bin 192858      # a place id from any other command
-npx tsx reader/src/cli.ts chunk  data/03-final/world.bin 3232        # the chunk index lookup printed
-npx tsx reader/src/cli.ts locate data/03-final/world.bin 309463      # a representative lat, lon per place id
+node reader/src/cli.ts help                              # or help <command>
+node reader/src/cli.ts info   data/03-final/world.bin             # header, counts, byte split, largest chunks
+node reader/src/cli.ts lookup data/03-final/world.bin 52.37,4.9   # no points -> read them from stdin
+node reader/src/cli.ts list   data/03-final/world.bin --level city --country nl --tree
+node reader/src/cli.ts search data/03-final/world.bin amst        # exit 1 when nothing matched (grep-style)
+node reader/src/cli.ts search data/03-final/world.bin amsterdam --sort  # rank by relevance, not id order
+node reader/src/cli.ts show   data/03-final/world.bin 192858      # a place id from any other command
+node reader/src/cli.ts chunk  data/03-final/world.bin 3232        # the chunk index lookup printed
+node reader/src/cli.ts locate data/03-final/world.bin 309463      # a representative lat, lon per place id
 ```
 
 `<file.bin>` may be `-` for stdin. `search` is a linear scan over the
@@ -166,7 +167,7 @@ hierarchy JSON, a cities GeoJSON/`.geojsonseq`, an output path, and
 `--regions`/`--countries` GeoJSON:
 
 ```bash
-npx tsx compressor/src/cli.ts <hierarchy.json> <cities.geojson|.geojsonseq> <out.bin> \
+node compressor/src/cli.ts <hierarchy.json> <cities.geojson|.geojsonseq> <out.bin> \
   --regions <regions.geojson> --countries <countries.geojson> \
   --width-exp 6 --height-exp 6 --max-depth N --keyframe-exp 7 \
   --attribution "..." --workers N [--only-chunks LIST]

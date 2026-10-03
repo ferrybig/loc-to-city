@@ -2,11 +2,11 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
-import { loadHierarchy } from "./hierarchy.js";
-import { buildCGeoDataFileParallel } from "./buildParallel.js";
-import { parseChunkSelection } from "./chunkSelection.js";
-import { loadCities } from "./cities.js";
-import type { CityProperties } from "./placeIds.js";
+import { loadHierarchy } from "./hierarchy.ts";
+import { buildCGeoDataFileParallel } from "./buildParallel.ts";
+import { parseChunkSelection } from "./chunkSelection.ts";
+import { loadCities } from "./cities.ts";
+import type { CityProperties } from "./placeIds.ts";
 
 function parseArgs(argv: string[]): { positional: string[]; flags: Record<string, string> } {
   const positional: string[] = [];

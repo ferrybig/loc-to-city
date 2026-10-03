@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-import { buildLocateIndexCmd } from "./cli/buildLocateIndex.js";
-import { buildSearchIndexCmd } from "./cli/buildSearchIndex.js";
-import { chunk } from "./cli/chunk.js";
-import { info } from "./cli/info.js";
-import { list } from "./cli/list.js";
-import { locate } from "./cli/locate.js";
-import { lookup } from "./cli/lookup.js";
-import { search } from "./cli/search.js";
-import { type Command, EXIT_ERROR, UsageError } from "./cli/shared.js";
-import { show } from "./cli/show.js";
+import { buildLocateIndexCmd } from "./cli/buildLocateIndex.ts";
+import { buildSearchIndexCmd } from "./cli/buildSearchIndex.ts";
+import { chunk } from "./cli/chunk.ts";
+import { info } from "./cli/info.ts";
+import { list } from "./cli/list.ts";
+import { locate } from "./cli/locate.ts";
+import { lookup } from "./cli/lookup.ts";
+import { search } from "./cli/search.ts";
+import { type Command, EXIT_ERROR, UsageError } from "./cli/shared.ts";
+import { show } from "./cli/show.ts";
 
 const COMMANDS: readonly Command[] = [
 	info,

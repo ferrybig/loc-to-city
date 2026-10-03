@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { APPENDIX_A_BYTES } from "./fixtures/appendixA.js";
+import { APPENDIX_A_BYTES } from "./fixtures/appendixA.ts";
 
 const CLI = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 
@@ -20,7 +20,7 @@ interface Run {
 }
 
 function run(args: string[], stdin: string | Buffer = ""): Run {
-  const result = spawnSync(process.execPath, ["--import", "tsx", CLI, ...args], {
+  const result = spawnSync(process.execPath, [CLI, ...args], {
     input: stdin,
     encoding: "utf8",
   });

@@ -14,7 +14,7 @@ import {
 	QUALITY_WHOLE_WORD,
 	tokenize,
 	tokenizeFolded,
-} from "../src/relevance.js";
+} from "../src/relevance.ts";
 
 test("foldDiacritics: NFD, strip combining marks, lowercase -- no digit/punctuation bucketing", () => {
 	assert.equal(foldDiacritics("Zürich"), "zurich");

@@ -1,6 +1,6 @@
 import { createReadStream } from "node:fs";
 import readline from "node:readline";
-import type { LonLat } from "./geo.js";
+import type { LonLat } from "./geo.ts";
 
 /** One row of GeoNames' `cities500.txt` (tab-separated, no header --
  * https://download.geonames.org/export/dump/, the `cities500` export:

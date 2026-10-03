@@ -1,11 +1,11 @@
 import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
-import type { HierarchyCountry } from "./hierarchy.js";
-import type { CityProperties } from "./placeIds.js";
-import { buildChunkRecords } from "./quadtree.js";
-import { encodeChunk } from "./chunkEncoder.js";
-import { prepareBuild, chunkBoundsOf, finishBuild, type BuildOptions, type BuildStats } from "./buildCore.js";
+import type { HierarchyCountry } from "./hierarchy.ts";
+import type { CityProperties } from "./placeIds.ts";
+import { buildChunkRecords } from "./quadtree.ts";
+import { encodeChunk } from "./chunkEncoder.ts";
+import { prepareBuild, chunkBoundsOf, finishBuild, type BuildOptions, type BuildStats } from "./buildCore.ts";
 
-export type { BuildOptions, BuildStats } from "./buildCore.js";
+export type { BuildOptions, BuildStats } from "./buildCore.ts";
 
 /** Sequential, single-threaded reference build: no worker threads, no
  * serialization overhead. Used by the fast synthetic unit tests, and as

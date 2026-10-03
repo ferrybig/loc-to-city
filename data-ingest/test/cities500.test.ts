@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { streamCities500 } from "../src/lib/cities500.js";
+import { streamCities500 } from "../src/lib/cities500.ts";
 
 function writeFixture(lines: string[]): string {
   const dir = mkdtempSync(path.join(tmpdir(), "cities500-test-"));

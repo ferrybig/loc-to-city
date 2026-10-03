@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Piscina, queueOptionsSymbol } from "piscina";
-import { type LaneOptions, LaneTaskQueue } from "../src/taskQueue.js";
+import { type LaneOptions, LaneTaskQueue } from "../src/taskQueue.ts";
 
 function task(label: string, lane?: LaneOptions) {
 	return { ms: 20, label, ...(lane && { [queueOptionsSymbol]: lane }) };

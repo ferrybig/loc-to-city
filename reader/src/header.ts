@@ -1,4 +1,4 @@
-import { readVarint, IncompleteBufferError } from "./varint.js";
+import { readVarint, IncompleteBufferError } from "./varint.ts";
 
 // "CGEODATA"
 const SIGNATURE = Uint8Array.from([0x43, 0x47, 0x45, 0x4f, 0x44, 0x41, 0x54, 0x41]);

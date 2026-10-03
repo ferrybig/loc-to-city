@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { loadAdmin1Names } from "../src/lib/admin1Codes.js";
+import { loadAdmin1Names } from "../src/lib/admin1Codes.ts";
 
 function writeFixture(lines: string[]): string {
   const dir = mkdtempSync(path.join(tmpdir(), "admin1-test-"));

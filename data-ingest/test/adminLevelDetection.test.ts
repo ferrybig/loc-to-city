@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import RBush from "rbush";
-import { selectRegionLevels, selectPrimaryLevels, detectGapFill } from "../src/lib/adminLevelDetection.js";
-import type { PrimaryLevelResult } from "../src/lib/adminLevelDetection.js";
-import type { AdminBoundaryIndex, CityCandidateMeta } from "../src/lib/adminBoundaryIndex.js";
-import { COUNTRY_ADMIN_LEVELS } from "../src/lib/countryAdminLevels.js";
-import type { CountryIndex } from "../src/lib/countryIndex.js";
+import { selectRegionLevels, selectPrimaryLevels, detectGapFill } from "../src/lib/adminLevelDetection.ts";
+import type { PrimaryLevelResult } from "../src/lib/adminLevelDetection.ts";
+import type { AdminBoundaryIndex, CityCandidateMeta } from "../src/lib/adminBoundaryIndex.ts";
+import { COUNTRY_ADMIN_LEVELS } from "../src/lib/countryAdminLevels.ts";
+import type { CountryIndex } from "../src/lib/countryIndex.ts";
 
 // selectRegionLevels/selectPrimaryLevels read COUNTRY_ADMIN_LEVELS directly
 // (a per-country data table, not a parameter), so these tests exercise it

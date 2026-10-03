@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { Feature, FeatureCollection, Polygon, MultiPolygon } from "geojson";
 import bbox from "@turf/bbox";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
-import { classifyCell, containsPoint, type CellBounds, type CellRelation } from "../src/geometry.js";
+import { classifyCell, containsPoint, type CellBounds, type CellRelation } from "../src/geometry.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

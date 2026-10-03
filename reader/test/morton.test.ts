@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mortonEncode, mortonDecode, shiftRight, lowBits } from "../src/index.js";
+import { mortonEncode, mortonDecode, shiftRight, lowBits } from "../src/index.ts";
 
 // Section 8.1's D=2 worked example:
 //  y=3 | 10  11  14  15

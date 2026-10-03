@@ -1,4 +1,4 @@
-import { parse, openReader, parseId, formatPlaceBlock, writeLine, UsageError, type Command } from "./shared.js";
+import { parse, openReader, parseId, formatPlaceBlock, writeLine, UsageError, type Command } from "./shared.ts";
 
 export const show: Command = {
   name: "show",

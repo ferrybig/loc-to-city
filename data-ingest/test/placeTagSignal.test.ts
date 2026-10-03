@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { COUNTRY_ADMIN_LEVELS } from "../src/lib/countryAdminLevels.js";
-import { findPlaceTagMismatches } from "../src/lib/placeTagSignal.js";
-import type { PlaceTagCandidate } from "../src/lib/placeTagSignal.js";
+import { COUNTRY_ADMIN_LEVELS } from "../src/lib/countryAdminLevels.ts";
+import { findPlaceTagMismatches } from "../src/lib/placeTagSignal.ts";
+import type { PlaceTagCandidate } from "../src/lib/placeTagSignal.ts";
 
 function fakeCandidate(opts: {
   name: string;

@@ -1,6 +1,6 @@
 import type { Feature, FeatureCollection, Polygon, MultiPolygon } from "geojson";
-import type { HierarchyCountry } from "./hierarchy.js";
-import type { CandidateEntry } from "./candidateIndex.js";
+import type { HierarchyCountry } from "./hierarchy.ts";
+import type { CandidateEntry } from "./candidateIndex.ts";
 
 /** Builds the country/region entries of the candidate list (Section 7.1
  * ids: countries 0..C-1, then regions C..C+R-1 in hierarchy order), so that

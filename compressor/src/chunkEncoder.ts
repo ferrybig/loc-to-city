@@ -1,6 +1,6 @@
 import { deflateSync } from "node:zlib";
 import { writeVarint } from "@loc-to-city/reader";
-import type { ChunkRecord } from "./quadtree.js";
+import type { ChunkRecord } from "./quadtree.ts";
 
 function paletteIndexWidth(paletteCount: number): number {
   if (paletteCount <= 255) return 1;

@@ -1,4 +1,4 @@
-import type { BoundingBox } from "../cellBounds.js";
+import type { BoundingBox } from "../cellBounds.ts";
 import {
 	type Command,
 	openReader,
@@ -6,7 +6,7 @@ import {
 	parseId,
 	UsageError,
 	writeLine,
-} from "./shared.js";
+} from "./shared.ts";
 
 /** Decimal places that meaningfully represent a coordinate given a cell size. */
 function coordPrecision(box: BoundingBox): number {

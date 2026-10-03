@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
 import { openSource, readHeaderAndDirectory } from "@loc-to-city/reader";
-import { buildCGeoDataFileParallel } from "../src/buildParallel.js";
-import type { HierarchyCountry } from "../src/hierarchy.js";
-import type { CityProperties } from "../src/placeIds.js";
+import { buildCGeoDataFileParallel } from "../src/buildParallel.ts";
+import type { HierarchyCountry } from "../src/hierarchy.ts";
+import type { CityProperties } from "../src/placeIds.ts";
 
 // A multi-chunk fixture, unlike build.test.ts's single-chunk one (that one
 // can't exercise chunk dispatch/collection at all). width_exp = height_exp

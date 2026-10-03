@@ -18,9 +18,9 @@ import {
 	searchIndexPathFor,
 	trigramListIndex,
 	trigramListIndices,
-} from "../src/index.js";
-import { APPENDIX_A_BYTES } from "./fixtures/appendixA.js";
-import { APPENDIX_B_BYTES, APPENDIX_B_OPTIONS } from "./fixtures/appendixB.js";
+} from "../src/index.ts";
+import { APPENDIX_A_BYTES } from "./fixtures/appendixA.ts";
+import { APPENDIX_B_BYTES, APPENDIX_B_OPTIONS } from "./fixtures/appendixB.ts";
 
 function ids(places: Iterable<Place>): number[] {
 	return [...places].map((p) => p.id);
@@ -407,7 +407,7 @@ const indexBin = path.join(tmpDir, "fixture.search-index.bin");
 writeFileSync(fixtureBin, APPENDIX_A_BYTES);
 
 function run(args: string[]): { stdout: string; stderr: string; status: number } {
-	const r = spawnSync(process.execPath, ["--import", "tsx", CLI, ...args], { encoding: "utf8" });
+	const r = spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8" });
 	if (r.error) throw r.error;
 	return { stdout: r.stdout, stderr: r.stderr, status: r.status ?? 1 };
 }

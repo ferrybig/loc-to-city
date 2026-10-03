@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { buildSearchIndex, CGeoDataReader, type Place } from "../src/index.js";
-import { APPENDIX_A_BYTES } from "./fixtures/appendixA.js";
+import { buildSearchIndex, CGeoDataReader, type Place } from "../src/index.ts";
+import { APPENDIX_A_BYTES } from "./fixtures/appendixA.ts";
 
 // Appendix A.3's identifier table: 0-1 countries, 2-3 regions, 4-6 cities.
 const reader = CGeoDataReader.open(APPENDIX_A_BYTES);

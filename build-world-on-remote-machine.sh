@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Builds data/03-final/world.bin on the Windows machine at REMOTE_HOST,
 # which has more RAM/cores than this box but no Docker -- so this script
-# only handles the compressor stage (plain Node/tsx, no Docker needed).
+# only handles the compressor stage (plain Node, no Docker needed; Node
+# >=26 strips the compressor's TypeScript source natively at import time,
+# no separate build or transpiler dependency required).
 # The data-ingest stage (extract-boundaries.sh + prepare-world.ts) still
 # has to run HERE first: extraction needs the loc2city-tools Docker
 # image, and prepare-world.ts consumes its output directly. Run that
 # locally, then run this script to sync + build on the remote box.
 #
 # Usage:
-#   npx tsx data-ingest/src/prepare-world.ts   # local, produces data/02-resolved/world/hierarchy.json etc.
+#   node data-ingest/src/prepare-world.ts   # local, produces data/02-resolved/world/hierarchy.json etc.
 #   ./build-world-on-remote-machine.sh                    # full worldwide build, default workers
 #   ./build-world-on-remote-machine.sh --only-chunks 1     # scoped test build (verifies the pipeline works)
 #   ./build-world-on-remote-machine.sh --only-chunks ''    # place-table-only build (seconds, no chunks)
@@ -30,9 +32,9 @@
 #      creating a `.bin` shim for a workspace package whose `bin` target
 #      (compressor/reader's dist/cli.js) doesn't exist yet -- unlike
 #      POSIX, which just creates a dangling link. `--no-bin-links` skips
-#      shim creation for every package (including tsc/tsx's own), so this
-#      script invokes tsc/tsx by their real dist paths instead of relying
-#      on PATH-injected shims.
+#      shim creation for every package (including tsc's own), so this
+#      script invokes tsc by its real dist path instead of relying on a
+#      PATH-injected shim.
 #   3. Deeper problem, independent of (2): even with the shim issue
 #      solved, requiring `@loc-to-city/reader` from `compressor` throws
 #      "the path cannot be traversed because it contains an untrusted
@@ -44,8 +46,8 @@
 #      session restriction; untested whether an interactive session would
 #      differ). Worked around by building `reader` first, then replacing
 #      its junction with a real `robocopy` of the already-built directory
-#      -- `compressor` itself never needs prebuilding since `tsx`
-#      transpiles its TypeScript source directly at import time.
+#      -- `compressor` itself never needs prebuilding since Node >=26
+#      strips its TypeScript source directly at import time.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -70,7 +72,7 @@ REQUIRED_DATA_FILES=(
 )
 for f in "${REQUIRED_DATA_FILES[@]}"; do
   if [ ! -f "$f" ]; then
-    echo "missing $f -- run 'npx tsx data-ingest/src/prepare-world.ts' locally first" >&2
+    echo "missing $f -- run 'node data-ingest/src/prepare-world.ts' locally first" >&2
     echo "(that step needs data/01-extracted/world/*-admin.geojson, produced by" >&2
     echo " scripts/extract-boundaries.sh via the loc2city-tools Docker image," >&2
     echo " which is why it can't run on the Docker-less remote machine)" >&2
@@ -118,13 +120,13 @@ ssh "$REMOTE_HOST" "rd \"$REMOTE_DIR_WIN\\node_modules\\@loc-to-city\\reader\""
 ssh "$REMOTE_HOST" "robocopy \"$REMOTE_DIR_WIN\\reader\" \"$REMOTE_DIR_WIN\\node_modules\\@loc-to-city\\reader\" /E /NFL /NDL /NJH /NJS || exit 0"
 
 echo "== running compressor build on remote (default workers = os.availableParallelism()) =="
-# compressor itself is never prebuilt -- tsx transpiles its TS source
-# directly, so only reader (imported via its compiled dist/ per its
-# package.json `exports`) needs the tsc step above. --workers is
-# deliberately omitted: the CLI's own default is
+# compressor itself is never prebuilt -- Node >=26 strips its TS source
+# directly at import time, so only reader (imported via its compiled
+# dist/ per its package.json `exports`) needs the tsc step above.
+# --workers is deliberately omitted: the CLI's own default is
 # os.availableParallelism(), which is exactly "the default amount of
 # workers" on whichever machine actually runs it.
-ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR_WIN && set NODE_OPTIONS=--max-old-space-size=$REMOTE_MAX_OLD_SPACE_MB && node node_modules\\tsx\\dist\\cli.mjs compressor\\src\\cli.ts data\\02-resolved\\world\\hierarchy.json data\\02-resolved\\world\\cities-filtered.geojsonseq data\\03-final\\world.bin --regions data\\02-resolved\\world\\regions.geojson --countries data\\02-resolved\\world\\country-polygons.geojson --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 7 --attribution \"[OpenStreetMap](https://openstreetmap.org/copyright)\" $*"
+ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR_WIN && set NODE_OPTIONS=--max-old-space-size=$REMOTE_MAX_OLD_SPACE_MB && node compressor\\src\\cli.ts data\\02-resolved\\world\\hierarchy.json data\\02-resolved\\world\\cities-filtered.geojsonseq data\\03-final\\world.bin --regions data\\02-resolved\\world\\regions.geojson --countries data\\02-resolved\\world\\country-polygons.geojson --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 7 --attribution \"[OpenStreetMap](https://openstreetmap.org/copyright)\" $*"
 
 echo "== syncing data/03-final/world.bin back =="
 rsync -avz \

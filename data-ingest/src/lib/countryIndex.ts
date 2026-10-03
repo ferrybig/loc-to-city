@@ -4,7 +4,7 @@ import bbox from "@turf/bbox";
 import area from "@turf/area";
 import simplify from "@turf/simplify";
 import type { Feature, FeatureCollection, Polygon, MultiPolygon, Position } from "geojson";
-import type { LonLat } from "./geo.js";
+import type { LonLat } from "./geo.ts";
 
 interface NECountryProps {
   ISO_A2_EH?: string;

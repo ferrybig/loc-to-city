@@ -13,8 +13,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsx --test test/*.test.ts",
-    "dev": "tsx src/cli.ts"
+    "test": "node --test test/*.test.ts",
+    "dev": "node src/cli.ts"
   },
   "dependencies": {
     "@loc-to-city/reader": "*",
@@ -28,7 +28,6 @@
   },
   "devDependencies": {
     "typescript": "^5.7.0",
-    "tsx": "^4.19.0",
     "@types/node": "^24.0.0",
     "@types/geojson": "^7946.0.16",
     "@types/rbush": "^4.0.0"

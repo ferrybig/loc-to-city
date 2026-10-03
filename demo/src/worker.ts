@@ -17,7 +17,7 @@ import {
 	type QueryResult,
 	searchIndexPathFor,
 } from "@loc-to-city/reader";
-import { renderTilePng } from "./tiles.js";
+import { renderTilePng } from "./tiles.ts";
 
 export interface WorkerData {
 	datasetPath: string;

@@ -1,4 +1,4 @@
-import { parse, openReader, writeLine, type Command } from "./shared.js";
+import { parse, openReader, writeLine, type Command } from "./shared.ts";
 
 export const info: Command = {
   name: "info",

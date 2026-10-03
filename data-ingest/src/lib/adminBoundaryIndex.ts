@@ -3,11 +3,11 @@ import bbox from "@turf/bbox";
 import pointOnFeature from "@turf/point-on-feature";
 import simplify from "@turf/simplify";
 import type { BBox, Feature, MultiPolygon, Polygon } from "geojson";
-import { COUNTRY_ADMIN_LEVELS } from "./countryAdminLevels.js";
-import type { CountryIndex } from "./countryIndex.js";
-import type { LonLat } from "./geo.js";
-import { streamMergedAdminBoundaries } from "./mergeAdminBoundaries.js";
-import { resolvePolygonCountry } from "./polygonCountry.js";
+import { COUNTRY_ADMIN_LEVELS } from "./countryAdminLevels.ts";
+import type { CountryIndex } from "./countryIndex.ts";
+import type { LonLat } from "./geo.ts";
+import { streamMergedAdminBoundaries } from "./mergeAdminBoundaries.ts";
+import { resolvePolygonCountry } from "./polygonCountry.ts";
 
 // Matches prepare-europe.ts's REGION_SIMPLIFY_TOLERANCE: regions are a
 // fallback layer, not precision-critical the way cities are, and holding

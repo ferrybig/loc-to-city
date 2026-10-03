@@ -1,7 +1,7 @@
-import type { RandomAccessSource } from "./source.js";
-import { parseHeader, type CGeoDataHeader } from "./header.js";
-import { parseDirectory, type CGeoDataDirectory } from "./directory.js";
-import { IncompleteBufferError } from "./varint.js";
+import type { RandomAccessSource } from "./source.ts";
+import { parseHeader, type CGeoDataHeader } from "./header.ts";
+import { parseDirectory, type CGeoDataDirectory } from "./directory.ts";
+import { IncompleteBufferError } from "./varint.ts";
 
 /**
  * Reads the header and directory (Sections 5-6), which per the spec are

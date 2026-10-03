@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
  * webapp/server.py, but for one format with one lookup path instead of
  * comparing four approaches.
  *
- *   npx tsx src/server.ts [port] [dataset.bin]
+ *   node src/server.ts [port] [dataset.bin]
  *
  * dataset defaults to data/03-final/zuid-holland.bin (see the plan /
  * README for how that's built); pass a different .bin path to point at a later, larger
@@ -21,11 +21,11 @@ import { createServer, type ServerResponse } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Piscina, queueOptionsSymbol } from "piscina";
-import { type LaneOptions, LaneTaskQueue } from "./taskQueue.js";
-import type { Cancellable, WorkerData } from "./worker.js";
+import { type LaneOptions, LaneTaskQueue } from "./taskQueue.ts";
+import type { Cancellable, WorkerData } from "./worker.ts";
 
 /** The worker's exports, each one a task `piscina.run` can name. */
-type Tasks = typeof import("./worker.js");
+type Tasks = typeof import("./worker.ts");
 /** The ones a request runs; `indexes` only runs once, at startup. */
 type RequestTask = Exclude<keyof Tasks, "indexes">;
 
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
 
 	console.error(`Loading ${datasetPath}...`);
 	const pool = new Piscina({
-		filename: path.resolve(__dirname, "worker.js"),
+		filename: path.resolve(__dirname, import.meta.url.endsWith(".ts") ? "worker.ts" : "worker.js"),
 		minThreads: 0,
 		idleTimeout: 6000,
 		maxQueue: 256,

@@ -1,5 +1,5 @@
 import type { Feature, FeatureCollection, Polygon, MultiPolygon } from "geojson";
-import type { HierarchyCountry } from "./hierarchy.js";
+import type { HierarchyCountry } from "./hierarchy.ts";
 
 export interface CityProperties {
   id?: string;

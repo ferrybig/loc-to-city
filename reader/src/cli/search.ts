@@ -9,7 +9,7 @@ import {
 	resolveCountry,
 	UsageError,
 	writeLine,
-} from "./shared.js";
+} from "./shared.ts";
 
 export const search: Command = {
 	name: "search",

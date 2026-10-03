@@ -2,10 +2,10 @@ import bbox from "@turf/bbox";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import RBush from "rbush";
 import type { Feature, MultiPolygon, Polygon } from "geojson";
-import type { AdminBoundaryIndex, CityCandidateMeta } from "./adminBoundaryIndex.js";
-import { COUNTRY_ADMIN_LEVELS } from "./countryAdminLevels.js";
-import type { CountryIndex } from "./countryIndex.js";
-import { streamMergedAdminBoundaries } from "./mergeAdminBoundaries.js";
+import type { AdminBoundaryIndex, CityCandidateMeta } from "./adminBoundaryIndex.ts";
+import { COUNTRY_ADMIN_LEVELS } from "./countryAdminLevels.ts";
+import type { CountryIndex } from "./countryIndex.ts";
+import { streamMergedAdminBoundaries } from "./mergeAdminBoundaries.ts";
 
 const DEFAULT_COVERAGE_THRESHOLD = 0.6;
 const DEFAULT_MEMORY_CEILING_BYTES = 8 * 1024 ** 3;

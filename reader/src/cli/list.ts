@@ -1,5 +1,5 @@
-import type { CGeoDataReader, Place, PlaceLevel } from "../reader.js";
-import { parse, openReader, parseLevel, resolveCountry, formatPlaceLine, names, writeLine, type Command } from "./shared.js";
+import type { CGeoDataReader, Place, PlaceLevel } from "../reader.ts";
+import { parse, openReader, parseLevel, resolveCountry, formatPlaceLine, names, writeLine, type Command } from "./shared.ts";
 
 const DEPTH: Record<PlaceLevel, number> = { country: 0, region: 1, city: 2 };
 

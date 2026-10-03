@@ -1,4 +1,4 @@
-import { readVarint, readVarintList } from "./varint.js";
+import { readVarint, readVarintList } from "./varint.ts";
 
 export interface CGeoDataDirectory {
   placeTableStart: number;

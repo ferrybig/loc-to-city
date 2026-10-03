@@ -13,13 +13,12 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsx --test test/*.test.ts",
-    "dev": "tsx src/index.ts"
+    "test": "node --test test/*.test.ts",
+    "dev": "node src/index.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.13",
     "@types/node": "^24.0.0",
-    "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }
 }

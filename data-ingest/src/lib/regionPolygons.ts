@@ -1,8 +1,8 @@
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import RBush from "rbush";
 import type { Feature, MultiPolygon, Polygon } from "geojson";
-import type { RegionCandidate } from "./adminBoundaryIndex.js";
-import type { LonLat } from "./geo.js";
+import type { RegionCandidate } from "./adminBoundaryIndex.ts";
+import type { LonLat } from "./geo.ts";
 
 interface IndexedRegion {
   minX: number;

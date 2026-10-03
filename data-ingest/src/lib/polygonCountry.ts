@@ -1,7 +1,7 @@
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import type { BBox, Feature, MultiPolygon, Polygon } from "geojson";
-import type { CountryIndex } from "./countryIndex.js";
-import type { LonLat } from "./geo.js";
+import type { CountryIndex } from "./countryIndex.ts";
+import type { LonLat } from "./geo.ts";
 
 /** Resolves which country an admin polygon belongs to.
  *

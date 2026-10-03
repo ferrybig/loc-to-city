@@ -29,26 +29,26 @@ import path from "node:path";
 import bbox from "@turf/bbox";
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from "geojson";
 import type { CityProperties, HierarchyCountry } from "@loc-to-city/compressor";
-import { discoverAdminGeoJsonFiles } from "./lib/osmFiles.js";
-import { loadCountryIndex } from "./lib/countryIndex.js";
-import { buildAdminBoundaryIndex } from "./lib/adminBoundaryIndex.js";
-import type { AdminBoundaryIndex, CityCandidateMeta } from "./lib/adminBoundaryIndex.js";
+import { discoverAdminGeoJsonFiles } from "./lib/osmFiles.ts";
+import { loadCountryIndex } from "./lib/countryIndex.ts";
+import { buildAdminBoundaryIndex } from "./lib/adminBoundaryIndex.ts";
+import type { AdminBoundaryIndex, CityCandidateMeta } from "./lib/adminBoundaryIndex.ts";
 import {
   selectRegionLevels,
   selectPrimaryLevels,
   loadPrimaryGeometries,
   detectGapFill,
   fetchFinalGeometries,
-} from "./lib/adminLevelDetection.js";
-import type { PrimaryLevelResult } from "./lib/adminLevelDetection.js";
-import { buildRegionIndex, assignCityRegion } from "./lib/regionPolygons.js";
-import { streamCities500 } from "./lib/cities500.js";
-import type { Cities500Row } from "./lib/cities500.js";
-import { loadAdmin1Names } from "./lib/admin1Codes.js";
-import { buildCityFallback, buildRegionFallback } from "./lib/voronoiFallback.js";
-import { VORONOI_CITY_FALLBACK, VORONOI_REGION_FALLBACK } from "./lib/countryAdminLevels.js";
-import type { LonLat } from "./lib/geo.js";
-import type { RegionCandidate } from "./lib/adminBoundaryIndex.js";
+} from "./lib/adminLevelDetection.ts";
+import type { PrimaryLevelResult } from "./lib/adminLevelDetection.ts";
+import { buildRegionIndex, assignCityRegion } from "./lib/regionPolygons.ts";
+import { streamCities500 } from "./lib/cities500.ts";
+import type { Cities500Row } from "./lib/cities500.ts";
+import { loadAdmin1Names } from "./lib/admin1Codes.ts";
+import { buildCityFallback, buildRegionFallback } from "./lib/voronoiFallback.ts";
+import { VORONOI_CITY_FALLBACK, VORONOI_REGION_FALLBACK } from "./lib/countryAdminLevels.ts";
+import type { LonLat } from "./lib/geo.ts";
+import type { RegionCandidate } from "./lib/adminBoundaryIndex.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");

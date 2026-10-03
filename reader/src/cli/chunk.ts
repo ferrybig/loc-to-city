@@ -1,4 +1,4 @@
-import { parse, openReader, parseId, names, writeLine, UsageError, type Command } from "./shared.js";
+import { parse, openReader, parseId, names, writeLine, UsageError, type Command } from "./shared.ts";
 
 export const chunk: Command = {
   name: "chunk",

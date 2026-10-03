@@ -4,8 +4,8 @@ import intersect from "@turf/intersect";
 import union from "@turf/union";
 import { featureCollection, polygon as turfPolygon } from "@turf/helpers";
 import type { Feature, MultiPolygon, Polygon, Position } from "geojson";
-import type { LonLat } from "./geo.js";
-import type { Cities500Row } from "./cities500.js";
+import type { LonLat } from "./geo.ts";
+import type { Cities500Row } from "./cities500.ts";
 
 /** One synthesized city candidate: a `cities500.txt` point's own name/id
  * plus its Voronoi cell, already clipped to the real country outline.

@@ -14,9 +14,9 @@ import {
 	LocateIndex,
 	locateEntryWidth,
 	locateIndexPathFor,
-} from "../src/index.js";
-import { type CellList, representativeCell } from "../src/locateIndex.js";
-import { APPENDIX_A_BYTES } from "./fixtures/appendixA.js";
+} from "../src/index.ts";
+import { type CellList, representativeCell } from "../src/locateIndex.ts";
+import { APPENDIX_A_BYTES } from "./fixtures/appendixA.ts";
 
 function hexBytes(hex: string): Uint8Array {
 	return Uint8Array.from(

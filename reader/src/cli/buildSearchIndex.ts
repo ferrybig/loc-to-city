@@ -3,14 +3,14 @@ import {
 	buildSearchIndex,
 	DEFAULT_SEARCH_INDEX_OPTIONS,
 	type SearchIndexOptions,
-} from "../searchIndex.js";
+} from "../searchIndex.ts";
 import {
 	type Command,
 	EXIT_OK,
 	openReader,
 	parse,
 	UsageError,
-} from "./shared.js";
+} from "./shared.ts";
 
 const { hashExp, topCount, topBlockExp } = DEFAULT_SEARCH_INDEX_OPTIONS;
 

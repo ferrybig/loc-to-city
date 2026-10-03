@@ -9,9 +9,9 @@ import {
   resolveIdentifier,
   readNameEntry,
 } from "@loc-to-city/reader";
-import { buildCGeoDataFile } from "../src/build.js";
-import type { HierarchyCountry } from "../src/hierarchy.js";
-import { assembleNameEntry, type CityProperties } from "../src/placeIds.js";
+import { buildCGeoDataFile } from "../src/build.ts";
+import type { HierarchyCountry } from "../src/hierarchy.ts";
+import { assembleNameEntry, type CityProperties } from "../src/placeIds.ts";
 
 // A tiny synthetic dataset: one country, two regions (only one of which has
 // cities -- Section 7.2 explicitly allows a region's city count to be 0),

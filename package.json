@@ -14,9 +14,6 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "reader": "tsx reader/src/cli.ts"
-  },
-  "allowScripts": {
-    "esbuild": true
+    "reader": "node reader/src/cli.ts"
   }
 }

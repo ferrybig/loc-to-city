@@ -2,19 +2,19 @@ import {
 	type BoundingBox,
 	cellBoundingBox,
 	chunkBoundingBox,
-} from "./cellBounds.js";
-import { type ChunkRecords, parseChunk } from "./chunk.js";
-import { readHeaderAndDirectory } from "./container.js";
-import type { CGeoDataDirectory } from "./directory.js";
-import type { CGeoDataHeader } from "./header.js";
-import { mortonDecode, mortonEncode, shiftRight } from "./morton.js";
+} from "./cellBounds.ts";
+import { type ChunkRecords, parseChunk } from "./chunk.ts";
+import { readHeaderAndDirectory } from "./container.ts";
+import type { CGeoDataDirectory } from "./directory.ts";
+import type { CGeoDataHeader } from "./header.ts";
+import { mortonDecode, mortonEncode, shiftRight } from "./morton.ts";
 import {
 	largestIndexWithPrefixAtMost,
 	type PlaceTableInfo,
 	parsePlaceTable,
 	readNameBlock,
 	resolveIdentifier,
-} from "./placeTable.js";
+} from "./placeTable.ts";
 import { existsSync } from "node:fs";
 import {
 	computeLocateCell,
@@ -22,16 +22,16 @@ import {
 	LocateIndex,
 	locateEntryWidth,
 	locateIndexPathFor,
-} from "./locateIndex.js";
+} from "./locateIndex.ts";
 import {
 	foldDiacritics,
 	LEVEL_BONUS,
 	placeMatchQuality,
 	prepareNeedle,
-} from "./relevance.js";
-import { SearchIndex, searchIndexPathFor } from "./searchIndex.js";
-import { openSource, type RandomAccessSource } from "./source.js";
-import { safeInflate } from "./zlibUtil.js";
+} from "./relevance.ts";
+import { SearchIndex, searchIndexPathFor } from "./searchIndex.ts";
+import { openSource, type RandomAccessSource } from "./source.ts";
+import { safeInflate } from "./zlibUtil.ts";
 
 export interface QueryResult {
 	country: string[] | null;
@@ -140,12 +140,22 @@ export class CGeoDataReader {
 	private pendingLocateIndexPath: string | undefined;
 	private cachedPrefixChecksum: bigint | undefined;
 
+	private readonly source: RandomAccessSource;
+	readonly header: CGeoDataHeader;
+	readonly directory: CGeoDataDirectory;
+	private readonly placeTable: PlaceTableInfo;
+
 	private constructor(
-		private readonly source: RandomAccessSource,
-		readonly header: CGeoDataHeader,
-		readonly directory: CGeoDataDirectory,
-		private readonly placeTable: PlaceTableInfo,
-	) {}
+		source: RandomAccessSource,
+		header: CGeoDataHeader,
+		directory: CGeoDataDirectory,
+		placeTable: PlaceTableInfo,
+	) {
+		this.source = source;
+		this.header = header;
+		this.directory = directory;
+		this.placeTable = placeTable;
+	}
 
 	static open(input: string | Uint8Array): CGeoDataReader {
 		const source = openSource(input);

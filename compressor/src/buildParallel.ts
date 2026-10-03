@@ -1,10 +1,10 @@
 import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
-import type { HierarchyCountry } from "./hierarchy.js";
-import type { CityProperties } from "./placeIds.js";
-import { prepareBuild, finishBuild, type BuildOptions, type BuildStats } from "./buildCore.js";
-import { enumerateChunkJobs } from "./chunkJobs.js";
-import { runChunkJobs } from "./chunkWorkerPool.js";
-import { buildCGeoDataFile } from "./build.js";
+import type { HierarchyCountry } from "./hierarchy.ts";
+import type { CityProperties } from "./placeIds.ts";
+import { prepareBuild, finishBuild, type BuildOptions, type BuildStats } from "./buildCore.ts";
+import { enumerateChunkJobs } from "./chunkJobs.ts";
+import { runChunkJobs } from "./chunkWorkerPool.ts";
+import { buildCGeoDataFile } from "./build.ts";
 
 export interface ParallelBuildOptions extends BuildOptions {
   /** Number of worker threads. `0` delegates to the plain sequential

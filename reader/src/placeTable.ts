@@ -1,6 +1,6 @@
-import type { RandomAccessSource } from "./source.js";
-import { readVarint, readVarintList, IncompleteBufferError } from "./varint.js";
-import { safeInflate } from "./zlibUtil.js";
+import type { RandomAccessSource } from "./source.ts";
+import { readVarint, readVarintList, IncompleteBufferError } from "./varint.ts";
+import { safeInflate } from "./zlibUtil.ts";
 
 export interface PlaceTableInfo {
   countryCount: number;

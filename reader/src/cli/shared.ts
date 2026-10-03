@@ -1,6 +1,6 @@
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import { readFileSync } from "node:fs";
-import { CGeoDataReader, type Place, type PlaceLevel } from "../reader.js";
+import { CGeoDataReader, type Place, type PlaceLevel } from "../reader.ts";
 
 /** grep's convention: 0 = success/matched, 1 = ran fine but found nothing
  * (search only), 2 = usage or runtime error. */

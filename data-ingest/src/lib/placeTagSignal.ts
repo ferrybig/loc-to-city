@@ -1,10 +1,10 @@
 import bbox from "@turf/bbox";
 import pointOnFeature from "@turf/point-on-feature";
 import type { BBox, Feature, MultiPolygon, Polygon } from "geojson";
-import { COUNTRY_ADMIN_LEVELS } from "./countryAdminLevels.js";
-import type { CountryIndex } from "./countryIndex.js";
-import { streamMergedAdminBoundaries } from "./mergeAdminBoundaries.js";
-import { resolvePolygonCountry } from "./polygonCountry.js";
+import { COUNTRY_ADMIN_LEVELS } from "./countryAdminLevels.ts";
+import type { CountryIndex } from "./countryIndex.ts";
+import { streamMergedAdminBoundaries } from "./mergeAdminBoundaries.ts";
+import { resolvePolygonCountry } from "./polygonCountry.ts";
 
 const PLACE_SETTLEMENT_VALUES = new Set(["city", "town", "village"]);
 
