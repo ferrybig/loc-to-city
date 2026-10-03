@@ -19,8 +19,8 @@ spec fixture, not pipeline output). A fresh clone has an essentially
 empty `data/` and must run the download + build scripts to populate it.
 
 ```
-data/00-raw/          external downloads (including planet-latest.osm.pbf,
-                       fetched via BitTorrent) + one orphan Python-prototype
+data/00-raw/          external downloads (including the ~80GB
+                       planet-latest.osm.pbf) + one orphan Python-prototype
                        output (nl_cities.geojson, gitignored -- see
                        "Orphan inputs" below)
 data/01-extracted/    osmium-exported admin boundaries (World only, now)
@@ -96,7 +96,7 @@ instead of a real-world one.
 ```
 data/00-raw/
 ├── osm/                     planet-latest.osm.pbf (whole-planet extract,
-│                            fetched via BitTorrent)
+│                            ~80GB over HTTPS from planet.openstreetmap.org)
 │                            download: scripts/download-osm.sh
 ├── geonames/                cities500.txt, admin1CodesASCII.txt
 │                            download: scripts/download-geonames-naturalearth.sh
@@ -179,20 +179,24 @@ sends `If-None-Match` on the next run, so re-running when nothing changed
 costs one small request per file instead of re-downloading gigabytes).
 
 `data-ingest/scripts/download-osm.sh` fetches the whole planet as a single
-`planet-latest.osm.pbf` via BitTorrent (`aria2c`, per
-https://wiki.openstreetmap.org/wiki/Planet.osm#Downloading) into
+`planet-latest.osm.pbf` from
+https://planet.openstreetmap.org/pbf/planet-latest.osm.pbf into
 `data/00-raw/osm/`, replacing the old per-continent Geofabrik extracts (and
 the separate Netherlands-only extract) with one canonical, always-current
-file. It doesn't use `lib/download.sh` -- a torrent client handles its own
-resume/integrity checking, unlike a plain HTTP `curl`.
+file. It goes through the same `lib/download.sh` helper, so it is atomic
+and ETag-conditional exactly like the GeoNames/Natural Earth fetch above:
+re-running it when the planet file hasn't been re-cut costs one small
+request instead of ~80GB. (OSM's own download page recommends BitTorrent
+or a mirror for a file this size; a torrent client would handle its own
+resume and integrity checking and would not need `lib/download.sh` at all,
+but that is not what this script does today.)
 
-Neither script is wired into the root `Makefile`'s `world` target for the
-OSM download -- that's an intentionally separate, explicit step (currently
-~80GB, hours to fetch), not something that should happen silently as a
-side effect of every build. (`make world` does have its own `download-osm.sh`
-file rule, since Make can detect the file's absence cheaply; it's the
-*cost* of the download that's meant to stay an explicit, visible step, not
-the dependency edge itself.)
+Both scripts are reachable from the root `Makefile` as file rules, so
+`make world` *will* fetch the planet file if it is missing -- there is no
+guard against that. The ~80GB, multi-hour download is still meant to be an
+explicit, visible step, so run `make download` (or `download-osm.sh`) on
+purpose and confirm it finished before kicking off a `make world` on a
+machine that doesn't already have the input.
 
 ## Orphan input: `data/00-raw/orphan/nl_cities.geojson`
 

@@ -195,11 +195,6 @@ export interface CountryAdminLevels {
  *   nested inside it) -- not the Indonesia/Czechia shape below, where
  *   gap-filling would only ever help an arbitrary, inconsistent subset
  *   of a much larger, mostly-untagged layer.
- * - BF: same discovery -- level 6 is `place=department` nationally (the
- *   real administrative tier, 67.2% coverage, the lowest of this group
- *   but still clearing the 60% bar), and a same-named level-8 relation is
- *   `place=town`/`village` for Koudougou, Tenkodogo, Bagaré, Lankoué and
- *   Toéni, all five confirmed directly against the extract.
  * - BY: level 6 holds 9 `place=city` relations nationally (Belarus's
  *   major cities below the handful at level 4, e.g. Minsk -- level 4,
  *   same tier as the country's own `region`, unfixable the Berlin/Minsk
@@ -271,9 +266,9 @@ export interface CountryAdminLevels {
  * Several countries' tie-break candidates were investigated and
  * deliberately NOT applied, because the "other" (non-place-tagged) level
  * was already confirmed correct and the place-tagged level looked like
- * noise, a name variant, too sparse/inconsistent to trust, or (EE, MX,
- * PT) structurally unreachable by gap-fill at all, rather than a missing
- * settlement:
+ * noise, a name variant, an already-resolving duplicate name, too
+ * sparse/inconsistent to trust, or (EE, MX, PT) structurally unreachable
+ * by gap-fill at all, rather than a missing settlement:
  * - EE: Tallinn is `place=city` at level 8, distinct from the configured
  *   level 9's ~4,821-feature fine tessellation (asustusüksus settlement
  *   units, 94.6% coverage) -- looked like a clean small-set fix (59
@@ -340,6 +335,21 @@ export interface CountryAdminLevels {
  *   as ID below, and the only Argentine candidate to survive the
  *   stricter false-positive filter, suggesting an isolated gap rather
  *   than a systemic one worth a country-wide gap-fill.
+ * - BF: level 6 is `place=department` nationally (the real administrative
+ *   tier, 67.2% coverage, the lowest of the whole group but still
+ *   clearing the 60% bar), and a level-8 relation carrying
+ *   `place=town`/`village` exists for Koudougou, Tenkodogo, Bagaré,
+ *   Lankoué and Toéni, all five confirmed directly against the extract.
+ *   This was reported before `alreadyResolvedAtLevel` existed and is in
+ *   fact that exact false positive: every one of those level-8 relations
+ *   shares its name with the level-6 department containing it (Burkinabè
+ *   departments are named after their own chief town), so all five
+ *   already resolve under their own plain name at the configured level --
+ *   verified on `data/03-final/world.bin`, which is built with
+ *   `city: [6]`. Gap-filling 8 in would buy no naming benefit and would
+ *   put a finer level in contention for cells its own container already
+ *   names correctly, the New York/Arkansas risk the `overrides` doc
+ *   comment above warns about. Not applied.
  * - CZ: level 8 (configured, `place=municipality`/`city` where tagged)
  *   already resolves every sampled case correctly, including Brno
  *   (`place=city`) and all 6 same-named "Babice" municipalities
@@ -365,6 +375,11 @@ export interface CountryAdminLevels {
  *   the country at the regency level -- a patchier result than the
  *   current, consistent level-5 naming, not a country-wide fix like
  *   Bremen's.
+ * - IR: the configured level 7 (104.4% coverage) already resolves every
+ *   sampled case correctly; the place-tagged candidates are Tehran
+ *   neighbourhoods nested inside an already-correct level-7 entity --
+ *   the same noise-not-settlement shape as CZ's cadastral villages, and
+ *   the same contested-cells risk if gap-filled. Not applied.
  *
  * Entries whose comment shows a coverage figure far over 100% (e.g. small
  * multi-island nations like the Maldives or Cook Islands) reflect

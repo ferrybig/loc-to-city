@@ -47,21 +47,35 @@ async function main(): Promise<void> {
   console.error(`collected ${candidates.length.toLocaleString()} candidates`);
 
   const results = findPlaceTagMismatches(candidates);
-  const mismatches = results.filter((r) => r.isMismatch);
-  const regionScoped = results.filter((r) => r.configuredCityLevel === undefined);
-  const alreadyResolved = results.filter((r) => r.alreadyResolvedAtLevel !== undefined);
+  // Four disjoint buckets, in the order the per-line tag picks them:
+  // region-scoped (nothing compared) beats mismatch beats already-resolved
+  // beats agreeing. `configuredCityLevel === undefined` is NOT the
+  // region-scoped test -- a country with a genuinely empty `city: []` list
+  // has no configured level either, yet is still compared and can still be
+  // a real mismatch (see PlaceTagMismatch.regionScoped).
+  const regionScoped = results.filter((r) => r.regionScoped);
+  const mismatches = results.filter((r) => !r.regionScoped && r.isMismatch);
+  const alreadyResolved = results.filter(
+    (r) => !r.regionScoped && !r.isMismatch && r.alreadyResolvedAtLevel !== undefined,
+  );
   const agreeing = results.filter(
-    (r) => r.configuredCityLevel !== undefined && r.alreadyResolvedAtLevel === undefined && !r.isMismatch,
+    (r) => !r.regionScoped && !r.isMismatch && r.alreadyResolvedAtLevel === undefined,
   );
 
   for (const r of showAll ? results : mismatches) {
-    const tag = r.isMismatch ? "MISMATCH" : r.alreadyResolvedAtLevel !== undefined ? "already-resolved" : "ok";
-    const configured =
-      r.configuredCityLevel === undefined
-        ? "region-scoped, skipped"
+    const tag = r.regionScoped
+      ? "region-scoped"
+      : r.isMismatch
+        ? "MISMATCH"
         : r.alreadyResolvedAtLevel !== undefined
-          ? `configured=[${r.configuredCityLevel}], same name already resolves at level ${r.alreadyResolvedAtLevel}`
-          : `configured=[${r.configuredCityLevel}]`;
+          ? "already-resolved"
+          : "ok";
+    const configuredList = r.configuredCityLevel === undefined ? "[]" : `[${r.configuredCityLevel}]`;
+    const configured = r.regionScoped
+      ? "region-scoped, skipped"
+      : r.alreadyResolvedAtLevel !== undefined
+        ? `configured=${configuredList}, same name already resolves at level ${r.alreadyResolvedAtLevel}`
+        : `configured=${configuredList}`;
     console.log(
       `${tag}\t${r.country}\t${r.name}\tplace=${r.place} at level ${r.placeLevel}\tother levels: ${r.otherLevels.join(",")}\t${configured}`,
     );

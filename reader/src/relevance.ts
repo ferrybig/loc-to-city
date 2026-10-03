@@ -28,12 +28,16 @@ export const LEVEL_BONUS: Readonly<Record<PlaceLevel, number>> = {
 	region: 1,
 };
 
-const COMBINING = /[̀-ͯ]/g;
+/** The Combining Diacritical Marks block (Section B.2 step 2). Written
+ * with escapes, not the literal code points, which would otherwise
+ * combine onto the surrounding brackets in an editor. */
+const COMBINING = /[\u0300-\u036f]/g;
 
 /** NFD, strip combining diacritics, lowercase -- diacritic- and
  * case-insensitive text for matching and ranking (Section B.5).
- * Deliberately distinct from `searchIndex.ts`'s `foldSymbols` (Section
- * B.2's full symbol folding used for trigrams): that one also buckets
+ * `searchIndex.ts`'s `foldSymbols` (Section B.2's full symbol folding
+ * used for trigrams) continues from this, and only from this -- but
+ * matching and ranking stop here, because that one also buckets
  * every ASCII digit into one shared symbol and every other ASCII
  * punctuation/space character into another, which is the right call for
  * trigram list sizing but would make "5th" match "9th" as a substring --

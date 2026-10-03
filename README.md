@@ -820,11 +820,11 @@ section, since those are spec decisions rather than pipeline work.
   now detects and excludes this case (`alreadyResolvedAtLevel`), leaving
   41 real candidates.
 
-  Of those 41, eleven countries got a real gap-fill fix, all the same
+  Of those 41, ten countries got a real gap-fill fix, all the same
   shape as Bremen's and verified on `data/03-final/world.bin`: Cuba
   (`city: [6, 8]`), Moldova (`city: [8, 9]`), Nicaragua (`city: [6,
   10]`), El Salvador (`city: [6, 7]`), Luxembourg (`city: [8, 9]`),
-  Burkina Faso (`city: [6, 8]`), Belarus (`city: [8, 6]`), Canada
+  Belarus (`city: [8, 6]`), Canada
   (`city: [8, 6]`), Latvia (`city: [8, 7]`) and Turkmenistan
   (`city: [5, 8]`) all now resolve their affected cities under their own
   name instead of the enclosing municipality/department/parish/region;
@@ -838,14 +838,19 @@ section, since those are spec decisions rather than pipeline work.
   came from manual investigation, not the tool itself: Latvia tags its
   real town tier with `border_type=town`, no OSM `place` value at all.
 
-  Eight countries' candidates were investigated and deliberately left
+  Nine countries' candidates were investigated and deliberately left
   unfixed, each for a different reason, all recorded in
   `countryAdminLevels.ts`'s own doc comment: Armenia's one candidate
   already resolves under a name-variant (`placeTagSignal.ts`'s exact-string
   grouping doesn't normalize away an administrative suffix); Argentina
   and Indonesia's place-tagged levels are sparse and inconsistently
   tagged multiple tiers below the configured level, so a gap-fill would
-  help only an arbitrary subset; Czechia's and Iran's configured levels
+  help only an arbitrary subset; Burkina Faso's five candidates all share
+  their name with the level-6 department containing them (Burkinabè
+  departments are named after their own chief town), so every one of them
+  already resolves under its own plain name at the configured level -- the
+  `alreadyResolvedAtLevel` shape, found before that guard existed;
+  Czechia's and Iran's configured levels
   already resolve correctly, with the place-tagged level either noise
   (cadastral sub-villages, Tehran neighbourhoods) or the same
   New York/Arkansas contested-cells risk a gap-fill into an

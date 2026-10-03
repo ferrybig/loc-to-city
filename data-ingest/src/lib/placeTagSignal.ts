@@ -87,14 +87,21 @@ export interface PlaceTagMismatch {
    * container (Bremen's Land) that the plain area vote would otherwise
    * prefer, or a finer subdivision gap-fill already reaches. */
   otherLevels: number[];
-  /** The level `COUNTRY_ADMIN_LEVELS[country].city` (or a listed region
-   * override's own primary) currently resolves this country to -- absent
-   * when the country has no configured city level at all. undefined also
-   * when the candidate sits in a region with its own `overrides` entry:
-   * this function has no region geometry to resolve against, so it leaves
-   * region-scoped countries for manual review rather than risk a false
-   * mismatch report (see `hasRegionOverrides`). */
+  /** The level `COUNTRY_ADMIN_LEVELS[country].city` currently resolves
+   * this country to -- absent both when the country is `regionScoped`
+   * (nothing was compared at all) and when its `city` list is genuinely
+   * empty (`city: []`, the ~30 Voronoi-fallback/no-city-polygon
+   * countries), which still *is* compared and can still be a mismatch.
+   * Read `regionScoped` to tell the two apart; `configuredCityLevel ===
+   * undefined` alone does not mean "skipped". */
   configuredCityLevel: number | undefined;
+  /** True when the candidate's country has at least one region
+   * `overrides` entry, so no country-wide comparison was made and
+   * `isMismatch` is forced to false: this function has no region
+   * geometry to resolve against, and leaves such a country for manual
+   * review rather than risk a false mismatch report against a
+   * region-scoped level list (see `hasRegionOverrides`). */
+  regionScoped: boolean;
   /** A configured city level some *other* same-settlement candidate
    * already sits at, carrying the identical name -- set when the
    * settlement already resolves correctly today under that candidate,
@@ -202,7 +209,8 @@ export function findPlaceTagMismatches(candidates: readonly PlaceTagCandidate[])
     if (otherLevels.length === 0) continue;
 
     const country = settlement.country;
-    const configured = hasRegionOverrides(country) ? undefined : configuredCityLevels(country);
+    const regionScoped = hasRegionOverrides(country);
+    const configured = regionScoped ? undefined : configuredCityLevels(country);
     const configuredCityLevel = configured?.[0];
     const alreadyResolvedAtLevel = configured
       ? related.find((c) => c !== settlement && configured.includes(c.level))?.level
@@ -217,6 +225,7 @@ export function findPlaceTagMismatches(candidates: readonly PlaceTagCandidate[])
       place: settlement.place!,
       otherLevels,
       configuredCityLevel,
+      regionScoped,
       alreadyResolvedAtLevel,
       isMismatch,
     });

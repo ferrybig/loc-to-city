@@ -99,8 +99,27 @@ test("findPlaceTagMismatches: a region-scoped country (US, GB) is left unscored 
   const a = fakeCandidate({ name: "X", country: "US", level: 6 });
   const b = fakeCandidate({ name: "X", country: "US", level: 8, place: "town" });
   const [result] = findPlaceTagMismatches([a, b]);
+  assert.equal(result?.regionScoped, true);
   assert.equal(result?.configuredCityLevel, undefined);
   assert.equal(result?.isMismatch, false);
+});
+
+test("findPlaceTagMismatches: a country with an empty city list is still scored -- not confused with a region-scoped skip", () => {
+  // LY has `city: []` (no OSM city-tier polygons at all, Voronoi
+  // fallback territory), so configuredCityLevel is undefined here too --
+  // but unlike a region-override country it IS compared, and a
+  // place-tagged level really is unconfigured, so this is a mismatch.
+  // `regionScoped` is what tells the two apart; report-place-tag-
+  // mismatches.ts's buckets would otherwise double-count this row as
+  // both MISMATCH and "region-scoped, skipped".
+  assert.deepEqual(COUNTRY_ADMIN_LEVELS.LY?.city, [], "test assumes LY's real table entry is still city: []");
+  assert.equal(COUNTRY_ADMIN_LEVELS.LY?.overrides, undefined, "test assumes LY has no region overrides");
+  const district = fakeCandidate({ name: "X", country: "LY", level: 4 });
+  const city = fakeCandidate({ name: "X", country: "LY", level: 8, place: "city" });
+  const [result] = findPlaceTagMismatches([district, city]);
+  assert.equal(result?.regionScoped, false);
+  assert.equal(result?.configuredCityLevel, undefined);
+  assert.equal(result?.isMismatch, true);
 });
 
 test("findPlaceTagMismatches: Brazil -- a place=village level not configured is NOT a mismatch when the same name already resolves at the configured level", () => {

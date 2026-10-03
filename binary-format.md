@@ -1085,13 +1085,17 @@ that does contain it gets `1` added to its folded tier -- an **exact
 spelling bonus** -- when the *unfolded* comparison (plain lowercase, no
 decomposition or diacritic stripping) reaches that same tier against the
 *unfolded* query, i.e. when folding was not actually needed to reach it.
-Folding can only ever reach a tier the unfolded comparison also reaches
-or falls short of, never a better one, so "reaches the same tier" is
-exactly "the query's own spelling, as given, was already enough" --
-unlike the folded tier itself, the bonus is evaluated with no
-normalization beyond lowercasing, the same way [Section B.9](#b9-query-procedure)'s
-confirmation step is. A field's **quality** is its folded tier plus this
-bonus, so quality is one of `0`, `10`, `11`, `20`, `21`, `40`, `41`.
+The unfolded comparison can never reach a *better* tier than the folded
+one -- folding only ever adds matches -- so "reaches at least the same
+tier" is exactly "the query's own spelling, as given, was already
+enough". Unlike the folded tier itself, and unlike
+[Section B.9](#b9-query-procedure)'s confirmation step, which compares
+folded forms, the bonus is evaluated with no normalization beyond
+lowercasing: it decides only how well a field matches, never whether it
+matches at all, so it can be stricter than the comparison the index's
+guarantee rests on without ever losing a match. A field's **quality** is
+its folded tier plus this bonus, so quality is one of `0`, `10`, `11`,
+`20`, `21`, `40`, `41`.
 
 The quality of a place is the highest quality of its fields, and its
 **score** is its quality plus a level bonus: `3` for a country, `2` for
@@ -1592,14 +1596,15 @@ ID order they produce, but are given here to show why):
   `2`, country `1`) this came out the other way, `2 0` -- a region used
   to outrank a country of equal quality, which this version's bonus
   ordering specifically fixes.
-- `ie` and `iu` both key on `België`'s folded form alone (`belgium`
-  doesn't contain either as a substring): `ie` only exists in `belgië`
-  after folding (`belgië` does not contain the literal substring `ie`,
-  since its sixth letter is `ë` not `e`), so it reaches quality `10`,
-  no exact spelling bonus, score `13`; `iu` is a literal substring of
-  `belgium` with no folding involved at all, quality `11`, score `14`.
-  Both entries hold only ID `1`, so the difference isn't visible in the
-  stored bytes, only in how each key was reached.
+- `ie` and `iu` are both keys of the country `België` / `Belgium` (ID
+  `1`) alone, reached in opposite ways. `ie` exists only in `België`'s
+  folded form (`belgië` does not contain the literal substring `ie`,
+  since its sixth letter is `ë` not `e`, and `belgium` does not contain
+  it either), so it reaches quality `10`, no exact spelling bonus, score
+  `13`; `iu` is a literal substring of `belgium` with no folding
+  involved at all, quality `11`, score `14`. Both entries hold only ID
+  `1`, so the difference isn't visible in the stored bytes, only in how
+  each key was reached.
 - `nl` is not a key, so a search for `nl` matches nothing, without
   reading any block beyond the one that would hold it.
 

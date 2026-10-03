@@ -59,9 +59,11 @@ test runner, no Jest/Vitest). To run a single test file directly:
 npx tsx --test compressor/test/geometry.test.ts
 ```
 
-`data-ingest` has no `test` script — it's ingest scripts, not a tested
-library; validate it by running a scoped build (see below) and reading its
-diagnostic output.
+`npm test -w data-ingest` covers the pure, library-shaped parts only
+(`adminLevelDetection`, `placeTagSignal`, `cities500`, `admin1Codes`,
+`polygonCountry`, `voronoiFallback`); the ingest scripts themselves have
+no test coverage — validate those by running a scoped build (see below)
+and reading their diagnostic output.
 
 Demo e2e (spins up its own server against `data/03-final/zuid-holland.bin` on
 :8767, per `demo/playwright.config.ts`):
@@ -220,9 +222,10 @@ image — `docker build -t loc2city-tools -f Dockerfile.tools .`), then
 `prepare-world.ts`, then the compressor CLI. Extraction skips any file
 whose output is already newer than its input, so swapping one `.osm.pbf`
 and re-running only re-extracts that file; file discovery is by glob, not
-a hardcoded continent list. Positional args scope both the extraction and
-the run to a subset of `.osm.pbf` basenames, for staged verification
-before a full rebuild.
+a hardcoded continent list. `make` itself takes no scoping arguments —
+for staged verification, run `data-ingest/scripts/extract-boundaries.sh
+<basename>...` directly, which still scopes extraction to a subset of
+`.osm.pbf` basenames.
 
 ## Architecture notes that span multiple files
 
