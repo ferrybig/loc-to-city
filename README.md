@@ -190,8 +190,10 @@ Four npm workspaces, all TypeScript:
   `data/` directory layout and file dependency graph. Its outputs land in
   `data/02-resolved/`, which is what you point the compressor at.
 - **`demo/`** — a click-to-query Leaflet page plus a grid tile overlay, the
-  JS/TS equivalent of `webapp/`'s demo but for one format with one lookup
-  path instead of comparing four approaches.
+  JS/TS successor to the deleted Python prototype's demo, but for one
+  format with one lookup path instead of comparing four approaches. It
+  serves its own copy of Leaflet, so only the OSM base map is fetched from
+  elsewhere.
 
 ```bash
 npm install                                # installs all four workspaces
@@ -218,7 +220,8 @@ make netherlands
 npm test -w compressor                     # now also runs the Zuid-Holland structural + query tests
 
 node demo/src/server.ts                    # serves data/03-final/zuid-holland.bin on :8766
-cd demo && npx playwright install chromium && npx playwright test   # click-to-query e2e
+npm test -w demo                           # unit tests (no dataset needed)
+cd demo && npx playwright install chromium && npx playwright test   # click-to-query e2e (needs zuid-holland.bin)
 ```
 
 Both of this phase's known accuracy regressions resolve correctly through

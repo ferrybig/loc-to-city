@@ -4,7 +4,7 @@ import { Piscina, queueOptionsSymbol } from "piscina";
 import { type LaneOptions, LaneTaskQueue } from "../src/taskQueue.ts";
 
 function task(label: string, lane?: LaneOptions) {
-	return { ms: 20, label, ...(lane && { [queueOptionsSymbol]: lane }) };
+	return { label, ...(lane && { [queueOptionsSymbol]: lane }) };
 }
 
 test("a queued foreground task runs before earlier background tasks", async () => {
@@ -16,17 +16,24 @@ test("a queued foreground task runs before earlier background tasks", async () =
 		stricterFIFO: true,
 	});
 	try {
+		// The first task holds the pool's only thread until every other
+		// task is queued. Whether it's already running by then or still
+		// queued itself, it's the first foreground task either way.
+		const gate = new Int32Array(new SharedArrayBuffer(4));
 		const order: string[] = [];
-		const run = (t: ReturnType<typeof task>) =>
+		const run = (t: object) =>
 			pool.run(t).then((label: string) => order.push(label));
-		await Promise.all([
-			run(task("busy")),
+		const done = Promise.all([
+			run({ ...task("busy"), gate: gate.buffer }),
 			run(task("tile 1", { background: true })),
 			run(task("tile 2", { background: true })),
 			run(task("query")),
 			run(task("tile 3", { background: true })),
 			run(task("search", { background: false })),
 		]);
+		Atomics.store(gate, 0, 1);
+		Atomics.notify(gate, 0);
+		await done;
 		assert.deepEqual(order, [
 			"busy",
 			"query",

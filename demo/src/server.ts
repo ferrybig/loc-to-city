@@ -1,27 +1,30 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
 /**
- * Tiny stdlib-only web server for the CGEODATA demo: serves the Leaflet
- * page, a JSON query API, and a tile overlay -- the JS/TS equivalent of
- * webapp/server.py, but for one format with one lookup path instead of
- * comparing four approaches.
+ * The CGEODATA demo's web server: serves the Leaflet page (with Leaflet
+ * itself, see staticAssets.ts), a JSON query API, and a tile overlay.
  *
  *   node src/server.ts [port] [dataset.bin]
  *
- * dataset defaults to data/03-final/zuid-holland.bin (see the plan /
- * README for how that's built); pass a different .bin path to point at a later, larger
- * build without changing any code. A `<dataset>.search-index.bin` and
+ * dataset defaults to data/03-final/zuid-holland.bin (`make netherlands`,
+ * see README); pass a different .bin path to point at a larger build
+ * without changing any code. A `<dataset>.search-index.bin` and
  * `<dataset>.locate-index.bin` next to it (from `cgeodata
  * build-search-index` / `build-locate-index`) are picked up automatically.
  *
  * The dataset is only ever read in a piscina pool of worker threads
  * (src/worker.ts); this thread just routes requests to them.
  */
-import { createServer, type ServerResponse } from "node:http";
+import {
+	createServer,
+	type IncomingMessage,
+	type ServerResponse,
+} from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Piscina, queueOptionsSymbol } from "piscina";
+import { loadStaticAssets, sendAsset } from "./staticAssets.ts";
 import { type LaneOptions, LaneTaskQueue } from "./taskQueue.ts";
+import { defaultTileResolution } from "./tiles.ts";
 import type { Cancellable, WorkerData } from "./worker.ts";
 
 /** The worker's exports, each one a task `piscina.run` can name. */
@@ -34,7 +37,6 @@ class QueueFullError extends Error {}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
-const PUBLIC_DIR = path.resolve(__dirname, "../public");
 
 const TILE_RE = /^\/tiles\/(\d+)\/(\d+)\/(\d+)\.png$/;
 
@@ -62,9 +64,14 @@ async function main(): Promise<void> {
 		? path.resolve(datasetArg)
 		: path.join(REPO_ROOT, "data/03-final/zuid-holland.bin");
 
+	const assets = loadStaticAssets();
+
 	console.error(`Loading ${datasetPath}...`);
 	const pool = new Piscina({
-		filename: path.resolve(__dirname, import.meta.url.endsWith(".ts") ? "worker.ts" : "worker.js"),
+		filename: path.resolve(
+			__dirname,
+			import.meta.url.endsWith(".ts") ? "worker.ts" : "worker.js",
+		),
 		minThreads: 0,
 		idleTimeout: 6000,
 		maxQueue: 256,
@@ -92,7 +99,9 @@ async function main(): Promise<void> {
 		const payload: Cancellable = {
 			...task,
 			cancelled: false,
-			[queueOptionsSymbol]: { background: name === "tile" } satisfies LaneOptions,
+			[queueOptionsSymbol]: {
+				background: name === "tile",
+			} satisfies LaneOptions,
 		};
 		res.on("close", () => {
 			payload.cancelled = true;
@@ -110,11 +119,14 @@ async function main(): Promise<void> {
 	for (const line of indexStatus) console.error(line);
 	console.error("Loaded.");
 
-	async function handle(url: URL, res: ServerResponse): Promise<void> {
-		if (url.pathname === "/" || url.pathname === "/index.html") {
-			const body = readFileSync(path.join(PUBLIC_DIR, "index.html"));
-			res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-			res.end(body);
+	async function handle(
+		req: IncomingMessage,
+		url: URL,
+		res: ServerResponse,
+	): Promise<void> {
+		const asset = assets.get(url.pathname);
+		if (asset) {
+			sendAsset(req, res, asset);
 			return;
 		}
 
@@ -159,9 +171,10 @@ async function main(): Promise<void> {
 			const z = Number(tileMatch[1]);
 			const x = Number(tileMatch[2]);
 			const y = Number(tileMatch[3]);
+			// `res` overrides the zoom-based default, for benchmarking.
 			const resolution = url.searchParams.has("res")
 				? numberParam(url, "res")
-				: 8;
+				: defaultTileResolution(z);
 			const tilesPerSide = 2 ** z;
 			if (
 				z > MAX_TILE_ZOOM ||
@@ -189,7 +202,7 @@ async function main(): Promise<void> {
 
 	const server = createServer((req, res) => {
 		const url = new URL(req.url ?? "/", "http://localhost");
-		handle(url, res).catch((err: unknown) => {
+		handle(req, url, res).catch((err: unknown) => {
 			// The client went away; there's no one to answer.
 			if (res.destroyed) return;
 			// A RangeError is the reader rejecting the request's coordinate
@@ -209,9 +222,7 @@ async function main(): Promise<void> {
 
 	const host = process.env.HOST ?? "127.0.0.1";
 	server.listen(port, host, () => {
-		console.error(
-			`Serving on http://${host}:${port} (dataset=${datasetPath})`,
-		);
+		console.error(`Serving on http://${host}:${port} (dataset=${datasetPath})`);
 	});
 }
 
