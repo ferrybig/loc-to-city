@@ -128,6 +128,79 @@ test("the cache saves queries on a zoomed-in tile", () => {
 	);
 });
 
+/** Uncached: how strong the border is at each grid pixel (0 none, 1
+ * city, 2 region, 3 country), from the pixel's place and the places of
+ * the samples left of and above it, which for the first row and column
+ * lie in the neighboring tile. */
+function uncachedBorders(
+	reader: TileReader,
+	z: number,
+	x: number,
+	y: number,
+	resolution: number,
+): number[] {
+	const gridSize = Math.floor(256 / resolution);
+	const place = (gx: number, gy: number) => {
+		const { lat, lon } = tilePixelToLonLat(
+			z,
+			x,
+			y,
+			gx * resolution + resolution / 2,
+			gy * resolution + resolution / 2,
+		);
+		const r = reader.query(lat, lon);
+		return [r.country, r.region, r.city].map((n) => JSON.stringify(n));
+	};
+	const strength = ([c1, r1, t1]: string[], [c2, r2, t2]: string[]): number =>
+		c1 !== c2 ? 3 : r1 !== r2 ? 2 : t1 !== t2 ? 1 : 0;
+	const out: number[] = [];
+	for (let gy = 0; gy < gridSize; gy++) {
+		for (let gx = 0; gx < gridSize; gx++) {
+			const here = place(gx, gy);
+			out.push(
+				Math.max(
+					strength(here, place(gx - 1, gy)),
+					strength(here, place(gx, gy - 1)),
+				),
+			);
+		}
+	}
+	return out;
+}
+
+test("borders darken exactly the pixels whose left or upper neighbor is another place", () => {
+	const reader = syntheticReader();
+	const alpha = [0, 0.3, 0.5, 0.75];
+	for (const [z, x, y] of [
+		[9, 263, 169],
+		[12, 2104, 1350],
+	] as const) {
+		for (const resolution of [2, 8]) {
+			const plain = renderTileGrid(reader, z, x, y, resolution).data;
+			const bordered = renderTileGrid(reader, z, x, y, resolution, true).data;
+			const expected = uncachedBorders(reader, z, x, y, resolution);
+			let drawn = 0;
+			for (const [i, strength] of expected.entries()) {
+				const dark = alpha[strength]!;
+				const [r, g, b, a] = plain.subarray(i * 4, i * 4 + 4);
+				const want = [
+					Math.round(r! * (1 - dark)),
+					Math.round(g! * (1 - dark)),
+					Math.round(b! * (1 - dark)),
+					Math.round(a! + (255 - a!) * dark),
+				];
+				assert.deepEqual(
+					[...bordered.subarray(i * 4, i * 4 + 4)],
+					want,
+					`tile ${z}/${x}/${y} res ${resolution} pixel ${i}`,
+				);
+				if (strength > 0) drawn++;
+			}
+			assert.ok(drawn > 0, `no borders in tile ${z}/${x}/${y}`);
+		}
+	}
+});
+
 test("default resolution is full from zoom 7 in and coarser further out", () => {
 	assert.equal(defaultTileResolution(20), 1);
 	assert.equal(defaultTileResolution(7), 1);
