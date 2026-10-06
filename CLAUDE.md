@@ -67,9 +67,14 @@ no test coverage — validate those by running a scoped build (see below)
 and reading their diagnostic output.
 
 Demo e2e (spins up its own server against `data/03-final/zuid-holland.bin` on
-:8767, per `demo/playwright.config.ts`):
+:8767, per `demo/playwright.config.ts`). That file isn't committed: build it
+with `make netherlands` first, which needs the worldwide build and runs it
+if it's missing (multi-hour, see below). Without it the Playwright config
+refuses to start, saying so. `demo/test/tiles.test.ts`'s real-data case
+skips without it too.
 
 ```bash
+make netherlands                        # once: data/03-final/zuid-holland.bin
 cd demo && npx playwright install chromium && npx playwright test
 ```
 
