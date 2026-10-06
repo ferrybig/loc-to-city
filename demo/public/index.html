@@ -113,7 +113,7 @@ let marker = null;
 
 function fmtPlace(names) {
   if (!names || names.length === 0) return '<span class="null-result">unknown</span>';
-  return names.join(' / ');
+  return escapeHtml(names.join(' / '));
 }
 
 function buildTable(data, lat, lon) {
@@ -147,12 +147,12 @@ async function queryAndPopup(lat, lon) {
     const resp = await fetch(`/api/query?lat=${lat}&lon=${wrappedLon}`);
     const data = await resp.json();
     if (data.error) {
-      popup.setContent(`<div class="loading">Error: ${data.error}</div>`);
+      popup.setContent(`<div class="loading">Error: ${escapeHtml(String(data.error))}</div>`);
       return;
     }
     popup.setContent(buildTable(data, lat, wrappedLon));
   } catch (e) {
-    popup.setContent(`<div class="loading">Request failed: ${e}</div>`);
+    popup.setContent(`<div class="loading">Request failed: ${escapeHtml(String(e))}</div>`);
   }
 }
 
@@ -200,30 +200,37 @@ const searchInput = document.getElementById('search-input');
 const searchResultsEl = document.getElementById('search-results');
 let searchTimeout = null;
 let lastResults = [];
+// Bumped by every input change, so a slow response to an older query
+// can't overwrite the results of a newer one.
+let searchSeq = 0;
 
 function escapeHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 searchInput.addEventListener('input', () => {
   clearTimeout(searchTimeout);
+  searchSeq++;
   const q = searchInput.value.trim();
   if (!q) { searchResultsEl.innerHTML = ''; lastResults = []; return; }
   searchTimeout = setTimeout(() => doSearch(q), 250);
 });
 
 searchInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { searchInput.value = ''; searchResultsEl.innerHTML = ''; lastResults = []; }
+  if (e.key === 'Escape') { searchSeq++; searchInput.value = ''; searchResultsEl.innerHTML = ''; lastResults = []; }
 });
 
 async function doSearch(q) {
+  const seq = searchSeq;
   try {
     const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
     const data = await resp.json();
+    if (seq !== searchSeq) return;
     lastResults = data.results ?? [];
     renderSearchResults(lastResults);
   } catch (_) {
-    searchResultsEl.innerHTML = '';
+    if (seq === searchSeq) searchResultsEl.innerHTML = '';
   }
 }
 

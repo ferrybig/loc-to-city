@@ -38,6 +38,18 @@ const PUBLIC_DIR = path.resolve(__dirname, "../public");
 
 const TILE_RE = /^\/tiles\/(\d+)\/(\d+)\/(\d+)\.png$/;
 
+/** The query parameter `name` as a number, or null when it is absent,
+ * empty or not a finite number (`Number(null)` and `Number("")` are 0,
+ * which would otherwise pass for a real value). */
+function numberParam(url: URL, name: string): number | null {
+	const raw = url.searchParams.get(name);
+	if (raw === null || raw.trim() === "") return null;
+	const value = Number(raw);
+	return Number.isFinite(value) ? value : null;
+}
+
+const MAX_TILE_ZOOM = 24;
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
 	res.writeHead(status, { "Content-Type": "application/json" });
 	res.end(JSON.stringify(body));
@@ -107,9 +119,9 @@ async function main(): Promise<void> {
 		}
 
 		if (url.pathname === "/api/query") {
-			const lat = Number(url.searchParams.get("lat"));
-			const lon = Number(url.searchParams.get("lon"));
-			if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+			const lat = numberParam(url, "lat");
+			const lon = numberParam(url, "lon");
+			if (lat === null || lon === null) {
 				sendJson(res, 400, { error: "missing or invalid lat/lon" });
 				return;
 			}
@@ -128,8 +140,8 @@ async function main(): Promise<void> {
 		}
 
 		if (url.pathname === "/api/locate") {
-			const id = Number(url.searchParams.get("id"));
-			if (!Number.isInteger(id) || id < 0) {
+			const id = numberParam(url, "id");
+			if (id === null || !Number.isInteger(id) || id < 0) {
 				sendJson(res, 400, { error: "missing or invalid id" });
 				return;
 			}
@@ -147,7 +159,22 @@ async function main(): Promise<void> {
 			const z = Number(tileMatch[1]);
 			const x = Number(tileMatch[2]);
 			const y = Number(tileMatch[3]);
-			const resolution = Number(url.searchParams.get("res") ?? "8");
+			const resolution = url.searchParams.has("res")
+				? numberParam(url, "res")
+				: 8;
+			const tilesPerSide = 2 ** z;
+			if (
+				z > MAX_TILE_ZOOM ||
+				x >= tilesPerSide ||
+				y >= tilesPerSide ||
+				resolution === null ||
+				!Number.isInteger(resolution) ||
+				resolution < 1 ||
+				resolution > 256
+			) {
+				sendJson(res, 400, { error: "invalid tile coordinates or res" });
+				return;
+			}
 			const png = await run(res, "tile", { x, y, z, resolution });
 			res.writeHead(200, {
 				"Content-Type": "image/png",
