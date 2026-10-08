@@ -1,8 +1,8 @@
 import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
 import type { HierarchyCountry } from "./hierarchy.ts";
-import { buildPlaceIdSpace, type CityProperties, type PlaceIdSpace } from "./placeIds.ts";
+import { buildPlaceIdSpace, type CityCollection, type PlaceIdSpace } from "./placeIds.ts";
 import { buildNameBlocks } from "./nameBlocks.ts";
-import { CandidateIndex, type CandidateEntry } from "./candidateIndex.ts";
+import { CandidateIndex, packFeature, type CandidateEntry } from "./candidateIndex.ts";
 import { writeCGeoDataFile } from "./writer.ts";
 import { buildRegionCountryCandidates } from "./regionCountryCandidates.ts";
 import type { CellBounds } from "./geometry.ts";
@@ -72,16 +72,16 @@ export interface PreparedBuild {
  * processed (sequential loop or worker pool). */
 export function prepareBuild(
   hierarchy: HierarchyCountry[],
-  cities: FeatureCollection<Polygon | MultiPolygon, CityProperties>,
+  cities: CityCollection,
   options: BuildOptions,
 ): PreparedBuild {
   const placeIds = buildPlaceIdSpace(hierarchy, cities);
   const { blockLengths, blockBytes } = buildNameBlocks(placeIds.nameEntries, options.keyframeExp);
 
   const regionCountryCandidates = buildRegionCountryCandidates(hierarchy, options.countries, options.regions);
-  const cityCandidates: CandidateEntry[] = [...placeIds.cityFeaturesById].map(([globalId, feature]) => ({
+  const cityCandidates: CandidateEntry[] = [...placeIds.cityFeaturesById].map(([globalId, city]) => ({
     globalId,
-    feature,
+    shape: "shape" in city ? city.shape : packFeature(city),
     ancestorIds: placeIds.cityAncestors.get(globalId) ?? [],
   }));
   const candidateIndex = new CandidateIndex([...regionCountryCandidates, ...cityCandidates]);

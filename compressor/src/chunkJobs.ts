@@ -28,11 +28,7 @@ export interface ChunkWorkerData {
 }
 
 function coordinateCount(candidate: IndexedCandidate): number {
-  const geometry = candidate.feature.geometry;
-  if (geometry.type === "Polygon") {
-    return geometry.coordinates.reduce((n, ring) => n + ring.length, 0);
-  }
-  return geometry.coordinates.reduce((n, poly) => n + poly.reduce((m, ring) => m + ring.length, 0), 0);
+  return candidate.geometry.coords.length / 2;
 }
 
 /** Walks every chunk in the `width x height` grid, runs the root bbox

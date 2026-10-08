@@ -1,6 +1,5 @@
-import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
 import type { HierarchyCountry } from "./hierarchy.ts";
-import type { CityProperties } from "./placeIds.ts";
+import type { CityCollection } from "./placeIds.ts";
 import { prepareBuild, finishBuild, type BuildOptions, type BuildStats } from "./buildCore.ts";
 import { enumerateChunkJobs } from "./chunkJobs.ts";
 import { runChunkJobs } from "./chunkWorkerPool.ts";
@@ -23,7 +22,7 @@ export interface ParallelBuildOptions extends BuildOptions {
  * divide up. */
 export async function buildCGeoDataFileParallel(
   hierarchy: HierarchyCountry[],
-  cities: FeatureCollection<Polygon | MultiPolygon, CityProperties>,
+  cities: CityCollection,
   options: ParallelBuildOptions,
 ): Promise<{ bytes: Buffer; stats: BuildStats }> {
   if (options.workers === 0) {

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { Feature, FeatureCollection, Polygon, MultiPolygon } from "geojson";
 import bbox from "@turf/bbox";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
-import { classifyCell, containsPoint, type CellBounds, type CellRelation } from "../src/geometry.ts";
+import { classifyCell, containsPoint, packGeometry, type CellBounds, type CellRelation } from "../src/geometry.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -47,7 +47,7 @@ function bboxOf(feature: Feature<Polygon | MultiPolygon>): [number, number, numb
 
 function classify(feature: Feature<Polygon | MultiPolygon>, bounds: CellBounds = CELL): CellRelation {
   const [minX, minY, maxX, maxY] = bboxOf(feature);
-  return classifyCell(feature, bounds, minX, minY, maxX, maxY);
+  return classifyCell(packGeometry(feature.geometry), bounds, minX, minY, maxX, maxY);
 }
 
 /** Ground truth, independent of any polygon algebra: sample a dense grid
@@ -171,12 +171,13 @@ test("containsPoint agrees with turf on real, complex province geometry", () => 
   let checked = 0;
   let onLand = 0;
   for (const feature of provinces.features) {
+    const packed = packGeometry(feature.geometry);
     const [minX, minY, maxX, maxY] = bbox(feature) as [number, number, number, number];
     for (let i = 0; i < 500; i++) {
       const x = minX + rng() * (maxX - minX);
       const y = minY + rng() * (maxY - minY);
       const expected = booleanPointInPolygon([x, y], feature);
-      const actual = containsPoint(feature.geometry, x, y);
+      const actual = containsPoint(packed, x, y);
       checked++;
       if (expected) onLand++;
       assert.equal(actual, expected, `${feature.properties?.name ?? "?"} at ${x},${y}: turf said ${expected}, containsPoint said ${actual}`);

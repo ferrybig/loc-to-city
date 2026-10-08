@@ -1,6 +1,6 @@
 import type { Feature, FeatureCollection, Polygon, MultiPolygon } from "geojson";
 import type { HierarchyCountry } from "./hierarchy.ts";
-import type { CandidateEntry } from "./candidateIndex.ts";
+import { packFeature, type CandidateEntry } from "./candidateIndex.ts";
 
 /** Builds the country/region entries of the candidate list (Section 7.1
  * ids: countries 0..C-1, then regions C..C+R-1 in hierarchy order), so that
@@ -30,14 +30,14 @@ export function buildRegionCountryCandidates(
   const countryCount = hierarchy.length;
   hierarchy.forEach((country, countryId) => {
     const feature = countryByCode.get(country.code);
-    if (feature) entries.push({ globalId: countryId, feature, ancestorIds: [] });
+    if (feature) entries.push({ globalId: countryId, shape: packFeature(feature), ancestorIds: [] });
   });
 
   let regionId = countryCount;
   hierarchy.forEach((country, countryId) => {
     for (const regionName of country.regions) {
       const feature = regionByKey.get(`${country.code} ${regionName}`);
-      if (feature) entries.push({ globalId: regionId, feature, ancestorIds: [countryId] });
+      if (feature) entries.push({ globalId: regionId, shape: packFeature(feature), ancestorIds: [countryId] });
       regionId++;
     }
   });

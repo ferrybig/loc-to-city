@@ -1,6 +1,5 @@
-import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
 import type { HierarchyCountry } from "./hierarchy.ts";
-import type { CityProperties } from "./placeIds.ts";
+import type { CityCollection } from "./placeIds.ts";
 import { buildChunkRecords } from "./quadtree.ts";
 import { encodeChunk } from "./chunkEncoder.ts";
 import { prepareBuild, chunkBoundsOf, finishBuild, type BuildOptions, type BuildStats } from "./buildCore.ts";
@@ -13,7 +12,7 @@ export type { BuildOptions, BuildStats } from "./buildCore.ts";
  * also exactly what `--workers 0` runs). */
 export function buildCGeoDataFile(
   hierarchy: HierarchyCountry[],
-  cities: FeatureCollection<Polygon | MultiPolygon, CityProperties>,
+  cities: CityCollection,
   options: BuildOptions,
 ): { bytes: Buffer; stats: BuildStats } {
   const prepared = prepareBuild(hierarchy, cities, options);
