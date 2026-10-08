@@ -551,7 +551,10 @@ Design notes worth keeping in mind if you touch this code: job candidate
 arrays are sent to workers via `postMessage` on demand (not written to
 temp files -- measured to be ~1% overhead even for the worst chunk, and
 files would've meant serializing 426MB up front before any worker could
-start); jobs are dispatched worst-first by a cheap coordinate-count cost
+start), with each candidate's geometry packed into one `Float64Array`
+(`packGeometry`) -- cloned as nested GeoJSON it stopped being cheap once
+chunk work got faster, 37s of a 128s single-worker benchmark build, 4s
+packed; jobs are dispatched worst-first by a cheap coordinate-count cost
 estimate, since per-chunk cost is skewed up to 1000x and a naive
 round-robin split would strand one worker with every hard chunk; and
 candidate array order must survive the trip unchanged; two tie-breaks in
@@ -661,6 +664,17 @@ once, the idea deliberately deferred when `--workers` landed) is what
 would change this picture; per-ring bounding boxes already skip whole
 islands, but Russia's mainland ring is a single ring that no bbox test can
 skip.
+
+(Since done, 2026-10-08: `boundaryContact` now walks only the y-bands of a
+ring that the cell spans, reusing the band index the ray cast already had;
+candidates travel to workers as packed `Float64Array`s instead of GeoJSON;
+and the max-depth tie-break casts each sample row's rays together. On a
+synthetic benchmark -- Natural Earth 10m countries at full precision,
+admin-1 regions simplified at 0.01, 5,290 Voronoi cities averaging ~720
+vertices, `--max-depth 8`, 4 workers -- chunk work went from 622s to 28s,
+wall clock from 171s to 10s and peak RSS from 1.26GB to 0.61GB, with
+byte-identical output. The numbers in this section predate that and are
+worth re-measuring, the region tolerance especially.)
 
 ## Known issues and open work
 
