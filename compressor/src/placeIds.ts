@@ -63,6 +63,10 @@ export interface PlaceIdSpace {
   unmatched: CityInput[];
 }
 
+function compareCodeUnits(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 /** Builds the Section 7.1 id space: countries 0..C-1, then regions C..C+R-1
  * grouped by country (in hierarchy order), then cities grouped by region
  * (in the same global region order). */
@@ -110,9 +114,12 @@ export function buildPlaceIdSpace(
     matchedKeys.add(key);
     const matched = [...(featuresByKey.get(key) ?? [])];
     // Deterministic order so re-running the compressor on the same input
-    // reproduces the same file byte-for-byte.
+    // reproduces the same file byte-for-byte -- on any machine, which is
+    // why this is plain code-unit order and not localeCompare: that
+    // collates by the build machine's default locale (and its ICU
+    // version), so the same input could get different city ids elsewhere.
     matched.sort((a, b) =>
-      String(a.properties.id ?? a.properties.name).localeCompare(String(b.properties.id ?? b.properties.name)),
+      compareCodeUnits(String(a.properties.id ?? a.properties.name), String(b.properties.id ?? b.properties.name)),
     );
     cityCounts[r] = matched.length;
     const regionGlobalId = countryCount + r;
