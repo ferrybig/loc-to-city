@@ -1,5 +1,5 @@
 import { createReadStream, readFileSync } from "node:fs";
-import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
+import type { FeatureCollection, MultiPolygon, Polygon } from "geojson";
 import { packFeature } from "./candidateIndex.ts";
 import type { CityFeature, CityProperties, PackedCityFeature } from "./placeIds.ts";
 

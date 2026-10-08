@@ -1,8 +1,8 @@
-import RBush from "rbush";
-import bbox from "@turf/bbox";
 import area from "@turf/area";
-import type { Feature, Polygon, MultiPolygon } from "geojson";
-import { packGeometry, type PackedGeometry } from "./geometry.ts";
+import bbox from "@turf/bbox";
+import type { Feature, MultiPolygon, Polygon } from "geojson";
+import RBush from "rbush";
+import { type PackedGeometry, packGeometry } from "./geometry.ts";
 
 /** Everything the build needs from a place's polygon, computed from its
  * GeoJSON once: the classifier's flat rings, plus the bbox and area turf

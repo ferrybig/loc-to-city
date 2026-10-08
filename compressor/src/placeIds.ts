@@ -1,6 +1,6 @@
-import type { Feature, Polygon, MultiPolygon } from "geojson";
-import type { HierarchyCountry } from "./hierarchy.ts";
+import type { Feature, MultiPolygon, Polygon } from "geojson";
 import type { PackedShape } from "./candidateIndex.ts";
+import type { HierarchyCountry } from "./hierarchy.ts";
 
 export interface CityProperties {
   id?: string;

@@ -1,9 +1,9 @@
+import { type BuildOptions, type BuildStats, finishBuild, prepareBuild } from "./buildCore.ts";
+import { encodeChunk } from "./chunkEncoder.ts";
+import { enumerateChunkJobs } from "./chunkJobs.ts";
 import type { HierarchyCountry } from "./hierarchy.ts";
 import type { CityCollection } from "./placeIds.ts";
 import { buildChunkRecords } from "./quadtree.ts";
-import { encodeChunk } from "./chunkEncoder.ts";
-import { prepareBuild, finishBuild, type BuildOptions, type BuildStats } from "./buildCore.ts";
-import { enumerateChunkJobs } from "./chunkJobs.ts";
 
 export type { BuildOptions, BuildStats } from "./buildCore.ts";
 

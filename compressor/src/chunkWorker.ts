@@ -1,7 +1,7 @@
 import { parentPort, workerData } from "node:worker_threads";
-import { buildChunkRecords } from "./quadtree.ts";
 import { encodeChunk } from "./chunkEncoder.ts";
 import type { ChunkWorkerData, WorkerRequest, WorkerResponse } from "./chunkJobs.ts";
+import { buildChunkRecords } from "./quadtree.ts";
 
 // Deliberately does not import candidateIndex.js/rbush/hierarchy.js -- this
 // worker only ever receives an already-queried candidate array, never

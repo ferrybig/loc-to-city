@@ -1,9 +1,9 @@
-import type { HierarchyCountry } from "./hierarchy.ts";
-import type { CityCollection } from "./placeIds.ts";
-import { prepareBuild, finishBuild, type BuildOptions, type BuildStats } from "./buildCore.ts";
+import { buildCGeoDataFile } from "./build.ts";
+import { type BuildOptions, type BuildStats, finishBuild, prepareBuild } from "./buildCore.ts";
 import { enumerateChunkJobs } from "./chunkJobs.ts";
 import { runChunkJobs } from "./chunkWorkerPool.ts";
-import { buildCGeoDataFile } from "./build.ts";
+import type { HierarchyCountry } from "./hierarchy.ts";
+import type { CityCollection } from "./placeIds.ts";
 
 export interface ParallelBuildOptions extends BuildOptions {
   /** Number of worker threads. `0` delegates to the plain sequential

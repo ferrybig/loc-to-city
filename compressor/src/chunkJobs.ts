@@ -1,5 +1,5 @@
-import type { IndexedCandidate, CandidateIndex } from "./candidateIndex.ts";
 import { chunkBoundsOf } from "./buildCore.ts";
+import type { CandidateIndex, IndexedCandidate } from "./candidateIndex.ts";
 import type { CellBounds } from "./geometry.ts";
 
 /** One chunk's worth of work: everything a worker needs to reproduce

@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
-import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
-import { loadHierarchy } from "./hierarchy.ts";
+import type { FeatureCollection, MultiPolygon, Polygon } from "geojson";
 import { buildCGeoDataFileParallel } from "./buildParallel.ts";
 import { parseChunkSelection } from "./chunkSelection.ts";
 import { loadCities } from "./cities.ts";
-import type { CityProperties } from "./placeIds.ts";
+import { loadHierarchy } from "./hierarchy.ts";
 
 const KNOWN_FLAGS = new Set([
   "regions",
@@ -74,7 +73,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const workersFlag = flags["workers"];
+  const workersFlag = flags.workers;
   const workers = workersFlag === undefined ? availableParallelism() : Number(workersFlag);
   if (!Number.isInteger(workers) || workers < 0) {
     throw new Error(`--workers must be a non-negative integer, got ${JSON.stringify(workersFlag)}`);
@@ -104,14 +103,14 @@ async function main(): Promise<void> {
   // takes minutes to read.
   const hierarchy = loadHierarchy(hierarchyPath);
   const cities = await loadCities(citiesPath);
-  const regionsPath = flags["regions"];
+  const regionsPath = flags.regions;
   const regions = regionsPath
     ? (JSON.parse(readFileSync(regionsPath, "utf8")) as FeatureCollection<
         Polygon | MultiPolygon,
         { name: string; country: string }
       >)
     : undefined;
-  const countriesPath = flags["countries"];
+  const countriesPath = flags.countries;
   const countries = countriesPath
     ? (JSON.parse(readFileSync(countriesPath, "utf8")) as FeatureCollection<
         Polygon | MultiPolygon,
@@ -125,7 +124,7 @@ async function main(): Promise<void> {
   );
 
   const options = {
-    attribution: flags["attribution"] ?? "",
+    attribution: flags.attribution ?? "",
     widthExp,
     heightExp,
     maxDepth,
