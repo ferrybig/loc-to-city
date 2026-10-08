@@ -1,5 +1,5 @@
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 import type { Feature, Polygon } from "geojson";
 import { buildPlaceIdSpace, type CityProperties } from "../src/placeIds.ts";
 
