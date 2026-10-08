@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import RBush from "rbush";
 import { selectRegionLevels, selectPrimaryLevels, detectGapFill } from "../src/lib/adminLevelDetection.ts";
-import type { PrimaryLevelResult } from "../src/lib/adminLevelDetection.ts";
+import type { PrimaryGeometryIndex, PrimaryGeometryItem, PrimaryLevelResult } from "../src/lib/adminLevelDetection.ts";
 import type { AdminBoundaryIndex, CityCandidateMeta } from "../src/lib/adminBoundaryIndex.ts";
 import { COUNTRY_ADMIN_LEVELS } from "../src/lib/countryAdminLevels.ts";
 import type { CountryIndex } from "../src/lib/countryIndex.ts";
@@ -169,7 +169,7 @@ test("detectGapFill: a candidate at another region's override level, in a region
     primaryLevelByCountry: new Map([["US", 8]]),
     primaryIds: new Set(), // not primary -- otherwise gap-fill wouldn't even consider it
   };
-  const primaryGeom = { tree: new RBush(), byId: new Map() };
+  const primaryGeom: PrimaryGeometryIndex = { tree: new RBush<PrimaryGeometryItem>(), byId: new Map() };
   const gapFill = detectGapFill(index, primary, primaryGeom, undefined, () => "Arkansas");
   assert.deepEqual(gapFill, []);
 });
@@ -184,7 +184,7 @@ test("detectGapFill: a New York candidate at its region's own gap-fill level (7)
     primaryLevelByCountry: new Map([["US", 8]]),
     primaryIds: new Set(),
   };
-  const primaryGeom = { tree: new RBush(), byId: new Map() }; // empty tree -- nothing covers this point
+  const primaryGeom: PrimaryGeometryIndex = { tree: new RBush<PrimaryGeometryItem>(), byId: new Map() }; // empty tree -- nothing covers this point
   const gapFill = detectGapFill(index, primary, primaryGeom, undefined, () => "New York");
   assert.deepEqual(
     gapFill.map((c) => c.id),
@@ -216,8 +216,8 @@ test("detectGapFill: a New York candidate at its region's own gap-fill level (7)
       ],
     ],
   };
-  const primaryGeom = {
-    tree: new RBush().load([{ minX: -1, minY: -1, maxX: 1, maxY: 1, id: "US-8-5", feature: { type: "Feature" as const, properties: {}, geometry: villagePolygon } }]),
+  const primaryGeom: PrimaryGeometryIndex = {
+    tree: new RBush<PrimaryGeometryItem>().load([{ minX: -1, minY: -1, maxX: 1, maxY: 1, id: "US-8-5", feature: { type: "Feature" as const, properties: {}, geometry: villagePolygon } }]),
     byId: new Map(),
   };
   townCandidate.repPoint = [0, 0]; // inside the village polygon above

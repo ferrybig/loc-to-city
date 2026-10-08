@@ -19,7 +19,7 @@ interface Run {
   status: number;
 }
 
-function run(args: string[], stdin: string | Buffer = ""): Run {
+function run(args: string[], stdin: string | Uint8Array = ""): Run {
   const result = spawnSync(process.execPath, [CLI, ...args], {
     input: stdin,
     encoding: "utf8",

@@ -147,7 +147,7 @@ test("a region's international name doesn't affect the region/city join, only it
     type: "FeatureCollection",
     features: cities.features.map((f) => ({
       ...f,
-      properties: { ...f.properties, nameEn: f.properties.name === "Springfield" ? "Springfield City" : undefined },
+      properties: f.properties.name === "Springfield" ? { ...f.properties, nameEn: "Springfield City" } : f.properties,
     })),
   };
 

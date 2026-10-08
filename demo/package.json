@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.test.json",
     "e2e": "playwright test",
     "dev": "node src/server.ts"
   },

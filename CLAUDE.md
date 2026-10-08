@@ -47,6 +47,7 @@ Four npm workspaces (Node >=26, see `.nvmrc`), all TypeScript, ESM
 ```bash
 npm install                                # installs all four workspaces
 npm run build --workspaces                 # tsc for each package
+npm run typecheck                          # tsc over src/ + test/ for each package (needs a build first)
 npm test -w reader                         # Appendix A conformance + varint/Morton unit tests
 npm test -w compressor                     # synthetic-dataset unit tests + real-data tests
 npm test -w demo                           # unit tests (not e2e)
