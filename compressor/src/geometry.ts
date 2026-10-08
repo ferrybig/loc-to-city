@@ -101,17 +101,27 @@ interface IndexedRing {
   points: [number, number][];
   /** Edge indices bucketed by horizontal band, or null for rings too small
    * for it to be worth it. `points` is GeoJSON-closed (first === last), so
-   * edge i is (points[i-1], points[i]) for i in [1, points.length) -- a
-   * ring with `bands` still walks every edge once, just only the edges
-   * near the query's y instead of all of them. See countContainedSamples
-   * and classifyCell's corner check for why a ring's edge count matters at
-   * all: a country the size of Russia has tens of thousands of them. */
+   * edge i is (points[i-1], points[i]) for i in [1, points.length). Every
+   * edge is listed in each band its y-range overlaps, so a query only
+   * walks the edges near its own y (or y-range) instead of all of them --
+   * both the ray cast (`ringToggle`) and the boundary walk
+   * (`boundaryContact`, the dominant cost of a build) use it. A country the
+   * size of Russia has tens of thousands of edges in one ring. */
   bands: number[][] | null;
   bandHeight: number;
 }
 
 const BAND_MIN_VERTICES = 256;
 const VERTICES_PER_BAND = 32;
+
+/** The band holding `y`, clamped to the ring's band range. The same
+ * monotonic formula files every edge (see `ringsOf`), which is what makes
+ * "every edge whose y-range reaches [yLo, yHi] is in bands
+ * bandOf(yLo)..bandOf(yHi)" hold exactly, rounding included. */
+function bandOf(ring: IndexedRing, y: number): number {
+  const band = Math.floor((y - ring.minY) / ring.bandHeight);
+  return band < 0 ? 0 : Math.min(ring.bands!.length - 1, band);
+}
 
 /** Per-ring bounding boxes (and, for large rings, a banded edge index),
  * computed once per geometry and reused for every cell that geometry is
@@ -130,8 +140,8 @@ function ringsOf(geometry: Polygon | MultiPolygon): IndexedRing[] {
   const rings: IndexedRing[] = [];
   const polygons = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates;
   for (const polygon of polygons) {
-    for (const ring of polygon) {
-      const points = ring as [number, number][];
+    for (const coordinates of polygon) {
+      const points = coordinates as [number, number][];
       // A closed linear ring needs at least 3 distinct vertices plus the
       // repeated closing point. Turf used to reject anything short of
       // that for us, as a side effect of calling into it for every cell;
@@ -152,22 +162,25 @@ function ringsOf(geometry: Polygon | MultiPolygon): IndexedRing[] {
         if (y > maxY) maxY = y;
       }
 
-      let bands: number[][] | null = null;
-      let bandHeight = maxY - minY;
-      if (points.length >= BAND_MIN_VERTICES && bandHeight > 0) {
+      const ring: IndexedRing = { minX, minY, maxX, maxY, points, bands: null, bandHeight: maxY - minY };
+      if (points.length >= BAND_MIN_VERTICES && ring.bandHeight > 0) {
         const bandCount = Math.ceil(points.length / VERTICES_PER_BAND);
-        bandHeight /= bandCount;
-        bands = Array.from({ length: bandCount }, () => []);
+        ring.bandHeight /= bandCount;
+        const bands: number[][] = Array.from({ length: bandCount }, () => []);
+        ring.bands = bands;
+        // Both ends go through bandOf's clamp: an edge whose lower end
+        // rounds to band `bandCount` (a horizontal edge along the ring's
+        // top, say) must still land in the last band, or a boundary walk
+        // over that band would never see it.
         for (let i = 1; i < points.length; i++) {
           const yi = points[i]![1];
           const yj = points[i - 1]![1];
-          const lo = Math.floor((Math.min(yi, yj) - minY) / bandHeight);
-          const hi = Math.min(bandCount - 1, Math.floor((Math.max(yi, yj) - minY) / bandHeight));
-          for (let b = lo; b <= hi; b++) bands[b]!.push(i);
+          const hi = bandOf(ring, Math.max(yi, yj));
+          for (let b = bandOf(ring, Math.min(yi, yj)); b <= hi; b++) bands[b]!.push(i);
         }
       }
 
-      rings.push({ minX, minY, maxX, maxY, points, bands, bandHeight });
+      rings.push(ring);
     }
   }
 
@@ -186,18 +199,24 @@ function ringToggle(ring: IndexedRing, x: number, y: number): boolean {
   if (x < ring.minX || x > ring.maxX || y < ring.minY || y > ring.maxY) return false;
   const { points, bands } = ring;
   let inside = false;
-  const crosses = (i: number): void => {
-    const [xi, yi] = points[i]!;
-    const [xj, yj] = points[i - 1]!;
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
-  };
   if (bands) {
-    const band = bands[Math.min(bands.length - 1, Math.floor((y - ring.minY) / ring.bandHeight))]!;
-    for (const i of band) crosses(i);
+    const band = bands[bandOf(ring, y)]!;
+    for (let k = 0; k < band.length; k++) {
+      if (rayCrossesEdge(points, band[k]!, x, y)) inside = !inside;
+    }
   } else {
-    for (let i = 1; i < points.length; i++) crosses(i);
+    for (let i = 1; i < points.length; i++) {
+      if (rayCrossesEdge(points, i, x, y)) inside = !inside;
+    }
   }
   return inside;
+}
+
+/** Whether a ray from (x, y) towards +x crosses edge i of `points`. */
+function rayCrossesEdge(points: [number, number][], i: number, x: number, y: number): boolean {
+  const [xi, yi] = points[i]!;
+  const [xj, yj] = points[i - 1]!;
+  return yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
 }
 
 /**
@@ -242,11 +261,29 @@ function boundaryContact(geometry: Polygon | MultiPolygon, bounds: CellBounds): 
     // Whole islands drop out here without a single segment being examined.
     if (ring.minX > lonMax || ring.maxX < lonMin || ring.minY > latMax || ring.maxY < latMin) continue;
 
-    const points = ring.points;
+    const { points, bands } = ring;
+    // segmentContact rejects any edge whose y-range misses [latMin,
+    // latMax], so only the bands covering that range can contribute. An
+    // edge spanning several of them is just checked more than once, which
+    // can't change a max. A cell spanning the whole ring gains nothing
+    // from the bands, so that case walks the ring directly.
+    if (bands) {
+      const lo = bandOf(ring, latMin);
+      const hi = bandOf(ring, latMax);
+      if (hi - lo + 1 < bands.length) {
+        for (let b = lo; b <= hi; b++) {
+          const band = bands[b]!;
+          for (let k = 0; k < band.length; k++) {
+            const contact = edgeContact(points, band[k]!, lonMin, lonMax, latMin, latMax);
+            if (contact === CONTACT_INTERIOR) return CONTACT_INTERIOR;
+            if (contact > strongest) strongest = contact;
+          }
+        }
+        continue;
+      }
+    }
     for (let i = 1; i < points.length; i++) {
-      const [x1, y1] = points[i - 1] as [number, number];
-      const [x2, y2] = points[i] as [number, number];
-      const contact = segmentContact(x1, y1, x2, y2, lonMin, lonMax, latMin, latMax);
+      const contact = edgeContact(points, i, lonMin, lonMax, latMin, latMax);
       // Interior contact is the strongest answer available, so stop as
       // soon as one turns up.
       if (contact === CONTACT_INTERIOR) return CONTACT_INTERIOR;
@@ -254,6 +291,19 @@ function boundaryContact(geometry: Polygon | MultiPolygon, bounds: CellBounds): 
     }
   }
   return strongest;
+}
+
+function edgeContact(
+  points: [number, number][],
+  i: number,
+  lonMin: number,
+  lonMax: number,
+  latMin: number,
+  latMax: number,
+): number {
+  const [x1, y1] = points[i - 1]!;
+  const [x2, y2] = points[i]!;
+  return segmentContact(x1, y1, x2, y2, lonMin, lonMax, latMin, latMax);
 }
 
 /**
