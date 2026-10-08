@@ -148,8 +148,9 @@ interface IndexedRing {
   /** Edge indices bucketed by horizontal band, or null for rings too small
    * for it to be worth it. Every edge is listed in each band its y-range
    * overlaps, so a query only walks the edges near its own y (or y-range)
-   * instead of all of them -- both the ray cast (`ringToggle`) and the
-   * boundary walk (`boundaryContact`, the dominant cost of a build) use it. A country the size of Russia has
+   * instead of all of them -- the ray casts (`ringToggle`,
+   * `countContainedSamples`) and the boundary walk (`boundaryContact`, the
+   * dominant cost of a build) all use it. A country the size of Russia has
    * tens of thousands of edges in one ring. */
   bands: number[][] | null;
   bandHeight: number;
@@ -405,7 +406,11 @@ export function classifyCell(
   return contact === CONTACT_GRAZE ? "crosses" : "disjoint";
 }
 
-const AREA_SHARE_SAMPLE_GRID = 5; // 5x5 = 25 sample points per ambiguous max-depth cell
+// 5x5 = 25 sample points per ambiguous max-depth cell. At most 31: a row's
+// samples are tracked as the bits of one int (see countContainedSamples).
+const AREA_SHARE_SAMPLE_GRID = 5;
+// The current cell's sample longitudes, shared by every row.
+const sampleLons = new Float64Array(AREA_SHARE_SAMPLE_GRID);
 
 /**
  * Approximates a candidate's share of a cell's area by counting how many of
@@ -414,19 +419,63 @@ const AREA_SHARE_SAMPLE_GRID = 5; // 5x5 = 25 sample points per ambiguous max-de
  * calling an exact polygon-clipping routine -- originally to avoid Turf
  * v7's `intersect()` (BigNumber arithmetic, profiled at ~45% of a real
  * build), and later `containsPoint` above replaced `booleanPointInPolygon`
- * itself for the same reason: 25 of those calls per candidate per still-
- * ambiguous leaf cell, at world scale, profiled as ~80% of total chunk
- * time. A cell this small only needs an approximate winner, not an exact
- * area.
+ * itself for the same reason. A cell this small only needs an approximate
+ * winner, not an exact area.
+ *
+ * Gives exactly `containsPoint`'s answer for every sample, but casts each
+ * row's rays together: a row's samples share one y, so each edge's
+ * crossing x is computed once (the same expression `rayCrossesEdge` uses)
+ * and compared against all of them, with the samples' parities kept as
+ * bits of one int, rather than walking the same band once per sample.
  */
 export function countContainedSamples(geometry: PackedGeometry, bounds: CellBounds): number {
+  const { coords } = geometry;
+  const rings = ringsOf(geometry);
+  for (let ix = 0; ix < AREA_SHARE_SAMPLE_GRID; ix++) {
+    sampleLons[ix] = bounds.lonMin + ((ix + 0.5) / AREA_SHARE_SAMPLE_GRID) * (bounds.lonMax - bounds.lonMin);
+  }
+
   let count = 0;
   for (let iy = 0; iy < AREA_SHARE_SAMPLE_GRID; iy++) {
     const lat = bounds.latMin + ((iy + 0.5) / AREA_SHARE_SAMPLE_GRID) * (bounds.latMax - bounds.latMin);
-    for (let ix = 0; ix < AREA_SHARE_SAMPLE_GRID; ix++) {
-      const lon = bounds.lonMin + ((ix + 0.5) / AREA_SHARE_SAMPLE_GRID) * (bounds.lonMax - bounds.lonMin);
-      if (containsPoint(geometry, lon, lat)) count++;
+    let inside = 0;
+    for (const ring of rings) {
+      if (lat < ring.minY || lat > ring.maxY) continue;
+      // ringToggle's bbox reject, per sample: a ring never toggles a
+      // sample outside its own x-range.
+      let eligible = 0;
+      for (let ix = 0; ix < AREA_SHARE_SAMPLE_GRID; ix++) {
+        const lon = sampleLons[ix]!;
+        if (lon >= ring.minX && lon <= ring.maxX) eligible |= 1 << ix;
+      }
+      if (eligible === 0) continue;
+
+      let toggles = 0;
+      if (ring.bands) {
+        const band = ring.bands[bandOf(ring, lat)]!;
+        for (let k = 0; k < band.length; k++) toggles ^= rowCrossings(coords, band[k]!, lat);
+      } else {
+        for (let i = ring.start + 1; i < ring.end; i++) toggles ^= rowCrossings(coords, i, lat);
+      }
+      inside ^= toggles & eligible;
     }
+    for (; inside !== 0; inside &= inside - 1) count++;
   }
   return count;
+}
+
+/** Bit ix set when a ray from sample ix of the current row (`sampleLons`,
+ * at y) towards +x crosses edge i -- `rayCrossesEdge` for the whole row. */
+function rowCrossings(coords: Float64Array, i: number, y: number): number {
+  const yi = coords[2 * i + 1]!;
+  const yj = coords[2 * i - 1]!;
+  if (yi > y === yj > y) return 0;
+  const xi = coords[2 * i]!;
+  const xj = coords[2 * i - 2]!;
+  const crossingX = ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+  let bits = 0;
+  for (let ix = 0; ix < AREA_SHARE_SAMPLE_GRID; ix++) {
+    if (sampleLons[ix]! < crossingX) bits |= 1 << ix;
+  }
+  return bits;
 }
