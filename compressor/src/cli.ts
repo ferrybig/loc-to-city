@@ -54,6 +54,10 @@ function headerFlag(flags: Record<string, string>, name: string, fallback: numbe
   return value;
 }
 
+function formatBytes(bytes: number): string {
+  return bytes >= 2 ** 30 ? `${(bytes / 2 ** 30).toFixed(1)}GB` : `${Math.round(bytes / 2 ** 20)}MB`;
+}
+
 async function main(): Promise<void> {
   const { positional, flags } = parseArgs(process.argv.slice(2));
   const [hierarchyPath, citiesPath, outPath] = positional;
@@ -114,6 +118,11 @@ async function main(): Promise<void> {
         { code: string }
       >)
     : undefined;
+  const loaded = process.memoryUsage();
+  console.error(
+    `loaded inputs: ${formatBytes(loaded.rss)} resident (JS heap ${formatBytes(loaded.heapUsed)}, ` +
+      `array buffers ${formatBytes(loaded.arrayBuffers)} -- mostly packed city geometry)`,
+  );
 
   const options = {
     attribution: flags["attribution"] ?? "",
@@ -125,11 +134,14 @@ async function main(): Promise<void> {
     countries,
     workers,
     onlyChunks,
-    onChunkBuilt: (info: { chunkIndex: number; chunkCount: number; recordCount: number; elapsedMs: number }) => {
+    onChunkBuilt: (info: { chunkIndex: number; jobCount: number; recordCount: number; elapsedMs: number }) => {
       timings.push({ chunkIndex: info.chunkIndex, recordCount: info.recordCount, elapsedMs: info.elapsedMs });
-      const percentage = ((timings.length) / info.chunkCount) * 100;
+      // Out of the chunks that do work at all, not the whole grid: most of
+      // a worldwide grid is ocean that never becomes a job.
+      const percentage = (timings.length / info.jobCount) * 100;
       console.error(
-        `  ${percentage.toFixed(0)}% chunk ${info.chunkIndex}/${info.chunkCount}: ${info.recordCount} records, ${info.elapsedMs.toFixed(0)}ms`,
+        `  [${timings.length}/${info.jobCount} ${percentage.toFixed(0)}%] chunk ${info.chunkIndex}: ` +
+          `${info.recordCount} records, ${info.elapsedMs.toFixed(0)}ms`,
       );
     },
   };
@@ -157,6 +169,10 @@ async function main(): Promise<void> {
       console.error(`  chunk ${t.chunkIndex}: ${(t.elapsedMs / 1000).toFixed(1)}s, ${t.recordCount} records`);
     }
   }
+
+  // Covers the whole process, worker threads included. maxRSS is in KiB
+  // on every platform (libuv's ru_maxrss; PeakWorkingSetSize on Windows).
+  console.error(`peak memory: ${formatBytes(process.resourceUsage().maxRSS * 1024)} resident, main thread and workers together`);
 }
 
 main().catch((err: unknown) => {

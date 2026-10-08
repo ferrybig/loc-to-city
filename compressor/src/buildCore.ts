@@ -37,10 +37,14 @@ export interface BuildOptions {
    * build; the worker-pool path fires out of order (whichever worker
    * finishes next), not in chunk-index order. `elapsedMs` covers the same
    * span in both paths: `buildChunkRecords` plus `encodeChunk`, excluding
-   * any queueing. A throwing callback fails the build. */
+   * any queueing. `jobCount` is how many times it fires over the whole
+   * build -- the denominator for progress, since `chunkCount` (the whole
+   * grid) also counts every chunk with no candidates at all. A throwing
+   * callback fails the build. */
   onChunkBuilt?: (info: {
     chunkIndex: number;
     chunkCount: number;
+    jobCount: number;
     recordCount: number;
     elapsedMs: number;
   }) => void;

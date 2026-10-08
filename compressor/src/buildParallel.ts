@@ -41,6 +41,7 @@ export async function buildCGeoDataFileParallel(
     options.onChunkBuilt?.({
       chunkIndex: result.chunkIndex,
       chunkCount: width * height,
+      jobCount: jobs.length,
       recordCount: result.recordCount,
       elapsedMs: result.elapsedMs,
     });
