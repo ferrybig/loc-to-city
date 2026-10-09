@@ -32,15 +32,14 @@ import type { CityProperties, HierarchyCountry } from "@loc-to-city/compressor";
 import { discoverAdminGeoJsonFiles } from "./lib/osmFiles.ts";
 import { loadCountryIndex } from "./lib/countryIndex.ts";
 import { buildAdminBoundaryIndex } from "./lib/adminBoundaryIndex.ts";
-import type { AdminBoundaryIndex, CityCandidateMeta } from "./lib/adminBoundaryIndex.ts";
+import type { CityCandidateMeta } from "./lib/adminBoundaryIndex.ts";
 import {
   selectRegionLevels,
   selectPrimaryLevels,
-  loadPrimaryGeometries,
-  detectGapFill,
-  fetchFinalGeometries,
+  createGapFillTracker,
+  streamPrimaries,
+  streamGeometries,
 } from "./lib/adminLevelDetection.ts";
-import type { PrimaryLevelResult } from "./lib/adminLevelDetection.ts";
 import { buildRegionIndex, assignCityRegion } from "./lib/regionPolygons.ts";
 import { streamCities500 } from "./lib/cities500.ts";
 import type { Cities500Row } from "./lib/cities500.ts";
@@ -62,52 +61,6 @@ const HIERARCHY_OUT = path.join(REPO_ROOT, "data/02-resolved/world/hierarchy.jso
 const CITIES_OUT = path.join(REPO_ROOT, "data/02-resolved/world/cities-filtered.geojsonseq");
 const REGIONS_OUT = path.join(REPO_ROOT, "data/02-resolved/world/regions.geojson");
 const COUNTRIES_OUT = path.join(REPO_ROOT, "data/02-resolved/world/country-polygons.geojson");
-
-// 115,000 primaries measured at 8.2GB resident, so a batch is sized well
-// under that -- the cost of one extra batch is one more read of the
-// corpus, which is cheap next to being killed.
-const MAX_PRIMARIES_PER_BATCH = 60_000;
-
-interface CountryBatch {
-  countries: Set<string>;
-  primaryIds: Set<string>;
-  primaryCount: number;
-}
-
-/** Splits countries into batches of roughly equal primary-city count, so
- * no batch blows the geometry budget while the number of corpus re-reads
- * stays small. Largest-country-first into whichever batch is currently
- * smallest -- crude, but it keeps a China or a Brazil from landing
- * together. */
-function planCountryBatches(index: AdminBoundaryIndex, primary: PrimaryLevelResult): CountryBatch[] {
-  const idsByCountry = new Map<string, string[]>();
-  for (const candidate of index.cityCandidates) {
-    if (!primary.primaryIds.has(candidate.id)) continue;
-    let ids = idsByCountry.get(candidate.country);
-    if (!ids) {
-      ids = [];
-      idsByCountry.set(candidate.country, ids);
-    }
-    ids.push(candidate.id);
-  }
-
-  const total = [...idsByCountry.values()].reduce((n, ids) => n + ids.length, 0);
-  const batchCount = Math.max(1, Math.ceil(total / MAX_PRIMARIES_PER_BATCH));
-  const batches: CountryBatch[] = Array.from({ length: batchCount }, () => ({
-    countries: new Set<string>(),
-    primaryIds: new Set<string>(),
-    primaryCount: 0,
-  }));
-
-  const bySize = [...idsByCountry.entries()].sort((a, b) => b[1].length - a[1].length);
-  for (const [country, ids] of bySize) {
-    const target = batches.reduce((a, b) => (a.primaryCount <= b.primaryCount ? a : b));
-    target.countries.add(country);
-    for (const id of ids) target.primaryIds.add(id);
-    target.primaryCount += ids.length;
-  }
-  return batches.filter((b) => b.primaryCount > 0);
-}
 
 async function main(): Promise<void> {
   mkdirSync(path.dirname(HIERARCHY_OUT), { recursive: true });
@@ -195,19 +148,6 @@ async function main(): Promise<void> {
     assignCityRegion(candidate.repPoint, candidate.country, regionIndex);
   const primary = selectPrimaryLevels(index, countries, undefined, resolveCandidateRegion);
 
-  // Full-precision city geometry for the whole world does not fit in
-  // memory at once -- ~295k primaries measured at roughly 60KB each, so
-  // ~19GB. Countries are therefore processed in batches, which is sound
-  // because every question left to answer is country-local: a candidate's
-  // representative point can only fall inside a primary of its own
-  // country, and its region can only be one of that country's regions.
-  // Each batch costs one more read of the corpus, so batches are kept few
-  // and balanced by primary count rather than split per country.
-  const batches = planCountryBatches(index, primary);
-  console.error(
-    `processing ${batches.length} country batches (largest ${Math.max(...batches.map((b) => b.primaryCount)).toLocaleString()} primaries)`,
-  );
-
   // Cities stream straight to disk as a GeoJSON Text Sequence (one
   // RS-delimited feature per record, the same shape osmium emits and
   // streamGeoJSONSeq reads). A single FeatureCollection is not an option
@@ -247,42 +187,23 @@ async function main(): Promise<void> {
   let cityCount = 0;
   let skippedNoName = 0;
   let skippedNoGeometry = 0;
-  const gapFillByCountryBatch: CityCandidateMeta[][] = [];
 
-  for (const [batchIndex, batch] of batches.entries()) {
-    console.error(
-      `  batch ${batchIndex + 1}/${batches.length}: ${batch.countries.size} countries, ${batch.primaryCount.toLocaleString()} primaries`,
-    );
-    const primaryGeom = await loadPrimaryGeometries(files, batch.primaryIds);
-    const gapFill = detectGapFill(index, primary, primaryGeom, batch.countries, resolveCandidateRegion);
-    gapFillByCountryBatch.push(gapFill);
-
-    for (const candidate of index.cityCandidates) {
-      if (!batch.primaryIds.has(candidate.id)) continue;
-      const geometry = primaryGeom.byId.get(candidate.id);
-      if (!geometry) {
-        skippedNoGeometry++;
-        continue;
-      }
-      const emitted = await emitCity(candidate, geometry);
-      if (emitted) cityCount++;
-    }
-  }
+  // Primaries are written as they stream past, straight from their source
+  // text, while the same read marks which other candidates they cover --
+  // no primary geometry is ever held (see createGapFillTracker).
+  const tracker = createGapFillTracker(index, primary, resolveCandidateRegion);
+  const primariesFound = await streamPrimaries(files, tracker, async (candidate, geometryJson) => {
+    if (await emitCity(candidate, geometryJson)) cityCount++;
+  });
+  skippedNoGeometry += tracker.primaryById.size - primariesFound;
 
   console.error("Pass 3/4: gap-fill geometry...");
   const gapFillById = new Map<string, CityCandidateMeta>();
-  for (const batch of gapFillByCountryBatch) {
-    for (const candidate of batch) gapFillById.set(candidate.id, candidate);
-  }
-  console.error(`  ${gapFillById.size.toLocaleString()} gap-fill cities across all batches`);
+  for (const candidate of tracker.gapFill()) gapFillById.set(candidate.id, candidate);
+  console.error(`  ${gapFillById.size.toLocaleString()} gap-fill cities`);
 
-  // One final corpus read covers every batch's gap-fill at once, and each
-  // feature is written and released immediately.
-  for await (const { id, feature } of fetchFinalGeometries(files, new Set(gapFillById.keys()))) {
-    const candidate = gapFillById.get(id);
-    if (!candidate) continue;
-    const emitted = await emitCity(candidate, feature);
-    if (emitted) cityCount++;
+  for await (const { id, geometryJson } of streamGeometries(files, gapFillById)) {
+    if (await emitCity(gapFillById.get(id)!, geometryJson)) cityCount++;
   }
 
   // README's "Voronoi-from-cities500" fallback (VORONOI_CITY_FALLBACK's
@@ -313,7 +234,7 @@ async function main(): Promise<void> {
       if (!countryPolygon) continue;
       const candidates = buildCityFallback(countryPolygon, points);
       for (const candidate of candidates) {
-        const emitted = await emitCity(candidate, { type: "Feature", properties: {}, geometry: candidate.geometry });
+        const emitted = await emitCity(candidate, JSON.stringify(candidate.geometry));
         if (emitted) {
           cityCount++;
           voronoiCount++;
@@ -337,7 +258,9 @@ async function main(): Promise<void> {
     country: string;
     repPoint: LonLat;
   }
-  async function emitCity(candidate: EmittableCity, geometry: Feature<Polygon | MultiPolygon>): Promise<boolean> {
+  /** `geometryJson` is the geometry's JSON text, written out as is -- for
+   * an OSM city, the exact text osmium wrote, never parsed. */
+  async function emitCity(candidate: EmittableCity, geometryJson: string): Promise<boolean> {
     if (!candidate.name) {
       skippedNoName++;
       return false;
@@ -348,18 +271,16 @@ async function main(): Promise<void> {
       return false;
     }
 
-    const feature: Feature<Polygon | MultiPolygon, CityProperties> = {
-      type: "Feature",
-      properties: {
-        id: candidate.id,
-        name: candidate.name,
-        ...(candidate.nameEn ? { nameEn: candidate.nameEn } : {}),
-        region,
-        country: candidate.country,
-      },
-      geometry: geometry.geometry,
+    const properties: CityProperties = {
+      id: candidate.id,
+      name: candidate.name,
+      ...(candidate.nameEn ? { nameEn: candidate.nameEn } : {}),
+      region,
+      country: candidate.country,
     };
-    await write("\x1e" + JSON.stringify(feature) + "\n");
+    // Same bytes JSON.stringify gives a {type, properties, geometry} feature,
+    // and properties-first is what filter-by-scope.ts peeks at.
+    await write(`\x1e{"type":"Feature","properties":${JSON.stringify(properties)},"geometry":${geometryJson}}\n`);
     return true;
   }
 

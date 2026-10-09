@@ -18,9 +18,9 @@
 import { createWriteStream, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import type { FeatureCollection, MultiPolygon, Polygon } from "geojson";
+import type { Feature, FeatureCollection, MultiPolygon, Polygon } from "geojson";
 import type { CityProperties, HierarchyCountry } from "@loc-to-city/compressor";
-import { streamGeoJSONSeq } from "./lib/geojsonseqStream.ts";
+import { peekLeadingProperties, streamGeoJSONSeqRecords } from "./lib/geojsonseqStream.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -132,18 +132,25 @@ async function main(): Promise<void> {
   // "JavaScript heap out of memory" on --only-continent Europe). The
   // compressor CLI already accepts .geojsonseq for exactly this reason
   // (see cities.ts) -- output extension here matches that expectation.
-  const RECORD_SEPARATOR = "\x1e";
+  const RECORD_SEPARATOR = Buffer.from("\x1e");
+  const NEWLINE = Buffer.from("\n");
   const citiesOut = path.join(resolvedOutDir, "cities-filtered.geojsonseq");
   const out = createWriteStream(citiesOut);
   let scanned = 0;
   let kept = 0;
-  for await (const feature of streamGeoJSONSeq(CITIES_SOURCE)) {
+  // Only each city's properties are parsed (prepare-world.ts writes them
+  // ahead of the geometry), and a kept record is copied through as the
+  // bytes it was read as: re-stringifying every geometry of a 4.4GB file
+  // was most of this script's runtime.
+  for await (const record of streamGeoJSONSeqRecords(CITIES_SOURCE)) {
     scanned++;
     if (scanned % 500_000 === 0) console.error(`scanned ${scanned} cities...`);
-    const country = (feature.properties as CityProperties | null)?.country;
+    const properties =
+      peekLeadingProperties(record) ?? (JSON.parse(record.toString("utf8")) as Feature).properties ?? undefined;
+    const country = (properties as CityProperties | undefined)?.country;
     if (!country || !countries.has(country)) continue;
     kept++;
-    if (!out.write(`${RECORD_SEPARATOR}${JSON.stringify(feature)}\n`)) {
+    if (!out.write(Buffer.concat([RECORD_SEPARATOR, record, NEWLINE]))) {
       await new Promise<void>((resolve) => out.once("drain", resolve));
     }
   }

@@ -63,7 +63,7 @@ node --test compressor/test/geometry.test.ts
 
 `npm test -w data-ingest` covers the pure, library-shaped parts only
 (`adminLevelDetection`, `placeTagSignal`, `cities500`, `admin1Codes`,
-`polygonCountry`, `voronoiFallback`); the ingest scripts themselves have
+`polygonCountry`, `voronoiFallback`, `geojsonseqStream`, `pointOnFeature`); the ingest scripts themselves have
 no test coverage — validate those by running a scoped build (see below)
 and reading their diagnostic output.
 
@@ -349,12 +349,15 @@ Buffer, and `JSON.parse` can't handle a string over
 scale (the city layer is ~4GB). `cities.ts`'s `loadCities` streams a
 GeoJSON Text Sequence (`.geojsonseq`, RS-delimited) record-by-record
 instead, falling back to plain `JSON.parse` for smaller `.geojson`
-inputs. `prepare-world.ts` batches primary-geometry loading by country
-(largest countries first, into the smallest batch) against a live RSS
-guardrail, because holding every country's primary geometry at once was
-measured to exceed available memory before output was even close to
-done — the guardrail fails fast with an actionable message rather than
-letting the whole machine OOM.
+inputs. `prepare-world.ts` never holds primary-city geometry at all
+(holding every country's at once was measured at ~19GB): after Pass 1,
+one streaming read hands each primary to `createGapFillTracker` and
+writes it straight out as osmium's own geometry text, and a second read
+fetches just the gap-fill cities. Both reads skip unwanted records by an
+id peeked off the raw bytes (`geojsonseqStream.ts`'s
+`streamGeoJSONSeqRecords`/`peekFeatureId`), so only Pass 1 parses the
+whole corpus. A primary only counts as covering a gap-fill candidate of
+its own country.
 
 **Memory-constrained runs**: use
 `systemd-run --user --scope -p MemoryMax=<N>` around a build, and set `N`
