@@ -1,15 +1,13 @@
-import bbox from "@turf/bbox";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import RBush from "rbush";
 import type { Feature, MultiPolygon, Polygon } from "geojson";
 import type { AdminBoundaryIndex, CityCandidateMeta } from "./adminBoundaryIndex.ts";
 import { COUNTRY_ADMIN_LEVELS } from "./countryAdminLevels.ts";
 import type { CountryIndex } from "./countryIndex.ts";
-import { streamMergedAdminBoundaries } from "./mergeAdminBoundaries.ts";
+import { splitOsmiumFeature } from "./geojsonseqStream.ts";
+import { streamMergedAdminRecords } from "./mergeAdminBoundaries.ts";
 
 const DEFAULT_COVERAGE_THRESHOLD = 0.6;
-const DEFAULT_MEMORY_CEILING_BYTES = 8 * 1024 ** 3;
-const RSS_CHECK_INTERVAL = 5000;
 
 export interface RegionLevelResult {
   regionLevelByCountry: Map<string, number>;
@@ -80,7 +78,7 @@ export interface PrimaryLevelResult {
  * list is primary here, unconditionally, no threshold, no competition
  * with the country-wide level. A candidate at one of that region's later
  * (gap-fill) levels is deliberately left out of `primaryIds` by this
- * function -- `detectGapFill` is what promotes those, region-scoped, the
+ * function -- `createGapFillTracker` is what promotes those, region-scoped, the
  * same "not covered by any primary" rule it already applies country-
  * wide. See `CountryAdminLevels.overrides`'s doc comment for why this
  * primary-then-gap-fill order matters -- both a flat country-wide
@@ -134,7 +132,7 @@ export function selectPrimaryLevels(
       // An overridden region never falls through to the country-wide
       // level, even for a candidate at a level the override doesn't list
       // at all -- such a candidate simply isn't primary here (it can
-      // never gap-fill either; see detectGapFill). Only the region's own
+      // never gap-fill either; see createGapFillTracker). Only the region's own
       // first (primary) level is added here -- a later, gap-fill-only
       // level in the same list is intentionally excluded from
       // primaryIds, even for a candidate that matches it exactly.
@@ -159,75 +157,48 @@ function isWholeUnit(candidate: CityCandidateMeta, region: string): boolean {
   return !!unit && unit.level === candidate.level && candidate.name !== undefined && unit.names.includes(candidate.name);
 }
 
-export interface PrimaryGeometryItem {
+interface GapFillPoint {
   minX: number;
   minY: number;
   maxX: number;
   maxY: number;
-  id: string;
-  feature: Feature<Polygon | MultiPolygon>;
+  candidate: CityCandidateMeta;
+  covered: boolean;
 }
 
-export interface PrimaryGeometryIndex {
-  tree: RBush<PrimaryGeometryItem>;
-  byId: Map<string, Feature<Polygon | MultiPolygon>>;
-}
-
-/** Second full streaming pass over the merged corpus: keeps real,
- * unsimplified geometry only for `id ∈ primaryIds` (cities are the
- * precision-critical layer -- same principle `prepare-europe.ts` already
- * documents for why they're never simplified). Guards peak memory with a
- * live RSS check every `RSS_CHECK_INTERVAL` kept records, failing fast
- * with an actionable message instead of repeating the original Python
- * pipeline's whole-machine OOM (README.md's "Europe scaling test", bug 1).
- * If this ever trips, call it again with a `primaryIds` subset restricted
- * to a handful of countries at a time (using `AdminBoundaryIndex`'s
- * per-country candidate counts to pick batches) -- trading wall-clock for
- * memory without touching Pass 1 or the output shape. */
-export async function loadPrimaryGeometries(
-  files: string[],
-  primaryIds: Set<string>,
-  opts: { memoryCeilingBytes?: number } = {},
-): Promise<PrimaryGeometryIndex> {
-  const memoryCeilingBytes = opts.memoryCeilingBytes ?? DEFAULT_MEMORY_CEILING_BYTES;
-  const items: PrimaryGeometryItem[] = [];
-  const byId = new Map<string, Feature<Polygon | MultiPolygon>>();
-  let kept = 0;
-
-  for await (const { id, feature } of streamMergedAdminBoundaries(files)) {
-    if (!primaryIds.has(id)) continue;
-    const geometry = feature as Feature<Polygon | MultiPolygon>;
-    const [minX, minY, maxX, maxY] = bbox(geometry);
-    items.push({ minX, minY, maxX, maxY, id, feature: geometry });
-    byId.set(id, geometry);
-    kept++;
-
-    if (kept % RSS_CHECK_INTERVAL === 0) {
-      const rss = process.memoryUsage().rss;
-      if (rss > memoryCeilingBytes) {
-        throw new Error(
-          `loadPrimaryGeometries: RSS ${(rss / 1024 ** 3).toFixed(1)}GB exceeded the ` +
-            `${(memoryCeilingBytes / 1024 ** 3).toFixed(1)}GB ceiling after ${kept}/${primaryIds.size} primary ` +
-            `geometries. Retry with a primaryIds subset restricted to fewer countries at a time.`,
-        );
-      }
-    }
-  }
-
-  const tree = new RBush<PrimaryGeometryItem>();
-  tree.load(items);
-  console.error(`loadPrimaryGeometries: loaded ${kept}/${primaryIds.size} primary geometries`);
-  return { tree, byId };
+/** Pass 3's bookkeeping: every gap-fill-eligible candidate's
+ * representative point, indexed, waiting to be covered by a primary. */
+export interface GapFillTracker {
+  /** The primaries `observePrimary` expects to see, by id. */
+  primaryById: Map<string, CityCandidateMeta>;
+  /** Marks every eligible point of the primary's own country that its
+   * geometry covers. `geometry` is only called when some still-uncovered
+   * point falls in the primary's bbox -- most primaries never need theirs
+   * parsed at all. */
+  observePrimary(primary: CityCandidateMeta, geometry: () => Polygon | MultiPolygon): void;
+  /** Candidates no observed primary covered, in `cityCandidates` order. */
+  gapFill(): CityCandidateMeta[];
 }
 
 /** Pass 3: re-scans every non-primary city candidate and adds it as a
  * gap-fill only if nothing in the primary set covers its representative
  * point -- the literal README rule ("an ordinary Kreis's point falls
  * inside one of its own child Gemeinden, already covered -> skipped; a
- * kreisfreie Stadt's point falls inside nothing at all -> added"). Runs
- * entirely over Pass 1's already-collected `cityCandidates` metadata (no
- * additional file I/O) plus Pass 2's in-memory primary geometry index --
- * both are already exactly the data this test needs.
+ * kreisfreie Stadt's point falls inside nothing at all -> added").
+ *
+ * Primaries are fed in one at a time (`observePrimary`, from
+ * `streamPrimaries`) against an index of the candidates' points, instead
+ * of indexing every primary polygon and probing it per candidate. The
+ * answer is the same -- covered by *some* primary or not -- but no primary
+ * geometry has to be held: holding it took batching the world by country
+ * (~19GB for ~295k primaries otherwise) and one more full corpus read per
+ * batch.
+ *
+ * Only a primary of the candidate's own country can cover it. A border
+ * municipality's polygon routinely reaches over the line (rivers,
+ * enclaves, slightly misaligned outlines), and the old batched pass let it
+ * cover a neighbour's candidate only when both countries happened to share
+ * a batch.
  *
  * `cityCandidates` contains every level any of a country's regions is
  * allowed to use -- the country's own `city` list *and* every level any
@@ -254,28 +225,28 @@ export async function loadPrimaryGeometries(
  * that region's own primary set, never a peer region's or the country's.
  * A candidate at a plain country-level (never listed in any override) is
  * never affected by this check. */
-export function detectGapFill(
+export function createGapFillTracker(
   index: AdminBoundaryIndex,
   primary: PrimaryLevelResult,
-  primaryGeom: PrimaryGeometryIndex,
-  countries?: ReadonlySet<string> | undefined,
   resolveRegion?: (candidate: CityCandidateMeta) => string | null,
-): CityCandidateMeta[] {
-  const gapFill: CityCandidateMeta[] = [];
+): GapFillTracker {
+  const primaryById = new Map<string, CityCandidateMeta>();
+  const points: GapFillPoint[] = [];
+  const overrideLevelsByCountry = new Map<string, Set<number>>();
 
   for (const candidate of index.cityCandidates) {
-    // When primaries were loaded for only some countries, only those
-    // countries' candidates can be judged: a candidate elsewhere would
-    // find nothing covering it and be wrongly promoted to a gap-fill.
-    // Restricting by country is sound because a candidate's
-    // representative point can only fall inside a primary of its own
-    // country.
-    if (countries && !countries.has(candidate.country)) continue;
-    if (primary.primaryIds.has(candidate.id)) continue;
+    if (primary.primaryIds.has(candidate.id)) {
+      primaryById.set(candidate.id, candidate);
+      continue;
+    }
 
     const overrides = COUNTRY_ADMIN_LEVELS[candidate.country]?.overrides;
     if (overrides) {
-      const overrideLevelsInCountry = new Set(Object.values(overrides).flat());
+      let overrideLevelsInCountry = overrideLevelsByCountry.get(candidate.country);
+      if (!overrideLevelsInCountry) {
+        overrideLevelsInCountry = new Set(Object.values(overrides).flat());
+        overrideLevelsByCountry.set(candidate.country, overrideLevelsInCountry);
+      }
       if (overrideLevelsInCountry.has(candidate.level)) {
         // This level only exists as a candidate at all because *some*
         // region in this country overrides to it -- only that region's
@@ -287,61 +258,106 @@ export function detectGapFill(
     }
 
     const [x, y] = candidate.repPoint;
-    const hits = primaryGeom.tree.search({ minX: x, minY: y, maxX: x, maxY: y });
-    let covered = false;
-    for (const hit of hits) {
-      if (booleanPointInPolygon(candidate.repPoint, hit.feature)) {
-        covered = true;
-        break;
-      }
-    }
-    if (!covered) gapFill.push(candidate);
+    points.push({ minX: x, minY: y, maxX: x, maxY: y, candidate, covered: false });
   }
 
-  console.error(`detectGapFill: ${gapFill.length} gap-fill cities added on top of ${primary.primaryIds.size} primary`);
-  return gapFill;
+  const tree = new RBush<GapFillPoint>();
+  tree.load(points);
+
+  return {
+    primaryById,
+    observePrimary(primaryCandidate, geometry) {
+      const [minX, minY, maxX, maxY] = primaryCandidate.bbox;
+      const open = tree
+        .search({ minX, minY, maxX, maxY })
+        .filter((p) => !p.covered && p.candidate.country === primaryCandidate.country);
+      if (open.length === 0) return;
+      const polygon = geometry();
+      for (const point of open) {
+        if (booleanPointInPolygon(point.candidate.repPoint, polygon)) point.covered = true;
+      }
+    },
+    gapFill() {
+      return points.filter((p) => !p.covered).map((p) => p.candidate);
+    },
+  };
 }
 
-/** A small, targeted fourth pass: fetches full geometry for a specific id
- * set that Pass 1 only kept metadata for (the gap-fill cities detected
- * above). Primary cities never need this -- their geometry already sits in
- * `PrimaryGeometryIndex.byId` from Pass 2. */
-export async function* fetchFinalGeometries(
+/** Passes 2 and 3 in one streaming read: hands every primary in the
+ * corpus to `tracker.observePrimary`, then to `onPrimary` with its
+ * geometry's source text, and drops it. A primary's geometry is parsed
+ * only if the tracker needs it for a coverage test; everything else in the
+ * corpus is skipped by id without being parsed. Returns how many of the
+ * expected primaries were found. */
+export async function streamPrimaries(
   files: string[],
-  ids: Set<string>,
-): AsyncGenerator<{ id: string; feature: Feature<Polygon | MultiPolygon> }> {
-  for await (const { id, feature } of streamMergedAdminBoundaries(files)) {
-    if (ids.has(id)) yield { id, feature: feature as Feature<Polygon | MultiPolygon> };
+  tracker: GapFillTracker,
+  onPrimary: (candidate: CityCandidateMeta, geometryJson: string) => Promise<void>,
+): Promise<number> {
+  let found = 0;
+  let parsed = 0;
+  for await (const { id, geometryJson } of streamGeometries(files, tracker.primaryById)) {
+    const candidate = tracker.primaryById.get(id)!;
+    found++;
+    tracker.observePrimary(candidate, () => {
+      parsed++;
+      return JSON.parse(geometryJson) as Polygon | MultiPolygon;
+    });
+    await onPrimary(candidate, geometryJson);
   }
+  console.error(
+    `streamPrimaries: ${found}/${tracker.primaryById.size} primaries streamed, ${parsed} parsed for a coverage test`,
+  );
+  return found;
+}
+
+/** A small, targeted final pass: the geometry source text of just `ids`
+ * (the gap-fill cities, which Pass 1 only kept metadata for), read without
+ * parsing anything else -- and no read at all when there's nothing to
+ * fetch. */
+export async function* streamGeometries(
+  files: string[],
+  ids: ReadonlySet<string> | ReadonlyMap<string, unknown>,
+): AsyncGenerator<{ id: string; geometryJson: string }> {
+  if (ids.size === 0) return;
+  for await (const { id, record, parsed } of streamMergedAdminRecords(files)) {
+    if (!ids.has(id)) continue;
+    const geometryJson =
+      (!parsed && splitOsmiumFeature(record)?.geometryJson) ||
+      JSON.stringify((parsed ?? (JSON.parse(record.toString("utf8")) as Feature)).geometry);
+    yield { id, geometryJson };
+  }
+}
+
+/** The primaries that are `wholeUnits` relations (`selectPrimaryLevels`
+ * promoted them by name). Few enough -- three in Wales -- that their
+ * geometry can be loaded on its own, ahead of the main primary stream. */
+export function selectWholeUnits(
+  index: AdminBoundaryIndex,
+  primary: PrimaryLevelResult,
+  resolveRegion: (candidate: CityCandidateMeta) => string | null,
+): CityCandidateMeta[] {
+  const units: CityCandidateMeta[] = [];
+  for (const candidate of index.cityCandidates) {
+    if (!COUNTRY_ADMIN_LEVELS[candidate.country]?.wholeUnits) continue;
+    if (!primary.primaryIds.has(candidate.id)) continue;
+    const region = resolveRegion(candidate);
+    if (region && isWholeUnit(candidate, region)) units.push(candidate);
+  }
+  return units;
 }
 
 /** Ids of primary candidates to drop because a `wholeUnits` relation
  * contains them: every primary candidate of the same country, at any other
- * level, whose representative point lies inside a promoted whole unit
- * (`selectPrimaryLevels` put the unit itself in `primaryIds`). Needs the
- * batch's loaded primary geometry for the unit outline, so it runs per
- * batch, after `loadPrimaryGeometries`. `countries` restricts the scan to
- * the batch, same as `detectGapFill`. */
-export function findSuppressedByWholeUnits(
+ * level, whose representative point lies inside a whole unit. Only the
+ * units' own geometry is needed -- the candidates are tested by the
+ * representative point their metadata already carries. */
+export function suppressedByWholeUnits(
   index: AdminBoundaryIndex,
   primary: PrimaryLevelResult,
-  primaryGeom: PrimaryGeometryIndex,
-  countries?: ReadonlySet<string> | undefined,
-  resolveRegion?: (candidate: CityCandidateMeta) => string | null,
+  units: readonly { candidate: CityCandidateMeta; geometry: Polygon | MultiPolygon }[],
 ): Set<string> {
   const suppressed = new Set<string>();
-  if (!resolveRegion) return suppressed;
-
-  const units: { candidate: CityCandidateMeta; feature: Feature<Polygon | MultiPolygon> }[] = [];
-  for (const candidate of index.cityCandidates) {
-    if (countries && !countries.has(candidate.country)) continue;
-    if (!COUNTRY_ADMIN_LEVELS[candidate.country]?.wholeUnits) continue;
-    if (!primary.primaryIds.has(candidate.id)) continue;
-    const region = resolveRegion(candidate);
-    if (!region || !isWholeUnit(candidate, region)) continue;
-    const feature = primaryGeom.byId.get(candidate.id);
-    if (feature) units.push({ candidate, feature });
-  }
   if (units.length === 0) return suppressed;
 
   for (const candidate of index.cityCandidates) {
@@ -352,13 +368,30 @@ export function findSuppressedByWholeUnits(
       const [x, y] = candidate.repPoint;
       const [minX, minY, maxX, maxY] = unit.candidate.bbox;
       if (x < minX || x > maxX || y < minY || y > maxY) continue;
-      if (booleanPointInPolygon(candidate.repPoint, unit.feature)) {
+      if (booleanPointInPolygon(candidate.repPoint, unit.geometry)) {
         suppressed.add(candidate.id);
         break;
       }
     }
   }
+  return suppressed;
+}
 
+/** `selectWholeUnits` + one targeted read for their geometry (none when
+ * no country has any) + `suppressedByWholeUnits`. */
+export async function findSuppressedByWholeUnits(
+  files: string[],
+  index: AdminBoundaryIndex,
+  primary: PrimaryLevelResult,
+  resolveRegion: (candidate: CityCandidateMeta) => string | null,
+): Promise<Set<string>> {
+  const candidates = selectWholeUnits(index, primary, resolveRegion);
+  const byId = new Map(candidates.map((c) => [c.id, c]));
+  const units: { candidate: CityCandidateMeta; geometry: Polygon | MultiPolygon }[] = [];
+  for await (const { id, geometryJson } of streamGeometries(files, byId)) {
+    units.push({ candidate: byId.get(id)!, geometry: JSON.parse(geometryJson) as Polygon | MultiPolygon });
+  }
+  const suppressed = suppressedByWholeUnits(index, primary, units);
   console.error(`findSuppressedByWholeUnits: ${units.length} whole units, ${suppressed.size} sub-units suppressed`);
   return suppressed;
 }

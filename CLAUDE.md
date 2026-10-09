@@ -63,7 +63,8 @@ node --test compressor/test/geometry.test.ts
 
 `npm test -w data-ingest` covers the pure, library-shaped parts only
 (`adminLevelDetection`, `placeTagSignal`, `cities500`, `admin1Codes`,
-`polygonCountry`, `voronoiFallback`); the ingest scripts themselves have
+`polygonCountry`, `voronoiFallback`, `geojsonseqStream`, `pointOnFeature`,
+`osmCountryBorders`); the ingest scripts themselves have
 no test coverage — validate those by running a scoped build (see below)
 and reading their diagnostic output.
 
@@ -334,6 +335,18 @@ tessellation, and a known residual limitation: a real OSM city's
 `repPoint` can land in a neighboring region's Voronoi cell when that
 city's own polygon is large or off-center — confirmed on Ljubljana).
 
+**Country resolution is Natural Earth, corrected by OSM's own borders.**
+`resolvePolygonCountry` (`polygonCountry.ts`) samples points against
+Natural Earth, but `prepare-world.ts` first wraps that index with
+`withOsmCountryBorders` (`osmCountryBorders.ts`): the corpus's own
+`admin_level=2` relations, keyed by their `ISO3166-1:alpha2` tag, override
+Natural Earth only where it names a country whose OSM border doesn't
+contain the point while another country's does. That fixes enclaves
+Natural Earth's 10m outlines don't have (Baarle-Hertog's Belgian enclaves
+inside NL resolved to NL and were dropped) without letting OSM's
+territorial waters or its folding of dependencies into a parent country
+change anything else.
+
 **Multi-file country handling.** OSM relations for a single country (e.g.
 Russia, Turkey) can be split across multiple continent extract files with
 zero overlap — each file has a complete, non-overlapping slice. Resolved
@@ -349,12 +362,15 @@ Buffer, and `JSON.parse` can't handle a string over
 scale (the city layer is ~4GB). `cities.ts`'s `loadCities` streams a
 GeoJSON Text Sequence (`.geojsonseq`, RS-delimited) record-by-record
 instead, falling back to plain `JSON.parse` for smaller `.geojson`
-inputs. `prepare-world.ts` batches primary-geometry loading by country
-(largest countries first, into the smallest batch) against a live RSS
-guardrail, because holding every country's primary geometry at once was
-measured to exceed available memory before output was even close to
-done — the guardrail fails fast with an actionable message rather than
-letting the whole machine OOM.
+inputs. `prepare-world.ts` never holds primary-city geometry at all
+(holding every country's at once was measured at ~19GB): after Pass 1,
+one streaming read hands each primary to `createGapFillTracker` and
+writes it straight out as osmium's own geometry text, and a second read
+fetches just the gap-fill cities. Both reads skip unwanted records by an
+id peeked off the raw bytes (`geojsonseqStream.ts`'s
+`streamGeoJSONSeqRecords`/`peekFeatureId`), so only Pass 1 parses the
+whole corpus. A primary only counts as covering a gap-fill candidate of
+its own country.
 
 **Memory-constrained runs**: use
 `systemd-run --user --scope -p MemoryMax=<N>` around a build, and set `N`

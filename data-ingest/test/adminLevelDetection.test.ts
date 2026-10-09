@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import RBush from "rbush";
-import type { Feature, Polygon } from "geojson";
-import { selectRegionLevels, selectPrimaryLevels, detectGapFill, findSuppressedByWholeUnits } from "../src/lib/adminLevelDetection.ts";
-import type { PrimaryGeometryIndex, PrimaryGeometryItem, PrimaryLevelResult } from "../src/lib/adminLevelDetection.ts";
+import type { Polygon } from "geojson";
+import { selectRegionLevels, selectPrimaryLevels, createGapFillTracker, selectWholeUnits, suppressedByWholeUnits } from "../src/lib/adminLevelDetection.ts";
+import type { PrimaryLevelResult } from "../src/lib/adminLevelDetection.ts";
 import type { AdminBoundaryIndex, CityCandidateMeta } from "../src/lib/adminBoundaryIndex.ts";
 import { COUNTRY_ADMIN_LEVELS } from "../src/lib/countryAdminLevels.ts";
 import type { CountryIndex } from "../src/lib/countryIndex.ts";
@@ -154,7 +153,7 @@ test("selectPrimaryLevels: a region override's later (gap-fill-only) level is ne
   assert.equal(primaryIds.has(nyLevel7Candidate.id), false);
 });
 
-test("detectGapFill: a candidate at another region's override level, in a region without that override, is never gap-fill-eligible", () => {
+test("gap-fill: a candidate at another region's override level, in a region without that override, is never gap-fill-eligible", () => {
   assert.deepEqual(COUNTRY_ADMIN_LEVELS.US?.overrides, { "New York": [8, 7] }, "test assumes US's override is still [8, 7]");
   // Big Rock Township, AR: a real regression this guards -- level 7 only
   // exists as a US city candidate at all because New York overrides to
@@ -170,12 +169,11 @@ test("detectGapFill: a candidate at another region's override level, in a region
     primaryLevelByCountry: new Map([["US", 8]]),
     primaryIds: new Set(), // not primary -- otherwise gap-fill wouldn't even consider it
   };
-  const primaryGeom: PrimaryGeometryIndex = { tree: new RBush<PrimaryGeometryItem>(), byId: new Map() };
-  const gapFill = detectGapFill(index, primary, primaryGeom, undefined, () => "Arkansas");
-  assert.deepEqual(gapFill, []);
+  const tracker = createGapFillTracker(index, primary, () => "Arkansas");
+  assert.deepEqual(tracker.gapFill(), []);
 });
 
-test("detectGapFill: a New York candidate at its region's own gap-fill level (7) IS eligible when uncovered by its region's own primary (8)", () => {
+test("gap-fill: a New York candidate at its region's own gap-fill level (7) IS eligible when uncovered by its region's own primary (8)", () => {
   assert.deepEqual(COUNTRY_ADMIN_LEVELS.US?.overrides, { "New York": [8, 7] }, "test assumes US's override is still [8, 7]");
   // Town of Galen, NY, say -- a level-7 town with no level-8 village
   // covering this particular point.
@@ -185,45 +183,92 @@ test("detectGapFill: a New York candidate at its region's own gap-fill level (7)
     primaryLevelByCountry: new Map([["US", 8]]),
     primaryIds: new Set(),
   };
-  const primaryGeom: PrimaryGeometryIndex = { tree: new RBush<PrimaryGeometryItem>(), byId: new Map() }; // empty tree -- nothing covers this point
-  const gapFill = detectGapFill(index, primary, primaryGeom, undefined, () => "New York");
+  const tracker = createGapFillTracker(index, primary, () => "New York"); // no primary observed -- nothing covers this point
   assert.deepEqual(
-    gapFill.map((c) => c.id),
+    tracker.gapFill().map((c) => c.id),
     [nyTownCandidate.id],
   );
 });
 
-test("detectGapFill: a New York candidate at its region's own gap-fill level (7) is skipped when its region's own primary (8) already covers the point", () => {
+test("gap-fill: a New York candidate at its region's own gap-fill level (7) is skipped when its region's own primary (8) already covers the point", () => {
   assert.deepEqual(COUNTRY_ADMIN_LEVELS.US?.overrides, { "New York": [8, 7] }, "test assumes US's override is still [8, 7]");
   // Village of Clyde inside Town of Galen: the exact regression this
   // guards -- the town (level 7, gap-fill) must lose to a village
   // (level 8, primary) that already covers the same point, not out-vote
   // it via the quadtree's coverage-share tie-break.
   const townCandidate = fakeCandidate("US", 7, 1000); // large, contains the village
-  const index = fakeIndex({ cityCandidates: [townCandidate] });
+  townCandidate.repPoint = [0, 0]; // inside the village polygon below
+  const village = { ...fakeCandidate("US", 8, 5), bbox: [-1, -1, 1, 1] as [number, number, number, number] };
+  const index = fakeIndex({ cityCandidates: [townCandidate, village] });
   const primary: PrimaryLevelResult = {
     primaryLevelByCountry: new Map([["US", 8]]),
-    primaryIds: new Set(["US-8-5"]), // a village primary already "loaded"
+    primaryIds: new Set([village.id]),
   };
-  const villagePolygon = {
-    type: "Polygon" as const,
+  const tracker = createGapFillTracker(index, primary, () => "New York");
+  assert.equal(tracker.primaryById.get(village.id), village);
+  tracker.observePrimary(village, () => square(-1, -1, 1, 1));
+  assert.deepEqual(tracker.gapFill(), []);
+});
+
+function square(minX: number, minY: number, maxX: number, maxY: number): Polygon {
+  return {
+    type: "Polygon",
     coordinates: [
       [
-        [-1, -1],
-        [1, -1],
-        [1, 1],
-        [-1, 1],
-        [-1, -1],
+        [minX, minY],
+        [maxX, minY],
+        [maxX, maxY],
+        [minX, maxY],
+        [minX, minY],
       ],
     ],
   };
-  const primaryGeom: PrimaryGeometryIndex = {
-    tree: new RBush<PrimaryGeometryItem>().load([{ minX: -1, minY: -1, maxX: 1, maxY: 1, id: "US-8-5", feature: { type: "Feature" as const, properties: {}, geometry: villagePolygon } }]),
-    byId: new Map(),
+}
+
+test("gap-fill: only a primary of the candidate's own country can cover it", () => {
+  assert.deepEqual(COUNTRY_ADMIN_LEVELS.DE?.city, [8, 6], "test assumes DE's city levels are still [8, 6]");
+  // A Kreis whose representative point sits just inside a Dutch
+  // municipality's polygon, where the two outlines don't quite line up at
+  // the border: that municipality is no reason to drop the Kreis.
+  const kreis = { ...fakeCandidate("DE", 6, 100), repPoint: [0, 0] as [number, number] };
+  const dutch = { ...fakeCandidate("NL", 10, 5), bbox: [-1, -1, 1, 1] as [number, number, number, number] };
+  const german = { ...fakeCandidate("DE", 8, 5), bbox: [-1, -1, 1, 1] as [number, number, number, number] };
+  const index = fakeIndex({ cityCandidates: [kreis, dutch, german] });
+  const primary: PrimaryLevelResult = {
+    primaryLevelByCountry: new Map([
+      ["DE", 8],
+      ["NL", 10],
+    ]),
+    primaryIds: new Set([dutch.id, german.id]),
   };
-  townCandidate.repPoint = [0, 0]; // inside the village polygon above
-  const gapFill = detectGapFill(index, primary, primaryGeom, undefined, () => "New York");
-  assert.deepEqual(gapFill, []);
+
+  const tracker = createGapFillTracker(index, primary);
+  let parsed = 0;
+  tracker.observePrimary(dutch, () => {
+    parsed++;
+    return square(-1, -1, 1, 1);
+  });
+  assert.equal(parsed, 0, "a foreign primary's geometry isn't even needed");
+  assert.deepEqual(
+    tracker.gapFill().map((c) => c.id),
+    [kreis.id],
+  );
+
+  tracker.observePrimary(german, () => square(-1, -1, 1, 1));
+  assert.deepEqual(tracker.gapFill(), []);
+});
+
+test("gap-fill: a primary whose bbox holds no open candidate point is never parsed", () => {
+  const kreis = { ...fakeCandidate("DE", 6, 100), repPoint: [5, 5] as [number, number] };
+  const far = { ...fakeCandidate("DE", 8, 5), bbox: [-1, -1, 1, 1] as [number, number, number, number] };
+  const index = fakeIndex({ cityCandidates: [kreis, far] });
+  const primary: PrimaryLevelResult = { primaryLevelByCountry: new Map([["DE", 8]]), primaryIds: new Set([far.id]) };
+  const tracker = createGapFillTracker(index, primary);
+  tracker.observePrimary(far, () => assert.fail("geometry should not be needed"));
+  assert.deepEqual(
+    tracker.gapFill().map((c) => c.id),
+    [kreis.id],
+  );
 });
 
 test("selectPrimaryLevels: a non-overridden region in the same country is unaffected by another region's override", () => {
@@ -257,14 +302,17 @@ test("whole units: Welsh Cardiff is promoted to primary and its communities are 
   const primary = selectPrimaryLevels(index, fakeCountries({ GB: 243_000 }), undefined, resolveRegion);
   assert.deepEqual([...primary.primaryIds].sort(), ["cardiff", "castle", "pontypridd"]);
 
-  const square = (b: [number, number, number, number]): Feature<Polygon> => ({
-    type: "Feature",
-    properties: {},
-    geometry: { type: "Polygon", coordinates: [[[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]], [b[0], b[1]]]] },
+  const box = (b: [number, number, number, number]): Polygon => ({
+    type: "Polygon",
+    coordinates: [[[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]], [b[0], b[1]]]],
   });
-  const byId = new Map(index.cityCandidates.map((c) => [c.id, square(c.bbox as [number, number, number, number])]));
-  const geom = { tree: new RBush<PrimaryGeometryItem>(), byId } as PrimaryGeometryIndex;
+  const units = selectWholeUnits(index, primary, resolveRegion);
+  assert.deepEqual(units.map((u) => u.id), ["cardiff"]);
 
-  const suppressed = findSuppressedByWholeUnits(index, primary, geom, undefined, resolveRegion);
+  const suppressed = suppressedByWholeUnits(
+    index,
+    primary,
+    units.map((candidate) => ({ candidate, geometry: box(candidate.bbox as [number, number, number, number]) })),
+  );
   assert.deepEqual([...suppressed], ["castle"]);
 });

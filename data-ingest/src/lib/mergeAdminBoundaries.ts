@@ -1,5 +1,5 @@
 import type { Feature } from "geojson";
-import { streamGeoJSONSeq } from "./geojsonseqStream.ts";
+import { peekFeatureId, streamGeoJSONSeqRecords } from "./geojsonseqStream.ts";
 
 /** Streams every file in `files`, in order, deduplicating by the id field
  * `osmium export --add-unique-id type_id` adds (observed in practice as
@@ -20,13 +20,32 @@ import { streamGeoJSONSeq } from "./geojsonseqStream.ts";
 export async function* streamMergedAdminBoundaries(
   files: string[],
 ): AsyncGenerator<{ id: string; feature: Feature }> {
+  for await (const { id, record, parsed } of streamMergedAdminRecords(files)) {
+    yield { id, feature: parsed ?? (JSON.parse(record.toString("utf8")) as Feature) };
+  }
+}
+
+/** `streamMergedAdminBoundaries` without the parse: the same files, order
+ * and dedup, but each record's raw bytes keyed by an id peeked off its
+ * prefix (`peekFeatureId`), so a pass that only wants a handful of ids
+ * never parses the rest of the corpus. `parsed` is set when the id could
+ * only be found by parsing the record anyway (not osmium's layout), so
+ * the caller doesn't parse it twice. */
+export async function* streamMergedAdminRecords(
+  files: string[],
+): AsyncGenerator<{ id: string; record: Buffer; parsed?: Feature }> {
   const seen = new Set<string>();
   let noId = 0;
   let duplicates = 0;
 
   for (const file of files) {
-    for await (const feature of streamGeoJSONSeq(file)) {
-      const id = featureId(feature);
+    for await (const record of streamGeoJSONSeqRecords(file)) {
+      let id = peekFeatureId(record);
+      let parsed: Feature | undefined;
+      if (id === undefined) {
+        parsed = JSON.parse(record.toString("utf8")) as Feature;
+        id = featureId(parsed);
+      }
       if (id === undefined) {
         noId++;
         continue;
@@ -36,7 +55,7 @@ export async function* streamMergedAdminBoundaries(
         continue;
       }
       seen.add(id);
-      yield { id, feature };
+      yield parsed ? { id, record, parsed } : { id, record };
     }
   }
 

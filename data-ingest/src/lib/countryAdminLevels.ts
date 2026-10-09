@@ -13,7 +13,7 @@ export interface CountryAdminLevels {
    * simpler, since an override is already a hand-picked exception, not
    * something to re-derive a vote for); every later level gap-fills
    * *within this region only*, on top of that region's own primary, the
-   * same "not covered by any primary -> add it" rule `detectGapFill`
+   * same "not covered by any primary -> add it" rule `createGapFillTracker`
    * already applies country-wide. A region's own levels never compete
    * against the country's `city` level, or against another region's
    * override levels, or against each other except via that same primary-
@@ -308,7 +308,7 @@ export interface CountryAdminLevels {
  *   tagged at level 9 -- the same level that's already primary nearly
  *   everywhere in Estonia -- so Tallinn's own area is already fully
  *   covered by its own, already-primary districts before the gap-fill
- *   pass ever runs; `detectGapFill` only promotes a candidate whose
+ *   pass ever runs; `createGapFillTracker` only promotes a candidate whose
  *   representative point isn't already covered by a primary, so the
  *   level-8 whole-city candidate is correctly (if unhelpfully) rejected
  *   every time. This is the same underlying shape as README's "Capitals

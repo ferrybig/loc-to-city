@@ -445,10 +445,13 @@ Two things had to be solved that Europe never hit:
 
 Memory is bounded by holding only scalars (id, country, level, area,
 representative point, bbox) for every candidate during the area-
-accumulation pass, and full geometry only for the primary set that
-actually survives -- so peak RSS tracks the *output* size, not the corpus.
-An RSS guardrail aborts with an actionable message rather than repeating
-the whole-machine OOM that this project already hit once.
+accumulation pass, and no city geometry after it: primaries are streamed
+from the corpus one at a time, tested against an index of the gap-fill
+candidates' points, and written out as the geometry text osmium produced
+-- so peak RSS tracks the candidate *count*, not the corpus or the output.
+On a 640MB DE/FR/NL benchmark corpus that took a run from 45s wall / 76s
+CPU / 1.3GB peak RSS (the earlier batched, geometry-holding design) to
+18s / 22s / 0.5GB, with byte-identical output.
 
 ```bash
 make world    # download, extract, resolve, compress -- whatever's already
@@ -495,7 +498,9 @@ sized to a per-run RSS ceiling (largest countries first, into the smallest
 batch) rather than all at once, which is what actually made a worldwide
 run possible after an early attempt measured 115,000 primaries resident at
 8.2GB, over the 8GB guardrail described above that exists specifically to
-fail fast rather than repeat this project's whole-machine OOM.
+fail fast rather than repeat this project's whole-machine OOM. (Batching
+and that guardrail have since been replaced by streaming primaries without
+holding their geometry at all -- see the memory note above.)
 
 The compressor stage was the bottleneck exactly as expected: 1h14m45s
 wall clock at `--workers 2`, capped to 16GB resident via `systemd-run
