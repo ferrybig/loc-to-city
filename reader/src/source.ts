@@ -42,7 +42,16 @@ class FileSource implements RandomAccessSource {
     const clampedLength = Math.max(0, Math.min(length, this.size - offset));
     const buf = Buffer.alloc(clampedLength);
     if (clampedLength > 0) {
-      readSync(this.fd, buf, 0, clampedLength, offset);
+      // The byte count has to be checked: a short read (a signal, or the
+      // file being truncated after the fstat above) would otherwise leave
+      // the tail of `buf` zeroed, and zeros parse as perfectly good
+      // varints -- a silently wrong answer instead of an error.
+      const bytesRead = readSync(this.fd, buf, 0, clampedLength, offset);
+      if (bytesRead !== clampedLength) {
+        throw new Error(
+          `short read: wanted ${clampedLength} bytes at offset ${offset}, got ${bytesRead}`,
+        );
+      }
     }
     return buf;
   }

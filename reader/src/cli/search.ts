@@ -1,5 +1,6 @@
 import {
 	type Command,
+	coordPrecision,
 	EXIT_NO_MATCH,
 	EXIT_OK,
 	formatPlaceLine,
@@ -105,11 +106,7 @@ grep's convention.
 				} else if (values.locate) {
 					const pos = reader.locate(place.id);
 					if (pos) {
-						const cellSize = Math.min(
-							pos.boundingBox.maxLat - pos.boundingBox.minLat,
-							pos.boundingBox.maxLon - pos.boundingBox.minLon,
-						);
-						const p = Math.max(0, Math.round(-Math.log10(cellSize) + 1));
+						const p = coordPrecision(pos.boundingBox);
 						writeLine(`${formatPlaceLine(place)}\t${pos.lat.toFixed(p)},${pos.lon.toFixed(p)}`);
 					} else {
 						writeLine(`${formatPlaceLine(place)}\t-`);

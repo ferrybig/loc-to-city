@@ -774,6 +774,21 @@ export class CGeoDataReader {
 		);
 		const inflated = safeInflate(compressed);
 		const chunk = parseChunk(inflated, this.header.maxDepth);
+		// Section 11: "every palette entry [MUST be] less than N".
+		// `parseChunk` can't check that -- it has no place table -- and this
+		// is the one place that has both, so a corrupt palette fails here
+		// with a format error naming the chunk, instead of surfacing much
+		// later as an out-of-range place id (`chunkRecords`) or as a bare
+		// TypeError on an undefined lookup (`buildLocateIndex`'s
+		// `countryOf[placeId]`).
+		const { totalPlaces } = this.placeTable;
+		for (const placeId of chunk.palette) {
+			if (placeId >= totalPlaces) {
+				throw new Error(
+					`chunk ${index}'s palette references place ${placeId}, beyond this file's ${totalPlaces} places`,
+				);
+			}
+		}
 		if (cache) this.chunkCache.set(index, new WeakRef(chunk));
 		return chunk;
 	}

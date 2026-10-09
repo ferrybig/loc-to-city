@@ -22,13 +22,18 @@ const COMMANDS: readonly Command[] = [
 	buildLocateIndexCmd,
 ];
 
+// Wide enough for the longest name there actually is: a fixed 8 left
+// `build-search-index` and `build-locate-index` hanging ten characters
+// into their own summaries.
+const NAME_WIDTH = Math.max(...COMMANDS.map((c) => c.name.length));
+
 const USAGE = `usage: cgeodata <command> <file.bin> [...]
        cgeodata help [<command>]
 
 Reads a CGEODATA file. <file.bin> may be "-" to read the file from stdin.
 
 commands:
-${COMMANDS.map((c) => `  ${c.name.padEnd(8)} ${c.summary}`).join("\n")}
+${COMMANDS.map((c) => `  ${c.name.padEnd(NAME_WIDTH)}  ${c.summary}`).join("\n")}
 
 Exit status is 0 on success, 1 when a search matched nothing, 2 on a
 usage or runtime error.`;
@@ -80,7 +85,12 @@ async function main(argv: string[]): Promise<number> {
 // reader's business, not an error worth a stack trace.
 process.stdout.on("error", (err: NodeJS.ErrnoException) => {
 	if (err.code === "EPIPE") process.exit(0);
-	throw err;
+	// Throwing from an 'error' listener raises an uncaughtException, so a
+	// plain write failure (`cgeodata list world.bin > /dev/full`, ENOSPC)
+	// would print a stack trace -- the very thing this handler exists to
+	// avoid. Report it the way main()'s own failure path does.
+	process.stderr.write(`${err.message}\n`);
+	process.exit(EXIT_ERROR);
 });
 
 main(process.argv.slice(2)).then(

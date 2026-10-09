@@ -937,9 +937,9 @@ section, since those are spec decisions rather than pipeline work.
   Nederland first, because the country has no `Nederland` field to match
   against at all, exact-match bonus or not.
 
-- **Wales and Northern Ireland resolved to sub-town units instead of the
-  town.** GB's country-wide city pick (level 10, civil parishes) is right
-  for England/Scotland but wrong for these two: Cardiff has its own
+- **Wales, Northern Ireland and Scotland resolved to sub-town units instead
+  of the town.** GB's country-wide city pick (level 10, civil parishes) is
+  right for England but wrong for these three: Cardiff has its own
   level-6 relation ("Cardiff") and Belfast its own level-7 ("Belfast City
   District"), both real town-level units, but both lost their own cell to
   a co-located level-10 sub-town unit ("Castle", a Welsh community;
@@ -960,6 +960,20 @@ section, since those are spec decisions rather than pipeline work.
   verified on `data/03-final/world.bin`: Cardiff now resolves to `city: Cardiff`,
   Belfast to `city: Belfast City District`, London and parished towns
   unchanged.
+
+  Scotland was added to the same override afterwards
+  (`"Alba / Scotland": [6, 10]`). Its level 10 is not parishes at all but
+  ~150 islands plus a few city-centre areas, and on the previous build
+  Edinburgh resolved to `Old Town`, Aberdeen to `City Centre` and
+  Inverness to `Crown and City Centre`, while Glasgow and Dundee resolved
+  to no city. Measured directly against the planet extract: Scotland's 32
+  level-6 council areas sum to 79,814 km² (47.5% of the `Alba / Scotland`
+  outline, which includes territorial waters, so effectively all of its
+  land); level 10 is 152 features, 1.7%. Level 6 primary with level 10
+  gap-filled gives `City of Edinburgh`, `Aberdeen City`, `Glasgow City`,
+  `Dundee City` and `Highland`. **Not yet verified on a rebuilt
+  `world.bin`** -- the numbers above are from the extract, the
+  after-state is expected, not observed.
 
 - **Uzbekistan and Laos's region tier was a district level, not a
   province level.** Both picked up `region: [6]` from the generated

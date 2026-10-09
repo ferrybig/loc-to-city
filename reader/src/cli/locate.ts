@@ -1,18 +1,12 @@
-import type { BoundingBox } from "../cellBounds.ts";
 import {
 	type Command,
+	coordPrecision,
 	openReader,
 	parse,
 	parseId,
 	UsageError,
 	writeLine,
 } from "./shared.ts";
-
-/** Decimal places that meaningfully represent a coordinate given a cell size. */
-function coordPrecision(box: BoundingBox): number {
-	const cellSize = Math.min(box.maxLat - box.minLat, box.maxLon - box.minLon);
-	return Math.max(0, Math.round(-Math.log10(cellSize) + 1));
-}
 
 export const locate: Command = {
 	name: "locate",
