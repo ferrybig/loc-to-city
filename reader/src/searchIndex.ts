@@ -16,7 +16,13 @@
  * reader's name blocks.
  */
 import type { CGeoDataReader, PlaceLevel } from "./reader.ts";
-import { foldDiacritics, LEVEL_BONUS, nameMatchQuality, prepareNeedle, QUALITY_MAX } from "./relevance.ts";
+import {
+	foldDiacritics,
+	LEVEL_BONUS,
+	nameMatchQuality,
+	prepareNeedle,
+	QUALITY_MAX,
+} from "./relevance.ts";
 import type { Needle } from "./relevance.ts";
 import { openSource, type RandomAccessSource } from "./source.ts";
 import { readVarint, writeVarint } from "./varint.ts";
@@ -56,14 +62,20 @@ const LATIN_LISTS = 28 ** 3;
 /** 32-bit FNV-1a. */
 export function fnv1a32(bytes: Uint8Array): number {
 	let h = 0x811c9dc5;
-	for (let i = 0; i < bytes.length; i++) h = Math.imul(h ^ bytes[i]!, 0x01000193);
+	for (let i = 0; i < bytes.length; i++)
+		h = Math.imul(h ^ bytes[i]!, 0x01000193);
 	return h >>> 0;
 }
 
 /** The list index of trigram `(a, b, c)`: exact for Latin symbols,
  * otherwise FNV-1a 32 of the three symbols as u24s, xor-folded to
  * `hashExp` bits. */
-export function trigramListIndex(a: number, b: number, c: number, hashExp: number): number {
+export function trigramListIndex(
+	a: number,
+	b: number,
+	c: number,
+	hashExp: number,
+): number {
 	if (a < 28 && b < 28 && c < 28) return a * 784 + b * 28 + c;
 	let h = 0x811c9dc5;
 	for (const s of [a, b, c]) {
@@ -89,7 +101,9 @@ export function trigramListIndices(text: string, hashExp: number): number[] {
 // ── File format (Section B.7) ─────────────────────────────────────────────────
 
 // "CGEODATA" -- same signature as the main data file.
-const SIGNATURE = Uint8Array.from([0x43, 0x47, 0x45, 0x4f, 0x44, 0x41, 0x54, 0x41]);
+const SIGNATURE = Uint8Array.from([
+	0x43, 0x47, 0x45, 0x4f, 0x44, 0x41, 0x54, 0x41,
+]);
 const KIND_SEARCH_INDEX = 1;
 // Version 2: relevance order (Section B.5) folds diacritics and reverses
 // the per-level bonus to favor country over city -- a version-1 file's
@@ -116,7 +130,9 @@ export interface SearchIndexOptions {
 }
 
 /** Appendix B.11's recommended parameters. */
-export const DEFAULT_SEARCH_INDEX_OPTIONS: Readonly<Required<SearchIndexOptions>> = {
+export const DEFAULT_SEARCH_INDEX_OPTIONS: Readonly<
+	Required<SearchIndexOptions>
+> = {
 	hashExp: 15,
 	topCount: 5,
 	topBlockExp: 6,
@@ -186,16 +202,34 @@ function pushTop(top: Ranked[], score: number, id: number, k: number): void {
 /** Builds a search index (Appendix B) over every place in `reader` and
  * returns the file's bytes. A pure function of the place table and the
  * options: the same input always gives the same bytes. */
-export function buildSearchIndex(reader: CGeoDataReader, options: SearchIndexOptions = {}): Uint8Array {
-	const { hashExp, topCount, topBlockExp } = { ...DEFAULT_SEARCH_INDEX_OPTIONS, ...options };
+export function buildSearchIndex(
+	reader: CGeoDataReader,
+	options: SearchIndexOptions = {},
+): Uint8Array {
+	const { hashExp, topCount, topBlockExp } = {
+		...DEFAULT_SEARCH_INDEX_OPTIONS,
+		...options,
+	};
 	if (!(Number.isInteger(hashExp) && hashExp >= 1 && hashExp <= MAX_EXP)) {
-		throw new RangeError(`hashExp must be an integer from 1 to ${MAX_EXP}, not ${hashExp}`);
+		throw new RangeError(
+			`hashExp must be an integer from 1 to ${MAX_EXP}, not ${hashExp}`,
+		);
 	}
 	if (!(Number.isInteger(topCount) && topCount >= 0 && topCount <= 255)) {
-		throw new RangeError(`topCount must be an integer from 0 to 255, not ${topCount}`);
+		throw new RangeError(
+			`topCount must be an integer from 0 to 255, not ${topCount}`,
+		);
 	}
-	if (!(Number.isInteger(topBlockExp) && topBlockExp >= 0 && topBlockExp <= MAX_EXP)) {
-		throw new RangeError(`topBlockExp must be an integer from 0 to ${MAX_EXP}, not ${topBlockExp}`);
+	if (
+		!(
+			Number.isInteger(topBlockExp) &&
+			topBlockExp >= 0 &&
+			topBlockExp <= MAX_EXP
+		)
+	) {
+		throw new RangeError(
+			`topBlockExp must be an integer from 0 to ${MAX_EXP}, not ${topBlockExp}`,
+		);
 	}
 	const { countries, regions, cities } = reader.placeCounts;
 	const N = countries + regions + cities;
@@ -229,7 +263,8 @@ export function buildSearchIndex(reader: CGeoDataReader, options: SearchIndexOpt
 						keyNeedles.set(key, needle);
 					}
 					const quality = nameMatchQuality(name, needle);
-					if (quality > (keyQuality.get(key) ?? 0)) keyQuality.set(key, quality);
+					if (quality > (keyQuality.get(key) ?? 0))
+						keyQuality.set(key, quality);
 				}
 			}
 		}
@@ -364,7 +399,10 @@ export class SearchIndex {
 	private listDirectoryCache: WeakRef<ListDirectory> | undefined;
 	private readonly listCache = new Map<number, WeakRef<Uint8Array>>();
 	private tableDirectoryCache: WeakRef<TableDirectory> | undefined;
-	private readonly tableBlockCache = new Map<number, WeakRef<Map<string, number[]>>>();
+	private readonly tableBlockCache = new Map<
+		number,
+		WeakRef<Map<string, number[]>>
+	>();
 
 	private readonly source: RandomAccessSource;
 	readonly sourceChecksum: bigint;
@@ -444,7 +482,8 @@ export class SearchIndex {
 			return value;
 		};
 		const u8 = (what: string): number => {
-			if (off >= data.length) throw new Error(`search index file is too short for ${what}`);
+			if (off >= data.length)
+				throw new Error(`search index file is too short for ${what}`);
 			return data[off++]!;
 		};
 
@@ -452,7 +491,9 @@ export class SearchIndex {
 		const kind = Math.floor(storedVersion / 16);
 		const version = storedVersion % 16;
 		if (kind !== KIND_SEARCH_INDEX) {
-			throw new Error(`not a text search index file (kind ${kind}, expected ${KIND_SEARCH_INDEX})`);
+			throw new Error(
+				`not a text search index file (kind ${kind}, expected ${KIND_SEARCH_INDEX})`,
+			);
 		}
 		if (version !== FORMAT_VERSION) {
 			throw new Error(
@@ -463,16 +504,23 @@ export class SearchIndex {
 						: `unsupported search index version ${version} (expected ${FORMAT_VERSION})`,
 			);
 		}
-		if (data.length < off + 8) throw new Error("search index file is too short for source checksum");
+		if (data.length < off + 8)
+			throw new Error("search index file is too short for source checksum");
 		const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
-		const sourceChecksum = BigInt(dv.getUint32(off, true)) | (BigInt(dv.getUint32(off + 4, true)) << 32n);
+		const sourceChecksum =
+			BigInt(dv.getUint32(off, true)) |
+			(BigInt(dv.getUint32(off + 4, true)) << 32n);
 		off += 8;
 		const placeCount = varint();
 		const hashExp = u8("hash_exp");
 		const topCount = u8("top_count");
 		const topBlockExp = u8("top_block_exp");
-		if (hashExp < 1 || hashExp > MAX_EXP) throw new Error(`hash_exp must be from 1 to ${MAX_EXP}, not ${hashExp}`);
-		if (topBlockExp > MAX_EXP) throw new Error(`top_block_exp must be at most ${MAX_EXP}, not ${topBlockExp}`);
+		if (hashExp < 1 || hashExp > MAX_EXP)
+			throw new Error(`hash_exp must be from 1 to ${MAX_EXP}, not ${hashExp}`);
+		if (topBlockExp > MAX_EXP)
+			throw new Error(
+				`top_block_exp must be at most ${MAX_EXP}, not ${topBlockExp}`,
+			);
 		const listDirectoryLength = varint();
 		const listsLength = varint();
 		const tableDirectoryLength = varint();
@@ -482,7 +530,9 @@ export class SearchIndex {
 		const tableDirectoryStart = listsStart + listsLength;
 		const tableBlocksStart = tableDirectoryStart + tableDirectoryLength;
 		if (tableBlocksStart > source.size) {
-			throw new Error(`search index header's section lengths run to byte ${tableBlocksStart}, past the end of the ${source.size}-byte file`);
+			throw new Error(
+				`search index header's section lengths run to byte ${tableBlocksStart}, past the end of the ${source.size}-byte file`,
+			);
 		}
 		const tableBlocksLength = source.size - tableBlocksStart;
 		if (topCount === 0 && tableDirectoryLength + tableBlocksLength > 0) {
@@ -490,12 +540,25 @@ export class SearchIndex {
 		}
 		const presenceLength = Math.ceil((LATIN_LISTS + 2 ** hashExp) / 8);
 		if (listDirectoryLength < presenceLength) {
-			throw new Error(`search index list directory is ${listDirectoryLength} bytes, shorter than its ${presenceLength}-byte presence bitmap`);
+			throw new Error(
+				`search index list directory is ${listDirectoryLength} bytes, shorter than its ${presenceLength}-byte presence bitmap`,
+			);
 		}
 		return new SearchIndex(
-			source, sourceChecksum, placeCount, hashExp, topCount, topBlockExp,
-			listDirectoryStart, listDirectoryLength, listsStart, listsLength,
-			tableDirectoryStart, tableDirectoryLength, tableBlocksStart, tableBlocksLength,
+			source,
+			sourceChecksum,
+			placeCount,
+			hashExp,
+			topCount,
+			topBlockExp,
+			listDirectoryStart,
+			listDirectoryLength,
+			listsStart,
+			listsLength,
+			tableDirectoryStart,
+			tableDirectoryLength,
+			tableBlocksStart,
+			tableBlocksLength,
 		);
 	}
 
@@ -578,7 +641,10 @@ export class SearchIndex {
 	private listDirectory(): ListDirectory {
 		const cached = this.listDirectoryCache?.deref();
 		if (cached) return cached;
-		const data = this.source.readSync(this.listDirectoryStart, this.listDirectoryLength);
+		const data = this.source.readSync(
+			this.listDirectoryStart,
+			this.listDirectoryLength,
+		);
 		const listCount = this.listCount;
 		const presenceLength = Math.ceil(listCount / 8);
 		const present: number[] = [];
@@ -588,7 +654,10 @@ export class SearchIndex {
 			for (let bit = 0; bit < 8; bit++) {
 				if ((bits & (1 << bit)) === 0) continue;
 				const l = byte * 8 + bit;
-				if (l >= listCount) throw new Error(`search index presence bitmap marks list ${l}, beyond its ${listCount} lists`);
+				if (l >= listCount)
+					throw new Error(
+						`search index presence bitmap marks list ${l}, beyond its ${listCount} lists`,
+					);
 				present.push(l);
 			}
 		}
@@ -606,9 +675,14 @@ export class SearchIndex {
 			off += bytesRead;
 			const length = Math.floor(value / 2);
 			const encoding = value % 2;
-			if (length === 0) throw new Error(`search index stores list ${present[slot]} with length 0`);
+			if (length === 0)
+				throw new Error(
+					`search index stores list ${present[slot]} with length 0`,
+				);
 			if (encoding === ENCODING_BITMAP && length !== bitmapLength) {
-				throw new Error(`search index bitmap for list ${present[slot]} is ${length} bytes, expected ${bitmapLength}`);
+				throw new Error(
+					`search index bitmap for list ${present[slot]} is ${length} bytes, expected ${bitmapLength}`,
+				);
 			}
 			dir.offsets[slot] = listOffset;
 			dir.lengths[slot] = length;
@@ -616,10 +690,14 @@ export class SearchIndex {
 			listOffset += length;
 		}
 		if (off !== data.length) {
-			throw new Error(`search index list directory has ${data.length - off} bytes after its last entry`);
+			throw new Error(
+				`search index list directory has ${data.length - off} bytes after its last entry`,
+			);
 		}
 		if (listOffset !== this.listsLength) {
-			throw new Error(`search index list lengths add up to ${listOffset}, but lists_length is ${this.listsLength}`);
+			throw new Error(
+				`search index list lengths add up to ${listOffset}, but lists_length is ${this.listsLength}`,
+			);
 		}
 		this.listDirectoryCache = new WeakRef(dir);
 		return dir;
@@ -631,7 +709,10 @@ export class SearchIndex {
 		const l = dir.indices[slot]!;
 		const cached = this.listCache.get(l)?.deref();
 		if (cached) return cached;
-		const list = this.source.readSync(this.listsStart + dir.offsets[slot]!, dir.lengths[slot]!);
+		const list = this.source.readSync(
+			this.listsStart + dir.offsets[slot]!,
+			dir.lengths[slot]!,
+		);
 		this.listCache.set(l, new WeakRef(list));
 		return list;
 	}
@@ -643,9 +724,13 @@ export class SearchIndex {
 		while (off < list.length) {
 			const { value, bytesRead } = readVarint(list, off);
 			off += bytesRead;
-			if (ids.length > 0 && value === 0) throw new Error("search index id list is not strictly increasing");
+			if (ids.length > 0 && value === 0)
+				throw new Error("search index id list is not strictly increasing");
 			id += value;
-			if (id >= this.placeCount) throw new Error(`search index lists place ${id}, beyond its ${this.placeCount} places`);
+			if (id >= this.placeCount)
+				throw new Error(
+					`search index lists place ${id}, beyond its ${this.placeCount} places`,
+				);
 			ids.push(id);
 		}
 		return ids;
@@ -659,7 +744,10 @@ export class SearchIndex {
 			for (let bit = 0; bit < 8; bit++) {
 				if ((bits & (1 << bit)) === 0) continue;
 				const id = byte * 8 + bit;
-				if (id >= this.placeCount) throw new Error(`search index bitmap sets place ${id}, beyond its ${this.placeCount} places`);
+				if (id >= this.placeCount)
+					throw new Error(
+						`search index bitmap sets place ${id}, beyond its ${this.placeCount} places`,
+					);
 				ids.push(id);
 			}
 		}
@@ -669,7 +757,10 @@ export class SearchIndex {
 	private tableDirectory(): TableDirectory {
 		const cached = this.tableDirectoryCache?.deref();
 		if (cached) return cached;
-		const data = this.source.readSync(this.tableDirectoryStart, this.tableDirectoryLength);
+		const data = this.source.readSync(
+			this.tableDirectoryStart,
+			this.tableDirectoryLength,
+		);
 		let off = 0;
 		const { value: keyCount, bytesRead } = readVarint(data, off);
 		off += bytesRead;
@@ -678,23 +769,31 @@ export class SearchIndex {
 		let blockOffset = 0;
 		for (let b = 0; b < blockCount; b++) {
 			const end = data.indexOf(0, off);
-			if (end < 0) throw new Error("search index table directory ends inside a key");
+			if (end < 0)
+				throw new Error("search index table directory ends inside a key");
 			const firstKey = data.slice(off, end);
 			off = end + 1;
 			const { value: length, bytesRead: lb } = readVarint(data, off);
 			off += lb;
 			const prev = dir.firstKeys[b - 1];
-			if (prev && compareBytes(prev, firstKey) >= 0) throw new Error("search index table directory keys are not in increasing order");
+			if (prev && compareBytes(prev, firstKey) >= 0)
+				throw new Error(
+					"search index table directory keys are not in increasing order",
+				);
 			dir.firstKeys.push(firstKey);
 			dir.offsets.push(blockOffset);
 			dir.lengths.push(length);
 			blockOffset += length;
 		}
 		if (off !== data.length) {
-			throw new Error(`search index table directory has ${data.length - off} bytes after its last block`);
+			throw new Error(
+				`search index table directory has ${data.length - off} bytes after its last block`,
+			);
 		}
 		if (blockOffset !== this.tableBlocksLength) {
-			throw new Error(`search index table block lengths add up to ${blockOffset}, but the table is ${this.tableBlocksLength} bytes`);
+			throw new Error(
+				`search index table block lengths add up to ${blockOffset}, but the table is ${this.tableBlocksLength} bytes`,
+			);
 		}
 		this.tableDirectoryCache = new WeakRef(dir);
 		return dir;
@@ -703,15 +802,23 @@ export class SearchIndex {
 	private tableBlock(dir: TableDirectory, b: number): Map<string, number[]> {
 		const cached = this.tableBlockCache.get(b)?.deref();
 		if (cached) return cached;
-		const data = this.source.readSync(this.tableBlocksStart + dir.offsets[b]!, dir.lengths[b]!);
+		const data = this.source.readSync(
+			this.tableBlocksStart + dir.offsets[b]!,
+			dir.lengths[b]!,
+		);
 		const entries = new Map<string, number[]>();
 		let off = 0;
 		let prevKey: Uint8Array | undefined;
 		while (off < data.length) {
 			const end = data.indexOf(0, off);
-			if (end < 0) throw new Error(`search index table block ${b} ends inside a key`);
+			if (end < 0)
+				throw new Error(`search index table block ${b} ends inside a key`);
 			const keyBytes = data.subarray(off, end);
-			if (prevKey ? compareBytes(prevKey, keyBytes) >= 0 : compareBytes(dir.firstKeys[b]!, keyBytes) !== 0) {
+			if (
+				prevKey
+					? compareBytes(prevKey, keyBytes) >= 0
+					: compareBytes(dir.firstKeys[b]!, keyBytes) !== 0
+			) {
 				throw new Error(`search index table block ${b} is not in key order`);
 			}
 			prevKey = keyBytes;
@@ -719,19 +826,26 @@ export class SearchIndex {
 			const { value: count, bytesRead } = readVarint(data, off);
 			off += bytesRead;
 			if (count < 1 || count > this.topCount) {
-				throw new Error(`search index table entry has ${count} places, expected 1 to ${this.topCount}`);
+				throw new Error(
+					`search index table entry has ${count} places, expected 1 to ${this.topCount}`,
+				);
 			}
 			const ids: number[] = [];
 			for (let i = 0; i < count; i++) {
 				const { value: id, bytesRead: ib } = readVarint(data, off);
 				off += ib;
-				if (id >= this.placeCount) throw new Error(`search index table lists place ${id}, beyond its ${this.placeCount} places`);
+				if (id >= this.placeCount)
+					throw new Error(
+						`search index table lists place ${id}, beyond its ${this.placeCount} places`,
+					);
 				ids.push(id);
 			}
 			entries.set(utf8Decoder.decode(keyBytes), ids);
 		}
 		if (entries.size > 2 ** this.topBlockExp) {
-			throw new Error(`search index table block ${b} has ${entries.size} entries, more than 2^${this.topBlockExp}`);
+			throw new Error(
+				`search index table block ${b} has ${entries.size} entries, more than 2^${this.topBlockExp}`,
+			);
 		}
 		this.tableBlockCache.set(b, new WeakRef(entries));
 		return entries;

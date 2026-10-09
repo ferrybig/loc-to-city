@@ -11,13 +11,13 @@
 
 /** Right-shift by `bits`, safe for values up to 2^53. */
 export function shiftRight(value: number, bits: number): number {
-  return Math.floor(value / 2 ** bits);
+	return Math.floor(value / 2 ** bits);
 }
 
 /** The low `bits` bits of `value`, safe for values up to 2^53. */
 export function lowBits(value: number, bits: number): number {
-  const modulus = 2 ** bits;
-  return value - Math.floor(value / modulus) * modulus;
+	const modulus = 2 ** bits;
+	return value - Math.floor(value / modulus) * modulus;
 }
 
 /**
@@ -26,29 +26,32 @@ export function lowBits(value: number, bits: number): number {
  * the x bit in every pair.
  */
 export function mortonEncode(x: number, y: number, depth: number): number {
-  let code = 0;
-  for (let i = depth - 1; i >= 0; i--) {
-    const yBit = (y >>> i) & 1;
-    const xBit = (x >>> i) & 1;
-    code = code * 2 + yBit;
-    code = code * 2 + xBit;
-  }
-  return code;
+	let code = 0;
+	for (let i = depth - 1; i >= 0; i--) {
+		const yBit = (y >>> i) & 1;
+		const xBit = (x >>> i) & 1;
+		code = code * 2 + yBit;
+		code = code * 2 + xBit;
+	}
+	return code;
 }
 
 /** Inverse of mortonEncode. Not needed by the read-only lookup path (which
  * only ever encodes a query point), but used by the compressor and tests. */
-export function mortonDecode(code: number, depth: number): { x: number; y: number } {
-  let x = 0;
-  let y = 0;
-  let remaining = code;
-  for (let i = 0; i < depth; i++) {
-    const xBit = lowBits(remaining, 1);
-    remaining = shiftRight(remaining, 1);
-    const yBit = lowBits(remaining, 1);
-    remaining = shiftRight(remaining, 1);
-    x |= xBit << i;
-    y |= yBit << i;
-  }
-  return { x, y };
+export function mortonDecode(
+	code: number,
+	depth: number,
+): { x: number; y: number } {
+	let x = 0;
+	let y = 0;
+	let remaining = code;
+	for (let i = 0; i < depth; i++) {
+		const xBit = lowBits(remaining, 1);
+		remaining = shiftRight(remaining, 1);
+		const yBit = lowBits(remaining, 1);
+		remaining = shiftRight(remaining, 1);
+		x |= xBit << i;
+		y |= yBit << i;
+	}
+	return { x, y };
 }

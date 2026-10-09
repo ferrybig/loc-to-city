@@ -7,10 +7,10 @@
  */
 
 function hexBytes(hex: string): number[] {
-  return hex
-    .split(/\s+/)
-    .filter((s) => s.length > 0)
-    .map((s) => parseInt(s, 16));
+	return hex
+		.split(/\s+/)
+		.filter((s) => s.length > 0)
+		.map((s) => parseInt(s, 16));
 }
 
 // A.1. Header (17 bytes)
@@ -57,10 +57,10 @@ const CHUNK_3 = hexBytes(`
 `);
 
 export const APPENDIX_A_BYTES: Uint8Array = Uint8Array.from([
-  ...HEADER,
-  ...DIRECTORY,
-  ...PLACE_TABLE_PREFIX,
-  ...NAME_BLOCK_0,
-  ...NAME_BLOCK_1,
-  ...CHUNK_3,
+	...HEADER,
+	...DIRECTORY,
+	...PLACE_TABLE_PREFIX,
+	...NAME_BLOCK_0,
+	...NAME_BLOCK_1,
+	...CHUNK_3,
 ]);

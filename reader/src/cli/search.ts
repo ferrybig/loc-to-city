@@ -89,7 +89,9 @@ grep's convention.
 				try {
 					reader.useSearchIndex(values.index);
 				} catch (error) {
-					throw new Error(`--index ${values.index}: ${(error as Error).message}`);
+					throw new Error(
+						`--index ${values.index}: ${(error as Error).message}`,
+					);
 				}
 			}
 
@@ -99,7 +101,11 @@ grep's convention.
 				if (values.json) {
 					if (values.locate) {
 						const pos = reader.locate(place.id);
-						writeLine(JSON.stringify(pos ? { ...place, lat: pos.lat, lon: pos.lon } : place));
+						writeLine(
+							JSON.stringify(
+								pos ? { ...place, lat: pos.lat, lon: pos.lon } : place,
+							),
+						);
 					} else {
 						writeLine(JSON.stringify(place));
 					}
@@ -107,7 +113,9 @@ grep's convention.
 					const pos = reader.locate(place.id);
 					if (pos) {
 						const p = coordPrecision(pos.boundingBox);
-						writeLine(`${formatPlaceLine(place)}\t${pos.lat.toFixed(p)},${pos.lon.toFixed(p)}`);
+						writeLine(
+							`${formatPlaceLine(place)}\t${pos.lat.toFixed(p)},${pos.lon.toFixed(p)}`,
+						);
 					} else {
 						writeLine(`${formatPlaceLine(place)}\t-`);
 					}

@@ -45,7 +45,9 @@ file. Same result either way.
 				try {
 					reader.useLocateIndex(values.index);
 				} catch (error) {
-					throw new Error(`--index ${values.index}: ${(error as Error).message}`);
+					throw new Error(
+						`--index ${values.index}: ${(error as Error).message}`,
+					);
 				}
 			}
 			let anyMissing = false;

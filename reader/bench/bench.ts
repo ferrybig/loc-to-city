@@ -146,10 +146,15 @@ function search(file: string): void {
 	] as const) {
 		const t = performance.now();
 		const hits = [...reader.search(q, { sort, limit: 20 })];
-		row(`search ${JSON.stringify(q)} sort=${sort} (${hits.length} hits)`, ms(t));
+		row(
+			`search ${JSON.stringify(q)} sort=${sort} (${hits.length} hits)`,
+			ms(t),
+		);
 	}
 	if (reader.hasLocateIndex) {
-		const ids = [...reader.search("paris", { sort: true, limit: 20 })].map((p) => p.id);
+		const ids = [...reader.search("paris", { sort: true, limit: 20 })].map(
+			(p) => p.id,
+		);
 		const t = performance.now();
 		for (const id of ids) reader.locate(id);
 		row(`locate x${ids.length} (indexed)`, ms(t));
@@ -193,7 +198,9 @@ async function memory(file: string): Promise<void> {
 
 const [file, ...requested] = process.argv.slice(2);
 if (!file) {
-	console.error("usage: node --expose-gc reader/bench/bench.ts <file.bin> [section...]");
+	console.error(
+		"usage: node --expose-gc reader/bench/bench.ts <file.bin> [section...]",
+	);
 	process.exit(2);
 }
 const child = process.env.CGEODATA_BENCH_CHILD === "1";
@@ -209,7 +216,10 @@ if (child) {
 			execFileSync(
 				process.execPath,
 				["--expose-gc", fileURLToPath(import.meta.url), file, name],
-				{ env: { ...process.env, CGEODATA_BENCH_CHILD: "1" }, encoding: "utf8" },
+				{
+					env: { ...process.env, CGEODATA_BENCH_CHILD: "1" },
+					encoding: "utf8",
+				},
 			),
 		);
 	}

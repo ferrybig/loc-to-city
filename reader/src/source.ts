@@ -7,62 +7,64 @@ import { openSync, readSync, closeSync, fstatSync } from "node:fs";
  * ever reads the bytes actually asked for, at the offset asked for.
  */
 export interface RandomAccessSource {
-  readonly size: number;
-  readSync(offset: number, length: number): Uint8Array;
-  close?(): void;
+	readonly size: number;
+	readSync(offset: number, length: number): Uint8Array;
+	close?(): void;
 }
 
 class BufferSource implements RandomAccessSource {
-  private readonly buf: Uint8Array;
+	private readonly buf: Uint8Array;
 
-  constructor(buf: Uint8Array) {
-    this.buf = buf;
-  }
+	constructor(buf: Uint8Array) {
+		this.buf = buf;
+	}
 
-  get size(): number {
-    return this.buf.length;
-  }
+	get size(): number {
+		return this.buf.length;
+	}
 
-  readSync(offset: number, length: number): Uint8Array {
-    const end = Math.min(offset + length, this.buf.length);
-    return this.buf.subarray(offset, Math.max(offset, end));
-  }
+	readSync(offset: number, length: number): Uint8Array {
+		const end = Math.min(offset + length, this.buf.length);
+		return this.buf.subarray(offset, Math.max(offset, end));
+	}
 }
 
 class FileSource implements RandomAccessSource {
-  private readonly fd: number;
-  readonly size: number;
+	private readonly fd: number;
+	readonly size: number;
 
-  constructor(path: string) {
-    this.fd = openSync(path, "r");
-    this.size = fstatSync(this.fd).size;
-  }
+	constructor(path: string) {
+		this.fd = openSync(path, "r");
+		this.size = fstatSync(this.fd).size;
+	}
 
-  readSync(offset: number, length: number): Uint8Array {
-    const clampedLength = Math.max(0, Math.min(length, this.size - offset));
-    const buf = Buffer.alloc(clampedLength);
-    if (clampedLength > 0) {
-      // The byte count has to be checked: a short read (a signal, or the
-      // file being truncated after the fstat above) would otherwise leave
-      // the tail of `buf` zeroed, and zeros parse as perfectly good
-      // varints -- a silently wrong answer instead of an error.
-      const bytesRead = readSync(this.fd, buf, 0, clampedLength, offset);
-      if (bytesRead !== clampedLength) {
-        throw new Error(
-          `short read: wanted ${clampedLength} bytes at offset ${offset}, got ${bytesRead}`,
-        );
-      }
-    }
-    return buf;
-  }
+	readSync(offset: number, length: number): Uint8Array {
+		const clampedLength = Math.max(0, Math.min(length, this.size - offset));
+		const buf = Buffer.alloc(clampedLength);
+		if (clampedLength > 0) {
+			// The byte count has to be checked: a short read (a signal, or the
+			// file being truncated after the fstat above) would otherwise leave
+			// the tail of `buf` zeroed, and zeros parse as perfectly good
+			// varints -- a silently wrong answer instead of an error.
+			const bytesRead = readSync(this.fd, buf, 0, clampedLength, offset);
+			if (bytesRead !== clampedLength) {
+				throw new Error(
+					`short read: wanted ${clampedLength} bytes at offset ${offset}, got ${bytesRead}`,
+				);
+			}
+		}
+		return buf;
+	}
 
-  close(): void {
-    closeSync(this.fd);
-  }
+	close(): void {
+		closeSync(this.fd);
+	}
 }
 
 /** Opens a CGEODATA source: a file path for lazy on-demand reads, or an
  * in-memory buffer (e.g. from `fetch()` in a browser, or a test fixture). */
 export function openSource(input: string | Uint8Array): RandomAccessSource {
-  return typeof input === "string" ? new FileSource(input) : new BufferSource(input);
+	return typeof input === "string"
+		? new FileSource(input)
+		: new BufferSource(input);
 }

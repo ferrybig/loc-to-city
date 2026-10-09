@@ -134,10 +134,15 @@ export const QUALITY_MAX = QUALITY_EXACT + EXACT_SPELLING_BONUS;
  * `normalized` reaches against `needle`/`needleTokens` -- both already
  * normalized the same way as `normalized` itself (both raw, or both
  * folded, never mixed). */
-function tierQuality(normalized: string, needle: string, needleTokens: readonly string[]): number {
+function tierQuality(
+	normalized: string,
+	needle: string,
+	needleTokens: readonly string[],
+): number {
 	if (!normalized.includes(needle)) return 0;
 	if (normalized === needle) return QUALITY_EXACT;
-	if (containsTokenRun(splitTokens(normalized), needleTokens)) return QUALITY_WHOLE_WORD;
+	if (containsTokenRun(splitTokens(normalized), needleTokens))
+		return QUALITY_WHOLE_WORD;
 	return QUALITY_SUBSTRING;
 }
 
@@ -157,14 +162,21 @@ function tierQuality(normalized: string, needle: string, needleTokens: readonly 
  * substring candidates, Appendix B.9) would miss it.
  */
 export function nameMatchQuality(name: string, needle: Needle): number {
-	const folded = tierQuality(foldDiacritics(name), needle.folded, needle.foldedTokens);
+	const folded = tierQuality(
+		foldDiacritics(name),
+		needle.folded,
+		needle.foldedTokens,
+	);
 	if (folded === 0) return 0;
 	const raw = tierQuality(name.toLowerCase(), needle.raw, needle.rawTokens);
 	return folded + (raw >= folded ? EXACT_SPELLING_BONUS : 0);
 }
 
 /** The best `nameMatchQuality` over a place's names. */
-export function placeMatchQuality(names: readonly string[], needle: Needle): number {
+export function placeMatchQuality(
+	names: readonly string[],
+	needle: Needle,
+): number {
 	let best = 0;
 	for (const name of names) {
 		best = Math.max(best, nameMatchQuality(name, needle));

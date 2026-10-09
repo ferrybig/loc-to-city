@@ -348,7 +348,8 @@ export class CGeoDataReader {
 		if (index === undefined) return;
 
 		const owned = !(index instanceof SearchIndex);
-		const opened = index instanceof SearchIndex ? index : SearchIndex.open(index);
+		const opened =
+			index instanceof SearchIndex ? index : SearchIndex.open(index);
 		try {
 			this.checkSearchIndex(opened);
 		} catch (error) {
@@ -421,7 +422,8 @@ export class CGeoDataReader {
 		if (index === undefined) return;
 
 		const owned = !(index instanceof LocateIndex);
-		const opened = index instanceof LocateIndex ? index : LocateIndex.open(index);
+		const opened =
+			index instanceof LocateIndex ? index : LocateIndex.open(index);
 		try {
 			this.checkLocateIndex(opened);
 		} catch (error) {
@@ -551,7 +553,9 @@ export class CGeoDataReader {
 			for (const id of this.searchScope(level, options, candidates)) {
 				// Match on the bare names first; resolving parents is only worth
 				// doing for the few that hit.
-				if (!this.names(id).some((name) => foldDiacritics(name).includes(needle)))
+				if (
+					!this.names(id).some((name) => foldDiacritics(name).includes(needle))
+				)
 					continue;
 				yield this.place(id);
 				if (--remaining <= 0) return;
@@ -596,7 +600,9 @@ export class CGeoDataReader {
 			let remaining = options.limit ?? Infinity;
 			for (const id of shortQuery) {
 				if (remaining <= 0) return;
-				if (!this.names(id).some((name) => foldDiacritics(name).includes(needle)))
+				if (
+					!this.names(id).some((name) => foldDiacritics(name).includes(needle))
+				)
 					continue;
 				yield this.place(id);
 				remaining--;
@@ -649,7 +655,10 @@ export class CGeoDataReader {
 	 * cached chunk stays alive at least until the current synchronous job
 	 * ends (WeakRef semantics), so a one-pass walk over every chunk should
 	 * skip the cache to keep memory flat. */
-	chunk(index: number, { cache = true }: { cache?: boolean } = {}): ChunkRecords | undefined {
+	chunk(
+		index: number,
+		{ cache = true }: { cache?: boolean } = {},
+	): ChunkRecords | undefined {
 		if (
 			!Number.isInteger(index) ||
 			index < 0 ||
@@ -684,7 +693,9 @@ export class CGeoDataReader {
 	 * With a locate index (`useLocateIndex()`) this reads one entry;
 	 * without one it scans every chunk. Same result either way.
 	 */
-	locate(id: number): { lat: number; lon: number; boundingBox: BoundingBox } | null {
+	locate(
+		id: number,
+	): { lat: number; lon: number; boundingBox: BoundingBox } | null {
 		if (!Number.isInteger(id) || id < 0 || id >= this.placeTable.totalPlaces) {
 			throw new RangeError(
 				`${id} is not a place id for this file (0 <= id < ${this.placeTable.totalPlaces})`,
@@ -911,7 +922,9 @@ function fnv1a64(data: Uint8Array): bigint {
 	for (let i = 0; i < data.length; i++) {
 		lo ^= data[i]!;
 		const loProduct = (lo >>> 0) * 0x1b3;
-		hi = (hi * 0x1b3 + Math.floor(loProduct / 0x100000000) + ((lo << 8) >>> 0)) >>> 0;
+		hi =
+			(hi * 0x1b3 + Math.floor(loProduct / 0x100000000) + ((lo << 8) >>> 0)) >>>
+			0;
 		lo = loProduct >>> 0;
 	}
 	return (BigInt(hi) << 32n) | BigInt(lo);

@@ -114,7 +114,12 @@ function syntheticReader(): QueryingReader & { queries: number } {
 			// Each country and region has one id, which every place under it
 			// refers to, as in a real place table: A and A1 are places 0 and
 			// 1 themselves; B and B1 have no entry of their own.
-			const ancestorIds: Record<string, number> = { A: 0, A1: 1, B: 100, B1: 101 };
+			const ancestorIds: Record<string, number> = {
+				A: 0,
+				A1: 1,
+				B: 100,
+				B1: 101,
+			};
 			return {
 				level: city ? "city" : region ? "region" : "country",
 				country: ancestorIds[country![0]!]!,

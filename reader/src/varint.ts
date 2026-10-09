@@ -16,8 +16,8 @@ const MAX_VARINT_BYTES = 8;
 const MAX_VARINT_VALUE = 2 ** 53;
 
 export interface VarintResult {
-  value: number;
-  bytesRead: number;
+	value: number;
+	bytesRead: number;
 }
 
 /** Scratch output for `readVarint`, so a single read allocates nothing
@@ -25,53 +25,61 @@ export interface VarintResult {
 const single = new Float64Array(1);
 
 export function readVarint(buf: Uint8Array, offset: number): VarintResult {
-  const end = readDeltaVarintsInto(buf, offset, single);
-  return { value: single[0]!, bytesRead: end - offset };
+	const end = readDeltaVarintsInto(buf, offset, single);
+	return { value: single[0]!, bytesRead: end - offset };
 }
 
 export function writeVarint(value: number): Uint8Array {
-  if (!Number.isInteger(value) || value < 0) {
-    throw new RangeError("varint value must be a non-negative integer");
-  }
-  if (value >= MAX_VARINT_VALUE) {
-    throw new RangeError("varint value must be less than 2^53");
-  }
-  const bytes: number[] = [];
-  let remaining = value;
-  do {
-    let byte = remaining % 128;
-    remaining = Math.floor(remaining / 128);
-    if (remaining > 0) byte |= CONTINUATION_BIT;
-    bytes.push(byte);
-  } while (remaining > 0);
-  return Uint8Array.from(bytes);
+	if (!Number.isInteger(value) || value < 0) {
+		throw new RangeError("varint value must be a non-negative integer");
+	}
+	if (value >= MAX_VARINT_VALUE) {
+		throw new RangeError("varint value must be less than 2^53");
+	}
+	const bytes: number[] = [];
+	let remaining = value;
+	do {
+		let byte = remaining % 128;
+		remaining = Math.floor(remaining / 128);
+		if (remaining > 0) byte |= CONTINUATION_BIT;
+		bytes.push(byte);
+	} while (remaining > 0);
+	return Uint8Array.from(bytes);
 }
 
 export interface VarintListResult {
-  values: number[];
-  bytesRead: number;
+	values: number[];
+	bytesRead: number;
 }
 
 /** A plain list of `count` varints (not delta-coded) -- used for
  * region_counts, city_counts, chunk_lengths, and block_lengths. */
-export function readVarintList(buf: Uint8Array, offset: number, count: number): VarintListResult {
-  const values: number[] = new Array(count);
-  let cursor = offset;
-  for (let i = 0; i < count; i++) {
-    const { value, bytesRead } = readVarint(buf, cursor);
-    values[i] = value;
-    cursor += bytesRead;
-  }
-  return { values, bytesRead: cursor - offset };
+export function readVarintList(
+	buf: Uint8Array,
+	offset: number,
+	count: number,
+): VarintListResult {
+	const values: number[] = new Array(count);
+	let cursor = offset;
+	for (let i = 0; i < count; i++) {
+		const { value, bytesRead } = readVarint(buf, cursor);
+		values[i] = value;
+		cursor += bytesRead;
+	}
+	return { values, bytesRead: cursor - offset };
 }
 
 /** A delta-coded list per Section 3.3 -- used for a chunk's palette and
  * codes. Each stored varint is the difference from the previous element,
  * with an implicit previous element of 0 before the first. */
-export function readDeltaVarintList(buf: Uint8Array, offset: number, count: number): VarintListResult {
-  const values = new Float64Array(count);
-  const end = readDeltaVarintsInto(buf, offset, values);
-  return { values: Array.from(values), bytesRead: end - offset };
+export function readDeltaVarintList(
+	buf: Uint8Array,
+	offset: number,
+	count: number,
+): VarintListResult {
+	const values = new Float64Array(count);
+	const end = readDeltaVarintsInto(buf, offset, values);
+	return { values: Array.from(values), bytesRead: end - offset };
 }
 
 /**
@@ -83,33 +91,42 @@ export function readDeltaVarintList(buf: Uint8Array, offset: number, count: numb
  * of varints, and an object per varint showed up as most of a chunk's
  * parse time.
  */
-export function readDeltaVarintsInto(buf: Uint8Array, offset: number, out: Float64Array): number {
-  let cursor = offset;
-  let previous = 0;
-  for (let i = 0; i < out.length; i++) {
-    let byte = buf[cursor++];
-    if (byte === undefined) throw new IncompleteBufferError("varint runs past end of buffer");
-    let value = byte & PAYLOAD_MASK;
-    let scale = 128;
-    for (let n = 1; byte & CONTINUATION_BIT; n++) {
-      if (n === MAX_VARINT_BYTES) throw new RangeError(`varint longer than ${MAX_VARINT_BYTES} bytes`);
-      byte = buf[cursor++];
-      if (byte === undefined) throw new IncompleteBufferError("varint runs past end of buffer");
-      value += (byte & PAYLOAD_MASK) * scale;
-      if ((byte & CONTINUATION_BIT) === 0) {
-        if (value >= MAX_VARINT_VALUE) {
-          throw new RangeError("varint value must be less than 2^53");
-        }
-        if (byte === 0) {
-          // A minimal encoder never emits a trailing zero group (see
-          // writeVarint above), so this can only be non-minimal padding.
-          throw new RangeError("non-minimal varint encoding (trailing zero byte)");
-        }
-      }
-      scale *= 128;
-    }
-    previous += value;
-    out[i] = previous;
-  }
-  return cursor;
+export function readDeltaVarintsInto(
+	buf: Uint8Array,
+	offset: number,
+	out: Float64Array,
+): number {
+	let cursor = offset;
+	let previous = 0;
+	for (let i = 0; i < out.length; i++) {
+		let byte = buf[cursor++];
+		if (byte === undefined)
+			throw new IncompleteBufferError("varint runs past end of buffer");
+		let value = byte & PAYLOAD_MASK;
+		let scale = 128;
+		for (let n = 1; byte & CONTINUATION_BIT; n++) {
+			if (n === MAX_VARINT_BYTES)
+				throw new RangeError(`varint longer than ${MAX_VARINT_BYTES} bytes`);
+			byte = buf[cursor++];
+			if (byte === undefined)
+				throw new IncompleteBufferError("varint runs past end of buffer");
+			value += (byte & PAYLOAD_MASK) * scale;
+			if ((byte & CONTINUATION_BIT) === 0) {
+				if (value >= MAX_VARINT_VALUE) {
+					throw new RangeError("varint value must be less than 2^53");
+				}
+				if (byte === 0) {
+					// A minimal encoder never emits a trailing zero group (see
+					// writeVarint above), so this can only be non-minimal padding.
+					throw new RangeError(
+						"non-minimal varint encoding (trailing zero byte)",
+					);
+				}
+			}
+			scale *= 128;
+		}
+		previous += value;
+		out[i] = previous;
+	}
+	return cursor;
 }

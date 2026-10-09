@@ -41,7 +41,8 @@ const APPENDIX_C_BYTES = hexBytes(`
 
 function referenceFnv1a64(data: Uint8Array): bigint {
 	let h = 0xcbf29ce484222325n;
-	for (const byte of data) h = ((h ^ BigInt(byte)) * 0x100000001b3n) & 0xffffffffffffffffn;
+	for (const byte of data)
+		h = ((h ^ BigInt(byte)) * 0x100000001b3n) & 0xffffffffffffffffn;
 	return h;
 }
 
@@ -54,7 +55,10 @@ test("buildLocateIndex: reproduces the Appendix C.8 file byte for byte", () => {
 test("prefixChecksum: FNV-1a of everything before the first chunk (C.8.1)", () => {
 	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
 	assert.equal(reader.prefixChecksum(), 0x334bf7a76cac66ean);
-	assert.equal(reader.prefixChecksum(), referenceFnv1a64(APPENDIX_A_BYTES.subarray(0, 131)));
+	assert.equal(
+		reader.prefixChecksum(),
+		referenceFnv1a64(APPENDIX_A_BYTES.subarray(0, 131)),
+	);
 	reader.close();
 });
 
@@ -78,7 +82,8 @@ test("locate: Appendix C.8's coordinates, with and without the index", () => {
 			lon: 112.5,
 			boundingBox: { minLon: 90, maxLon: 135, minLat: 0, maxLat: 22.5 },
 		});
-		for (const id of noGeometry) assert.equal(reader.locate(id), null, `id ${id}`);
+		for (const id of noGeometry)
+			assert.equal(reader.locate(id), null, `id ${id}`);
 		assert.throws(() => reader.locate(7), RangeError);
 		reader.close();
 	}
@@ -90,19 +95,48 @@ const APPENDIX_A_GRID = { widthExp: 1, heightExp: 1, maxDepth: 2 };
 
 test("decodeLocateEntry: the C.8.5 examples", () => {
 	assert.equal(decodeLocateEntry(0, APPENDIX_A_GRID), null);
-	assert.deepEqual(decodeLocateEntry(0x74, APPENDIX_A_GRID), { chunkIndex: 3, depth: 2, code: 4 });
-	assert.deepEqual(decodeLocateEntry(0x75, APPENDIX_A_GRID), { chunkIndex: 3, depth: 2, code: 5 });
-	assert.deepEqual(decodeLocateEntry(0x73, APPENDIX_A_GRID), { chunkIndex: 3, depth: 2, code: 3 });
-	assert.throws(() => decodeLocateEntry(0x20, APPENDIX_A_GRID), /does not name a cell/); // odd t - B
-	assert.throws(() => decodeLocateEntry(0x80, APPENDIX_A_GRID), /does not name a cell/); // deeper than D
-	assert.throws(() => decodeLocateEntry(0x02, APPENDIX_A_GRID), /does not name a cell/); // shallower than depth 0
+	assert.deepEqual(decodeLocateEntry(0x74, APPENDIX_A_GRID), {
+		chunkIndex: 3,
+		depth: 2,
+		code: 4,
+	});
+	assert.deepEqual(decodeLocateEntry(0x75, APPENDIX_A_GRID), {
+		chunkIndex: 3,
+		depth: 2,
+		code: 5,
+	});
+	assert.deepEqual(decodeLocateEntry(0x73, APPENDIX_A_GRID), {
+		chunkIndex: 3,
+		depth: 2,
+		code: 3,
+	});
+	assert.throws(
+		() => decodeLocateEntry(0x20, APPENDIX_A_GRID),
+		/does not name a cell/,
+	); // odd t - B
+	assert.throws(
+		() => decodeLocateEntry(0x80, APPENDIX_A_GRID),
+		/does not name a cell/,
+	); // deeper than D
+	assert.throws(
+		() => decodeLocateEntry(0x02, APPENDIX_A_GRID),
+		/does not name a cell/,
+	); // shallower than depth 0
 });
 
 test("decodeLocateEntry: coarser cells decode to their stored codes", () => {
 	// Depth 1 cell, path 2 (north-west), in chunk 1: 2^(2+2) + 1 × 4 + 2.
-	assert.deepEqual(decodeLocateEntry(22, APPENDIX_A_GRID), { chunkIndex: 1, depth: 1, code: 8 });
+	assert.deepEqual(decodeLocateEntry(22, APPENDIX_A_GRID), {
+		chunkIndex: 1,
+		depth: 1,
+		code: 8,
+	});
 	// A whole chunk (depth 0): just the marker and the chunk index.
-	assert.deepEqual(decodeLocateEntry(4 + 2, APPENDIX_A_GRID), { chunkIndex: 2, depth: 0, code: 0 });
+	assert.deepEqual(decodeLocateEntry(4 + 2, APPENDIX_A_GRID), {
+		chunkIndex: 2,
+		depth: 0,
+		code: 0,
+	});
 });
 
 test("encodeLocateEntry/decodeLocateEntry: round trip at every depth, up to 6-byte entries", () => {
@@ -125,9 +159,16 @@ test("encodeLocateEntry/decodeLocateEntry: round trip at every depth, up to 6-by
 		for (let depth = 0; depth <= grid.maxDepth; depth++) {
 			for (const chunkIndex of [0, chunks - 1, random(chunks)]) {
 				for (const path of [0, 4 ** depth - 1, random(4 ** depth)]) {
-					const cell = { chunkIndex, depth, code: path * 4 ** (grid.maxDepth - depth) };
+					const cell = {
+						chunkIndex,
+						depth,
+						code: path * 4 ** (grid.maxDepth - depth),
+					};
 					const entry = encodeLocateEntry(cell, grid);
-					assert.ok(entry > 0 && entry < 256 ** width, `${JSON.stringify(cell)} fits ${width} bytes`);
+					assert.ok(
+						entry > 0 && entry < 256 ** width,
+						`${JSON.stringify(cell)} fits ${width} bytes`,
+					);
 					assert.deepEqual(decodeLocateEntry(entry, grid), cell);
 				}
 			}
@@ -177,26 +218,61 @@ test("representativeCell: an empty area has none", () => {
 });
 
 test("representativeCell: with equal weights, an odd count takes the middle value", () => {
-	assert.deepEqual(rep([[1, 3, 4], [9, 3, 4], [5, 3, 4]]), { gx: 5, gy: 3 });
+	assert.deepEqual(
+		rep([
+			[1, 3, 4],
+			[9, 3, 4],
+			[5, 3, 4],
+		]),
+		{ gx: 5, gy: 3 },
+	);
 });
 
 test("representativeCell: with equal weights, an even count takes the midpoint", () => {
 	// Centres (half-cells) 5 and 13 on both axes: midpoint 9 -> cell 4...
 	// but (4, 4) is outside the area, and (2, 2) and (6, 6) are equally near:
 	// the lower row wins.
-	assert.deepEqual(rep([[6, 6, 4], [2, 2, 4]]), { gx: 2, gy: 2 });
+	assert.deepEqual(
+		rep([
+			[6, 6, 4],
+			[2, 2, 4],
+		]),
+		{ gx: 2, gy: 2 },
+	);
 	// Same row: the lower column wins.
-	assert.deepEqual(rep([[6, 0, 4], [2, 0, 4]]), { gx: 2, gy: 0 });
+	assert.deepEqual(
+		rep([
+			[6, 0, 4],
+			[2, 0, 4],
+		]),
+		{ gx: 2, gy: 0 },
+	);
 	// A midpoint inside the area is kept. Centres 5, 7, 9, 11: the midpoint
 	// of 7 and 9 is the edge between cells 3 and 4, which belongs to cell 4
 	// like every half-open cell's west edge.
-	assert.deepEqual(rep([[2, 0, 4], [3, 0, 4], [4, 0, 4], [5, 0, 4]]), { gx: 4, gy: 0 });
+	assert.deepEqual(
+		rep([
+			[2, 0, 4],
+			[3, 0, 4],
+			[4, 0, 4],
+			[5, 0, 4],
+		]),
+		{ gx: 4, gy: 0 },
+	);
 });
 
 test("representativeCell: cells are weighted by area, so one large cell outweighs many small ones", () => {
 	// A depth-2 square (4 × 4 cells, weight 16) and three single cells far to
 	// the east. Unweighted, the median would be among the singles.
-	assert.deepEqual(rep([[12, 0, 4], [0, 0, 2], [13, 0, 4], [14, 0, 4]]), { gx: 2, gy: 2 });
+	assert.deepEqual(
+		rep([
+			[12, 0, 4],
+			[0, 0, 2],
+			[13, 0, 4],
+			[14, 0, 4],
+		]),
+		{ gx: 2, gy: 2 },
+	);
 });
 
 test("representativeCell: a median outside the area moves to the nearest cell inside it", () => {
@@ -233,10 +309,20 @@ test("representativeCell: the result is in the area and doesn't depend on record
 		const result = rep(squares)!;
 		const inside = squares.some(
 			([x, y, d]) =>
-				result.gx >= x && result.gx < x + 2 ** (4 - d) && result.gy >= y && result.gy < y + 2 ** (4 - d),
+				result.gx >= x &&
+				result.gx < x + 2 ** (4 - d) &&
+				result.gy >= y &&
+				result.gy < y + 2 ** (4 - d),
 		);
-		assert.ok(inside, `trial ${trial}: ${JSON.stringify(result)} outside ${JSON.stringify(squares)}`);
-		assert.deepEqual(rep([...squares].reverse()), result, `trial ${trial}: order changed the result`);
+		assert.ok(
+			inside,
+			`trial ${trial}: ${JSON.stringify(result)} outside ${JSON.stringify(squares)}`,
+		);
+		assert.deepEqual(
+			rep([...squares].reverse()),
+			result,
+			`trial ${trial}: order changed the result`,
+		);
 	}
 });
 
@@ -247,17 +333,29 @@ test("LocateIndex.open: reads the header and entries of the C.8 file", () => {
 	assert.equal(index.sourceChecksum, 0x334bf7a76cac66ean);
 	assert.equal(index.entryWidth, 1);
 	assert.equal(index.placeCount, 7);
-	assert.deepEqual([0, 1, 2, 3, 4, 5, 6].map((id) => index.entry(id)), [0x73, 0, 0x73, 0, 0, 0x74, 0]);
+	assert.deepEqual(
+		[0, 1, 2, 3, 4, 5, 6].map((id) => index.entry(id)),
+		[0x73, 0, 0x73, 0, 0, 0x74, 0],
+	);
 	assert.throws(() => index.entry(7), RangeError);
 });
 
 test("LocateIndex.open: rejects malformed files", () => {
 	assert.throws(() => LocateIndex.open(new Uint8Array(5)), /too short/);
-	assert.throws(() => LocateIndex.open(new Uint8Array(40)), /wrong magic bytes/);
+	assert.throws(
+		() => LocateIndex.open(new Uint8Array(40)),
+		/wrong magic bytes/,
+	);
 	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
-	assert.throws(() => LocateIndex.open(buildSearchIndex(reader)), /kind 1, expected 2/);
+	assert.throws(
+		() => LocateIndex.open(buildSearchIndex(reader)),
+		/kind 1, expected 2/,
+	);
 	reader.close();
-	assert.throws(() => LocateIndex.open(APPENDIX_C_BYTES.subarray(0, 25)), /header implies 26/);
+	assert.throws(
+		() => LocateIndex.open(APPENDIX_C_BYTES.subarray(0, 25)),
+		/header implies 26/,
+	);
 	const wide = APPENDIX_C_BYTES.slice();
 	wide[17] = 7; // entry_width
 	assert.throws(() => LocateIndex.open(wide), /entry width 7/);
@@ -270,8 +368,15 @@ test("useLocateIndex: rejects an index with the wrong checksum, place count or w
 	assert.throws(() => reader.useLocateIndex(badChecksum), /checksum mismatch/);
 	assert.equal(reader.hasLocateIndex, false);
 
-	const fewer = Uint8Array.from([...APPENDIX_C_BYTES.subarray(0, 18), 6, ...APPENDIX_C_BYTES.subarray(19, 25)]);
-	assert.throws(() => reader.useLocateIndex(fewer), /covers 6 places, but this file has 7/);
+	const fewer = Uint8Array.from([
+		...APPENDIX_C_BYTES.subarray(0, 18),
+		6,
+		...APPENDIX_C_BYTES.subarray(19, 25),
+	]);
+	assert.throws(
+		() => reader.useLocateIndex(fewer),
+		/covers 6 places, but this file has 7/,
+	);
 
 	const wider = Uint8Array.from([
 		...APPENDIX_C_BYTES.subarray(0, 17),
@@ -279,7 +384,10 @@ test("useLocateIndex: rejects an index with the wrong checksum, place count or w
 		7,
 		...[...APPENDIX_C_BYTES.subarray(19)].flatMap((b) => [b, 0]),
 	]);
-	assert.throws(() => reader.useLocateIndex(wider), /2-byte entries, but this file's grid needs 1/);
+	assert.throws(
+		() => reader.useLocateIndex(wider),
+		/2-byte entries, but this file's grid needs 1/,
+	);
 	reader.close();
 });
 
@@ -287,7 +395,10 @@ test("open: picks up <name>.locate-index.bin next to the file; a stale one throw
 	const dir = mkdtempSync(path.join(tmpdir(), "cgeodata-locate-index-"));
 	const binPath = path.join(dir, "fixture.bin");
 	writeFileSync(binPath, APPENDIX_A_BYTES);
-	assert.equal(locateIndexPathFor(binPath), path.join(dir, "fixture.locate-index.bin"));
+	assert.equal(
+		locateIndexPathFor(binPath),
+		path.join(dir, "fixture.locate-index.bin"),
+	);
 
 	const without = CGeoDataReader.open(binPath);
 	assert.equal(without.hasLocateIndex, false);
@@ -303,7 +414,10 @@ test("open: picks up <name>.locate-index.bin next to the file; a stale one throw
 	stale[9]! ^= 0xff;
 	writeFileSync(locateIndexPathFor(binPath), stale);
 	const reader = CGeoDataReader.open(binPath); // opening alone doesn't touch it
-	assert.throws(() => reader.locate(5), /fixture\.locate-index\.bin: .*checksum mismatch/);
+	assert.throws(
+		() => reader.locate(5),
+		/fixture\.locate-index\.bin: .*checksum mismatch/,
+	);
 	assert.throws(() => reader.locate(5), /checksum mismatch/); // every time
 	reader.useLocateIndex(undefined); // opting out still works
 	assert.equal(reader.locate(5)?.lat, 11.25);
@@ -314,9 +428,20 @@ test("open: picks up <name>.locate-index.bin next to the file; a stale one throw
 
 test("subtreeIdRanges: a place, then its children's ranges", () => {
 	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
-	assert.deepEqual(reader.subtreeIdRanges(0), [[0, 1], [2, 3], [4, 6]]);
-	assert.deepEqual(reader.subtreeIdRanges(1), [[1, 2], [3, 4], [6, 7]]);
-	assert.deepEqual(reader.subtreeIdRanges(3), [[3, 4], [6, 7]]);
+	assert.deepEqual(reader.subtreeIdRanges(0), [
+		[0, 1],
+		[2, 3],
+		[4, 6],
+	]);
+	assert.deepEqual(reader.subtreeIdRanges(1), [
+		[1, 2],
+		[3, 4],
+		[6, 7],
+	]);
+	assert.deepEqual(reader.subtreeIdRanges(3), [
+		[3, 4],
+		[6, 7],
+	]);
 	assert.deepEqual(reader.subtreeIdRanges(5), [[5, 6]]);
 	assert.throws(() => reader.subtreeIdRanges(7), RangeError);
 	reader.close();
@@ -333,7 +458,9 @@ test("chunk: cache false parses the same records without caching them", () => {
 
 // Max depth 10 on a 64 × 64 grid: 5-byte entries, and enough places to
 // exercise the builder's batching and every level of the hierarchy.
-const ZH_BIN = fileURLToPath(new URL("../../data/03-final/zuid-holland.bin", import.meta.url));
+const ZH_BIN = fileURLToPath(
+	new URL("../../data/03-final/zuid-holland.bin", import.meta.url),
+);
 if (existsSync(ZH_BIN)) {
 	test("zuid-holland.bin: index and scan agree, in any batch size, and every point is inside its place", () => {
 		const scan = CGeoDataReader.open(ZH_BIN);
@@ -353,10 +480,21 @@ if (existsSync(ZH_BIN)) {
 			located++;
 			const place = indexed.place(id);
 			const found = indexed.query(point.lat, point.lon);
-			const names = { country: found.country, region: found.region, city: found.city }[place.level];
-			assert.deepEqual(names, place.names, `id ${id}'s point resolves elsewhere`);
+			const names = {
+				country: found.country,
+				region: found.region,
+				city: found.city,
+			}[place.level];
+			assert.deepEqual(
+				names,
+				place.names,
+				`id ${id}'s point resolves elsewhere`,
+			);
 		}
-		assert.ok(located > (countries + regions + cities) / 2, `only ${located} places located`);
+		assert.ok(
+			located > (countries + regions + cities) / 2,
+			`only ${located} places located`,
+		);
 		scan.close();
 		indexed.close();
 	});

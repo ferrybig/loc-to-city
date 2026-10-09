@@ -26,6 +26,12 @@
 			"quoteStyle": "double"
 		}
 	},
+	"overrides": [
+		{
+			"includes": ["reader/**", "demo/**"],
+			"formatter": { "enabled": true }
+		}
+	],
 	"assist": {
 		"enabled": true,
 		"actions": {

@@ -1,26 +1,26 @@
 {
-  "name": "@loc-to-city/reader",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": "./dist/index.js"
-  },
-  "bin": {
-    "cgeodata": "./dist/cli.js"
-  },
-  "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "test": "node --test test/*.test.ts",
-    "typecheck": "tsc -p tsconfig.test.json",
-    "dev": "node src/index.ts",
-    "bench": "node --expose-gc bench/bench.ts"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "2.5.13",
-    "@types/node": "^24.0.0",
-    "typescript": "^5.7.0"
-  }
+	"name": "@loc-to-city/reader",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": "./dist/index.js"
+	},
+	"bin": {
+		"cgeodata": "./dist/cli.js"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"test": "node --test test/*.test.ts",
+		"typecheck": "tsc -p tsconfig.test.json",
+		"dev": "node src/index.ts",
+		"bench": "node --expose-gc bench/bench.ts"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.13",
+		"@types/node": "^24.0.0",
+		"typescript": "^5.7.0"
+	}
 }

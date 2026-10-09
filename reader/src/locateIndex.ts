@@ -22,7 +22,9 @@ import { openSource, type RandomAccessSource } from "./source.ts";
 import { readVarint, writeVarint } from "./varint.ts";
 
 // "CGEODATA" — same signature as the main data file.
-const SIGNATURE = Uint8Array.from([0x43, 0x47, 0x45, 0x4f, 0x44, 0x41, 0x54, 0x41]);
+const SIGNATURE = Uint8Array.from([
+	0x43, 0x47, 0x45, 0x4f, 0x44, 0x41, 0x54, 0x41,
+]);
 const KIND_LOCATE_INDEX = 2;
 const FORMAT_VERSION = 0; // kind=2, version=0 → stored varint = 32 (0x20)
 const STORED_VERSION = KIND_LOCATE_INDEX * 16 + FORMAT_VERSION;
@@ -46,7 +48,9 @@ export interface LocateCell {
 /** `ceil((width_exp + height_exp + 2 × max_depth + 1) / 8)`: enough bytes
  * for a depth-`max_depth` cell plus its marker bit. */
 export function locateEntryWidth(grid: Grid): number {
-	return Math.ceil((grid.widthExp + grid.heightExp + 2 * grid.maxDepth + 1) / 8);
+	return Math.ceil(
+		(grid.widthExp + grid.heightExp + 2 * grid.maxDepth + 1) / 8,
+	);
 }
 
 /** The entry for `cell`, or `0` ("no geometry") for null. */
@@ -55,19 +59,30 @@ export function encodeLocateEntry(cell: LocateCell | null, grid: Grid): number {
 	const chunkBits = grid.widthExp + grid.heightExp;
 	const { depth } = cell;
 	const localCode = shiftRight(cell.code, 2 * (grid.maxDepth - depth));
-	return 2 ** (chunkBits + 2 * depth) + cell.chunkIndex * 4 ** depth + localCode;
+	return (
+		2 ** (chunkBits + 2 * depth) + cell.chunkIndex * 4 ** depth + localCode
+	);
 }
 
 /** Inverse of `encodeLocateEntry`: null for `0`, and an error for a value
  * whose marker bit doesn't sit at a valid depth. */
-export function decodeLocateEntry(value: number, grid: Grid): LocateCell | null {
+export function decodeLocateEntry(
+	value: number,
+	grid: Grid,
+): LocateCell | null {
 	if (value === 0) return null;
 	const chunkBits = grid.widthExp + grid.heightExp;
 	let top = 0;
 	while (2 ** (top + 1) <= value) top++;
 	const twiceDepth = top - chunkBits;
-	if (twiceDepth < 0 || twiceDepth % 2 !== 0 || twiceDepth > 2 * grid.maxDepth) {
-		throw new Error(`locate index entry ${value} does not name a cell of this file`);
+	if (
+		twiceDepth < 0 ||
+		twiceDepth % 2 !== 0 ||
+		twiceDepth > 2 * grid.maxDepth
+	) {
+		throw new Error(
+			`locate index entry ${value} does not name a cell of this file`,
+		);
 	}
 	const depth = twiceDepth / 2;
 	const rest = value - 2 ** top;
@@ -141,7 +156,11 @@ function distanceScale(header: CGeoDataHeader): { ax: number; ay: number } {
  * packed with the depth so a plain numeric sort orders by centre -- and is
  * sorted in place.
  */
-function medianSum(keys: Float64Array, total: number, maxDepth: number): number {
+function medianSum(
+	keys: Float64Array,
+	total: number,
+	maxDepth: number,
+): number {
 	keys.sort();
 	let cumulative = 0;
 	let i = 0;
@@ -216,7 +235,11 @@ export function representativeCell(
 
 /** A full-precision cell in global coordinates, as the chunk cell an
  * entry names. */
-function toLocateCell(gx: number, gy: number, header: CGeoDataHeader): LocateCell {
+function toLocateCell(
+	gx: number,
+	gy: number,
+	header: CGeoDataHeader,
+): LocateCell {
 	const D = header.maxDepth;
 	const side = 2 ** D;
 	const c = Math.floor(gx / side);
@@ -228,7 +251,10 @@ function toLocateCell(gx: number, gy: number, header: CGeoDataHeader): LocateCel
 	};
 }
 
-function inRanges(id: number, ranges: readonly (readonly [number, number])[]): boolean {
+function inRanges(
+	id: number,
+	ranges: readonly (readonly [number, number])[],
+): boolean {
 	for (const [lo, hi] of ranges) if (id >= lo && id < hi) return true;
 	return false;
 }
@@ -239,7 +265,10 @@ function inRanges(id: number, ranges: readonly (readonly [number, number])[]): b
  * representative cell. This is what `locate()` does without an index,
  * and it reads every non-empty chunk.
  */
-export function computeLocateCell(reader: CGeoDataReader, id: number): LocateCell | null {
+export function computeLocateCell(
+	reader: CGeoDataReader,
+	id: number,
+): LocateCell | null {
 	const { header } = reader;
 	checkGrid(header);
 	const ranges = reader.subtreeIdRanges(id);
@@ -362,7 +391,11 @@ export function buildLocateIndex(
 		let batchSize = 0;
 		while (lastCountry < C) {
 			let size = 0;
-			for (let p = countryDfsStart[lastCountry]!; p < countryDfsStart[lastCountry + 1]!; p++) {
+			for (
+				let p = countryDfsStart[lastCountry]!;
+				p < countryDfsStart[lastCountry + 1]!;
+				p++
+			) {
 				size += recordCount[dfsOrder[p]!]!;
 			}
 			if (lastCountry > firstCountry && batchSize + size > budget) break;
@@ -372,7 +405,11 @@ export function buildLocateIndex(
 
 		// Slots in depth-first order; subtree ends follow from the layout.
 		let slot = 0;
-		for (let p = countryDfsStart[firstCountry]!; p < countryDfsStart[lastCountry]!; p++) {
+		for (
+			let p = countryDfsStart[firstCountry]!;
+			p < countryDfsStart[lastCountry]!;
+			p++
+		) {
 			const placeId = dfsOrder[p]!;
 			start[placeId] = cursor[placeId] = slot;
 			slot += recordCount[placeId]!;
@@ -412,13 +449,29 @@ export function buildLocateIndex(
 				const placeId = chunk.palette[k - 1]!;
 				const pos = cursor[placeId]!;
 				cursor[placeId] = pos + 1;
-				putRecordCell(cells, pos, chunkIndex, chunk.codes[j]!, chunk.depths[j]!, header);
+				putRecordCell(
+					cells,
+					pos,
+					chunkIndex,
+					chunk.codes[j]!,
+					chunk.depths[j]!,
+					header,
+				);
 			}
 		}
 
-		for (let p = countryDfsStart[firstCountry]!; p < countryDfsStart[lastCountry]!; p++) {
+		for (
+			let p = countryDfsStart[firstCountry]!;
+			p < countryDfsStart[lastCountry]!;
+			p++
+		) {
 			const placeId = dfsOrder[p]!;
-			const best = representativeCell(cells, start[placeId]!, subtreeEnd[placeId]!, header);
+			const best = representativeCell(
+				cells,
+				start[placeId]!,
+				subtreeEnd[placeId]!,
+				header,
+			);
 			entries[placeId] = best
 				? encodeLocateEntry(toLocateCell(best.gx, best.gy, header), header)
 				: 0;
@@ -426,29 +479,46 @@ export function buildLocateIndex(
 		firstCountry = lastCountry;
 	}
 
-	return writeLocateIndex(reader.prefixChecksum(), locateEntryWidth(header), entries);
+	return writeLocateIndex(
+		reader.prefixChecksum(),
+		locateEntryWidth(header),
+		entries,
+	);
 }
 
 /** The ids of a country's regions or a region's cities: the second of
  * `subtreeIdRanges`, which lists the place itself first. */
-function childRange(reader: CGeoDataReader, id: number): readonly [number, number] {
+function childRange(
+	reader: CGeoDataReader,
+	id: number,
+): readonly [number, number] {
 	return reader.subtreeIdRanges(id)[1] ?? [0, 0];
 }
 
 /** Section C.4's layout around already-computed entries. */
-function writeLocateIndex(checksum: bigint, entryWidth: number, entries: ArrayLike<number>): Uint8Array {
+function writeLocateIndex(
+	checksum: bigint,
+	entryWidth: number,
+	entries: ArrayLike<number>,
+): Uint8Array {
 	const versionBytes = writeVarint(STORED_VERSION);
 	const countBytes = writeVarint(entries.length);
-	const headerSize = SIGNATURE.length + versionBytes.length + 8 + 1 + countBytes.length;
+	const headerSize =
+		SIGNATURE.length + versionBytes.length + 8 + 1 + countBytes.length;
 	const out = new Uint8Array(headerSize + entries.length * entryWidth);
 	const dv = new DataView(out.buffer);
 	let off = 0;
-	out.set(SIGNATURE, off); off += SIGNATURE.length;
-	out.set(versionBytes, off); off += versionBytes.length;
-	dv.setUint32(off, Number(checksum & 0xffffffffn), true); off += 4;
-	dv.setUint32(off, Number(checksum >> 32n), true); off += 4;
+	out.set(SIGNATURE, off);
+	off += SIGNATURE.length;
+	out.set(versionBytes, off);
+	off += versionBytes.length;
+	dv.setUint32(off, Number(checksum & 0xffffffffn), true);
+	off += 4;
+	dv.setUint32(off, Number(checksum >> 32n), true);
+	off += 4;
 	out[off++] = entryWidth;
-	out.set(countBytes, off); off += countBytes.length;
+	out.set(countBytes, off);
+	off += countBytes.length;
 	for (let i = 0; i < entries.length; i++) {
 		let value = entries[i]!;
 		for (let b = 0; b < entryWidth; b++) {
@@ -526,20 +596,29 @@ export class LocateIndex {
 		const kind = Math.floor(storedVersion / 16);
 		const ver = storedVersion % 16;
 		if (kind !== KIND_LOCATE_INDEX) {
-			throw new Error(`not a locate index file (kind ${kind}, expected ${KIND_LOCATE_INDEX})`);
+			throw new Error(
+				`not a locate index file (kind ${kind}, expected ${KIND_LOCATE_INDEX})`,
+			);
 		}
 		if (ver !== FORMAT_VERSION) {
-			throw new Error(`unsupported locate index version ${ver} (expected ${FORMAT_VERSION})`);
+			throw new Error(
+				`unsupported locate index version ${ver} (expected ${FORMAT_VERSION})`,
+			);
 		}
 
-		if (data.length < off + 9) throw new Error("locate index file is too short for its header");
+		if (data.length < off + 9)
+			throw new Error("locate index file is too short for its header");
 		const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
-		const sourceChecksum = BigInt(dv.getUint32(off, true)) | (BigInt(dv.getUint32(off + 4, true)) << 32n);
+		const sourceChecksum =
+			BigInt(dv.getUint32(off, true)) |
+			(BigInt(dv.getUint32(off + 4, true)) << 32n);
 		off += 8;
 
 		const entryWidth = data[off++]!;
 		if (entryWidth < 1 || entryWidth > MAX_ENTRY_WIDTH) {
-			throw new Error(`unsupported locate index entry width ${entryWidth} (must be 1 to ${MAX_ENTRY_WIDTH})`);
+			throw new Error(
+				`unsupported locate index entry width ${entryWidth} (must be 1 to ${MAX_ENTRY_WIDTH})`,
+			);
 		}
 
 		const { value: placeCount, bytesRead: pb } = readVarint(data, off);
@@ -547,7 +626,9 @@ export class LocateIndex {
 
 		const expectedTotal = off + placeCount * entryWidth;
 		if (source.size !== expectedTotal) {
-			throw new Error(`locate index has ${source.size} bytes but header implies ${expectedTotal}`);
+			throw new Error(
+				`locate index has ${source.size} bytes but header implies ${expectedTotal}`,
+			);
 		}
 		return new LocateIndex(source, off, sourceChecksum, entryWidth, placeCount);
 	}
@@ -559,11 +640,17 @@ export class LocateIndex {
 	/** Place `id`'s raw entry (Section C.2); `0` means no geometry. */
 	entry(id: number): number {
 		if (!Number.isInteger(id) || id < 0 || id >= this.placeCount) {
-			throw new RangeError(`${id} is not a place id in this locate index (0 <= id < ${this.placeCount})`);
+			throw new RangeError(
+				`${id} is not a place id in this locate index (0 <= id < ${this.placeCount})`,
+			);
 		}
-		const bytes = this.source.readSync(this.entriesStart + id * this.entryWidth, this.entryWidth);
+		const bytes = this.source.readSync(
+			this.entriesStart + id * this.entryWidth,
+			this.entryWidth,
+		);
 		let value = 0;
-		for (let b = this.entryWidth - 1; b >= 0; b--) value = value * 256 + bytes[b]!;
+		for (let b = this.entryWidth - 1; b >= 0; b--)
+			value = value * 256 + bytes[b]!;
 		return value;
 	}
 }

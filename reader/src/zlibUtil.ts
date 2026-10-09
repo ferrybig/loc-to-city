@@ -8,6 +8,9 @@ const MAX_EXPANSION_RATIO = 1100;
 const MIN_OUTPUT_CEILING = 1 << 20; // 1 MiB
 
 export function safeInflate(compressed: Uint8Array): Buffer {
-  const maxOutputLength = Math.max(MIN_OUTPUT_CEILING, compressed.length * MAX_EXPANSION_RATIO);
-  return inflateSync(compressed, { maxOutputLength });
+	const maxOutputLength = Math.max(
+		MIN_OUTPUT_CEILING,
+		compressed.length * MAX_EXPANSION_RATIO,
+	);
+	return inflateSync(compressed, { maxOutputLength });
 }

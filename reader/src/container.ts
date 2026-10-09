@@ -12,26 +12,31 @@ import { IncompleteBufferError } from "./varint.ts";
  * the file than these two small, fixed-at-load-time sections actually need.
  */
 export function readHeaderAndDirectory(source: RandomAccessSource): {
-  header: CGeoDataHeader;
-  directory: CGeoDataDirectory;
+	header: CGeoDataHeader;
+	directory: CGeoDataDirectory;
 } {
-  let size = Math.min(1024, source.size);
-  for (;;) {
-    const buf = source.readSync(0, size);
-    try {
-      const header = parseHeader(buf);
-      checkDirectoryFits(header, source.size);
-      const directory = parseDirectory(buf, header.headerLength, header.width, header.height);
-      checkSectionsWithinFile(directory, source.size);
-      return { header, directory };
-    } catch (err) {
-      if (err instanceof IncompleteBufferError && size < source.size) {
-        size = Math.min(size * 4, source.size);
-        continue;
-      }
-      throw err;
-    }
-  }
+	let size = Math.min(1024, source.size);
+	for (;;) {
+		const buf = source.readSync(0, size);
+		try {
+			const header = parseHeader(buf);
+			checkDirectoryFits(header, source.size);
+			const directory = parseDirectory(
+				buf,
+				header.headerLength,
+				header.width,
+				header.height,
+			);
+			checkSectionsWithinFile(directory, source.size);
+			return { header, directory };
+		} catch (err) {
+			if (err instanceof IncompleteBufferError && size < source.size) {
+				size = Math.min(size * 4, source.size);
+				continue;
+			}
+			throw err;
+		}
+	}
 }
 
 /**
@@ -48,31 +53,36 @@ export function readHeaderAndDirectory(source: RandomAccessSource): {
  * MB of RSS -- before finally failing on a short varint.
  */
 function checkDirectoryFits(header: CGeoDataHeader, fileSize: number): void {
-  const chunkCount = header.width * header.height;
-  const afterHeader = fileSize - header.headerLength;
-  if (chunkCount + 1 > afterHeader) {
-    throw new Error(
-      `header's ${header.width}x${header.height} grid needs a directory of at least ${chunkCount + 1} bytes, but only ${afterHeader} follow the header in this ${fileSize}-byte file`,
-    );
-  }
+	const chunkCount = header.width * header.height;
+	const afterHeader = fileSize - header.headerLength;
+	if (chunkCount + 1 > afterHeader) {
+		throw new Error(
+			`header's ${header.width}x${header.height} grid needs a directory of at least ${chunkCount + 1} bytes, but only ${afterHeader} follow the header in this ${fileSize}-byte file`,
+		);
+	}
 }
 
 /** The rest of Section 11's bounds check. Chunk offsets are the running
  * sum of the lengths from the place table's end, so the last chunk's end
  * bounds every chunk's. */
-function checkSectionsWithinFile(directory: CGeoDataDirectory, fileSize: number): void {
-  const { placeTableStart, placeTableLength, chunkOffsets, chunkLengths } = directory;
-  const placeTableEnd = placeTableStart + placeTableLength;
-  if (placeTableEnd > fileSize) {
-    throw new Error(
-      `place table runs to byte ${placeTableEnd}, past the end of the ${fileSize}-byte file`,
-    );
-  }
-  const last = chunkLengths.length - 1;
-  const chunksEnd = last < 0 ? placeTableEnd : chunkOffsets[last]! + chunkLengths[last]!;
-  if (chunksEnd > fileSize) {
-    throw new Error(
-      `chunks run to byte ${chunksEnd}, past the end of the ${fileSize}-byte file`,
-    );
-  }
+function checkSectionsWithinFile(
+	directory: CGeoDataDirectory,
+	fileSize: number,
+): void {
+	const { placeTableStart, placeTableLength, chunkOffsets, chunkLengths } =
+		directory;
+	const placeTableEnd = placeTableStart + placeTableLength;
+	if (placeTableEnd > fileSize) {
+		throw new Error(
+			`place table runs to byte ${placeTableEnd}, past the end of the ${fileSize}-byte file`,
+		);
+	}
+	const last = chunkLengths.length - 1;
+	const chunksEnd =
+		last < 0 ? placeTableEnd : chunkOffsets[last]! + chunkLengths[last]!;
+	if (chunksEnd > fileSize) {
+		throw new Error(
+			`chunks run to byte ${chunksEnd}, past the end of the ${fileSize}-byte file`,
+		);
+	}
 }

@@ -54,7 +54,9 @@ precomputed table.
 			if (text === undefined) continue;
 			const value = Number(text);
 			if (!(Number.isInteger(value) && value >= 0)) {
-				throw new UsageError(`--${flag} must be a non-negative integer, not ${JSON.stringify(text)}`);
+				throw new UsageError(
+					`--${flag} must be a non-negative integer, not ${JSON.stringify(text)}`,
+				);
 			}
 			options[key] = value;
 		}
