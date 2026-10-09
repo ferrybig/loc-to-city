@@ -15,6 +15,12 @@
  * `locate()` without an index computes exactly the same cell by scanning
  * (`computeLocateCell`). The index is only a precomputed copy of it.
  */
+
+import {
+	CGeoDataError,
+	CGeoDataFormatError,
+	CGeoDataVersionError,
+} from "./errors.ts";
 import type { CGeoDataHeader } from "./header.ts";
 import { mortonDecode, mortonEncode, shiftRight } from "./morton.ts";
 import type { CGeoDataReader } from "./reader.ts";
@@ -80,7 +86,7 @@ export function decodeLocateEntry(
 		twiceDepth % 2 !== 0 ||
 		twiceDepth > 2 * grid.maxDepth
 	) {
-		throw new Error(
+		throw new CGeoDataFormatError(
 			`locate index entry ${value} does not name a cell of this file`,
 		);
 	}
@@ -129,7 +135,7 @@ function putRecordCell(
 function checkGrid(header: CGeoDataHeader): void {
 	const width = locateEntryWidth(header);
 	if (width > MAX_ENTRY_WIDTH) {
-		throw new Error(
+		throw new CGeoDataError(
 			`a locate index needs ${width}-byte entries for this grid; at most ${MAX_ENTRY_WIDTH} are supported`,
 		);
 	}
@@ -137,7 +143,7 @@ function checkGrid(header: CGeoDataHeader): void {
 	const nx = header.width * 2 ** header.maxDepth;
 	const ny = header.height * 2 ** header.maxDepth;
 	if ((ax * nx) ** 2 + (ay * ny) ** 2 > Number.MAX_SAFE_INTEGER) {
-		throw new Error("this file's grid is too fine for a locate index");
+		throw new CGeoDataError("this file's grid is too fine for a locate index");
 	}
 }
 
@@ -579,11 +585,15 @@ export class LocateIndex {
 	private static parseHeader(source: RandomAccessSource): LocateIndex {
 		const data = source.readSync(0, Math.min(MAX_HEADER_LENGTH, source.size));
 		if (data.length < SIGNATURE.length + 1) {
-			throw new Error("locate index file is too short to be valid");
+			throw new CGeoDataFormatError(
+				"locate index file is too short to be valid",
+			);
 		}
 		for (let i = 0; i < SIGNATURE.length; i++) {
 			if (data[i] !== SIGNATURE[i]) {
-				throw new Error("not a CGEODATA locate index file (wrong magic bytes)");
+				throw new CGeoDataFormatError(
+					"not a CGEODATA locate index file (wrong magic bytes)",
+				);
 			}
 		}
 		let off = SIGNATURE.length;
@@ -596,18 +606,21 @@ export class LocateIndex {
 		const kind = Math.floor(storedVersion / 16);
 		const ver = storedVersion % 16;
 		if (kind !== KIND_LOCATE_INDEX) {
-			throw new Error(
+			throw new CGeoDataFormatError(
 				`not a locate index file (kind ${kind}, expected ${KIND_LOCATE_INDEX})`,
 			);
 		}
 		if (ver !== FORMAT_VERSION) {
-			throw new Error(
+			throw new CGeoDataVersionError(
 				`unsupported locate index version ${ver} (expected ${FORMAT_VERSION})`,
+				ver,
 			);
 		}
 
 		if (data.length < off + 9)
-			throw new Error("locate index file is too short for its header");
+			throw new CGeoDataFormatError(
+				"locate index file is too short for its header",
+			);
 		const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
 		const sourceChecksum =
 			BigInt(dv.getUint32(off, true)) |
@@ -616,7 +629,7 @@ export class LocateIndex {
 
 		const entryWidth = data[off++]!;
 		if (entryWidth < 1 || entryWidth > MAX_ENTRY_WIDTH) {
-			throw new Error(
+			throw new CGeoDataFormatError(
 				`unsupported locate index entry width ${entryWidth} (must be 1 to ${MAX_ENTRY_WIDTH})`,
 			);
 		}
@@ -626,7 +639,7 @@ export class LocateIndex {
 
 		const expectedTotal = off + placeCount * entryWidth;
 		if (source.size !== expectedTotal) {
-			throw new Error(
+			throw new CGeoDataFormatError(
 				`locate index has ${source.size} bytes but header implies ${expectedTotal}`,
 			);
 		}

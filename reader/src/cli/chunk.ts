@@ -1,11 +1,11 @@
 import {
-	parse,
-	openReader,
-	parseId,
-	names,
-	writeLine,
-	UsageError,
 	type Command,
+	names,
+	openReader,
+	parse,
+	parseId,
+	UsageError,
+	writeLine,
 } from "./shared.ts";
 
 export const chunk: Command = {

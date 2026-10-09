@@ -1,6 +1,7 @@
+import { type CGeoDataDirectory, parseDirectory } from "./directory.ts";
+import { CGeoDataFormatError } from "./errors.ts";
+import { type CGeoDataHeader, parseHeader } from "./header.ts";
 import type { RandomAccessSource } from "./source.ts";
-import { parseHeader, type CGeoDataHeader } from "./header.ts";
-import { parseDirectory, type CGeoDataDirectory } from "./directory.ts";
 import { IncompleteBufferError } from "./varint.ts";
 
 /**
@@ -56,7 +57,7 @@ function checkDirectoryFits(header: CGeoDataHeader, fileSize: number): void {
 	const chunkCount = header.width * header.height;
 	const afterHeader = fileSize - header.headerLength;
 	if (chunkCount + 1 > afterHeader) {
-		throw new Error(
+		throw new CGeoDataFormatError(
 			`header's ${header.width}x${header.height} grid needs a directory of at least ${chunkCount + 1} bytes, but only ${afterHeader} follow the header in this ${fileSize}-byte file`,
 		);
 	}
@@ -73,7 +74,7 @@ function checkSectionsWithinFile(
 		directory;
 	const placeTableEnd = placeTableStart + placeTableLength;
 	if (placeTableEnd > fileSize) {
-		throw new Error(
+		throw new CGeoDataFormatError(
 			`place table runs to byte ${placeTableEnd}, past the end of the ${fileSize}-byte file`,
 		);
 	}
@@ -81,7 +82,7 @@ function checkSectionsWithinFile(
 	const chunksEnd =
 		last < 0 ? placeTableEnd : chunkOffsets[last]! + chunkLengths[last]!;
 	if (chunksEnd > fileSize) {
-		throw new Error(
+		throw new CGeoDataFormatError(
 			`chunks run to byte ${chunksEnd}, past the end of the ${fileSize}-byte file`,
 		);
 	}

@@ -1,4 +1,5 @@
-import { readVarint, IncompleteBufferError } from "./varint.ts";
+import { CGeoDataFormatError, CGeoDataVersionError } from "./errors.ts";
+import { IncompleteBufferError, readVarint } from "./varint.ts";
 
 // "CGEODATA"
 const SIGNATURE = Uint8Array.from([
@@ -32,7 +33,7 @@ export function parseHeader(buf: Uint8Array): CGeoDataHeader {
 	}
 	for (let i = 0; i < SIGNATURE.length; i++) {
 		if (buf[i] !== SIGNATURE[i]) {
-			throw new Error("not a CGEODATA file: signature mismatch");
+			throw new CGeoDataFormatError("not a CGEODATA file: signature mismatch");
 		}
 	}
 	let offset = SIGNATURE.length;
@@ -40,7 +41,10 @@ export function parseHeader(buf: Uint8Array): CGeoDataHeader {
 	const version = readVarint(buf, offset);
 	offset += version.bytesRead;
 	if (version.value !== 0) {
-		throw new Error(`unsupported CGEODATA version ${version.value}`);
+		throw new CGeoDataVersionError(
+			`unsupported CGEODATA version ${version.value}`,
+			version.value,
+		);
 	}
 
 	const attrLen = readVarint(buf, offset);
@@ -63,13 +67,19 @@ export function parseHeader(buf: Uint8Array): CGeoDataHeader {
 	offset += 4;
 
 	if (maxDepth > 26) {
-		throw new Error(`max_depth ${maxDepth} exceeds the maximum of 26`);
+		throw new CGeoDataFormatError(
+			`max_depth ${maxDepth} exceeds the maximum of 26`,
+		);
 	}
 	if (widthExp > 15) {
-		throw new Error(`width_exp ${widthExp} exceeds the maximum of 15`);
+		throw new CGeoDataFormatError(
+			`width_exp ${widthExp} exceeds the maximum of 15`,
+		);
 	}
 	if (heightExp > 15) {
-		throw new Error(`height_exp ${heightExp} exceeds the maximum of 15`);
+		throw new CGeoDataFormatError(
+			`height_exp ${heightExp} exceeds the maximum of 15`,
+		);
 	}
 	// The only other u8 of the header, and the only one that was left
 	// unchecked: a place count is below 2^53 (Section 3.2), so a block of
@@ -77,7 +87,9 @@ export function parseHeader(buf: Uint8Array): CGeoDataHeader {
 	// unchecked value renders as nonsense ("keyframe 255 (5.8e+76 names per
 	// block)" from `cgeodata info`).
 	if (keyframeExp > 52) {
-		throw new Error(`keyframe_exp ${keyframeExp} exceeds the maximum of 52`);
+		throw new CGeoDataFormatError(
+			`keyframe_exp ${keyframeExp} exceeds the maximum of 52`,
+		);
 	}
 
 	return {

@@ -1,3 +1,5 @@
+import { CGeoDataFormatError } from "./errors.ts";
+
 /**
  * varint (LEB128) codec, per binary-format.md Section 3.2, plus the
  * delta-coded list helper from Section 3.3.
@@ -6,7 +8,9 @@
 /** Thrown when a parser ran out of bytes because the given buffer was too
  * short to hold the full structure -- distinct from a genuine format error,
  * so callers can retry with a larger read. */
-export class IncompleteBufferError extends RangeError {}
+export class IncompleteBufferError extends CGeoDataFormatError {
+	override name = "IncompleteBufferError";
+}
 
 const CONTINUATION_BIT = 0x80;
 const PAYLOAD_MASK = 0x7f;
@@ -106,19 +110,21 @@ export function readDeltaVarintsInto(
 		let scale = 128;
 		for (let n = 1; byte & CONTINUATION_BIT; n++) {
 			if (n === MAX_VARINT_BYTES)
-				throw new RangeError(`varint longer than ${MAX_VARINT_BYTES} bytes`);
+				throw new CGeoDataFormatError(
+					`varint longer than ${MAX_VARINT_BYTES} bytes`,
+				);
 			byte = buf[cursor++];
 			if (byte === undefined)
 				throw new IncompleteBufferError("varint runs past end of buffer");
 			value += (byte & PAYLOAD_MASK) * scale;
 			if ((byte & CONTINUATION_BIT) === 0) {
 				if (value >= MAX_VARINT_VALUE) {
-					throw new RangeError("varint value must be less than 2^53");
+					throw new CGeoDataFormatError("varint value must be less than 2^53");
 				}
 				if (byte === 0) {
 					// A minimal encoder never emits a trailing zero group (see
 					// writeVarint above), so this can only be non-minimal padding.
-					throw new RangeError(
+					throw new CGeoDataFormatError(
 						"non-minimal varint encoding (trailing zero byte)",
 					);
 				}

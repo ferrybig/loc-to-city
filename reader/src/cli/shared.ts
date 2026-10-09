@@ -1,5 +1,5 @@
-import { parseArgs, type ParseArgsConfig } from "node:util";
 import { readFileSync } from "node:fs";
+import { type ParseArgsConfig, parseArgs } from "node:util";
 import type { BoundingBox } from "../cellBounds.ts";
 import { CGeoDataReader, type Place, type PlaceLevel } from "../reader.ts";
 

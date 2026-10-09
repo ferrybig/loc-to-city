@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import {
 	type BoundingBox,
 	cellBoundingBox,
@@ -6,7 +7,15 @@ import {
 import { type ChunkRecords, parseChunk } from "./chunk.ts";
 import { readHeaderAndDirectory } from "./container.ts";
 import type { CGeoDataDirectory } from "./directory.ts";
+import { CGeoDataFormatError, CGeoDataIndexMismatchError } from "./errors.ts";
 import type { CGeoDataHeader } from "./header.ts";
+import {
+	computeLocateCell,
+	decodeLocateEntry,
+	LocateIndex,
+	locateEntryWidth,
+	locateIndexPathFor,
+} from "./locateIndex.ts";
 import { mortonDecode, mortonEncode, shiftRight } from "./morton.ts";
 import {
 	largestIndexWithPrefixAtMost,
@@ -15,14 +24,6 @@ import {
 	readNameBlock,
 	resolveIdentifier,
 } from "./placeTable.ts";
-import { existsSync } from "node:fs";
-import {
-	computeLocateCell,
-	decodeLocateEntry,
-	LocateIndex,
-	locateEntryWidth,
-	locateIndexPathFor,
-} from "./locateIndex.ts";
 import {
 	foldDiacritics,
 	LEVEL_BONUS,
@@ -379,8 +380,10 @@ export class CGeoDataReader {
 					this.useSearchIndex(path);
 				} catch (error) {
 					this.pendingSearchIndexPath = path;
-					throw new Error(
-						`${path}: ${(error as Error).message} (or delete it to search without an index)`,
+					throw withContext(
+						error,
+						`${path}: `,
+						" (or delete it to search without an index)",
 					);
 				}
 			}
@@ -390,12 +393,12 @@ export class CGeoDataReader {
 
 	private checkSearchIndex(index: SearchIndex): void {
 		if (index.sourceChecksum !== this.placeTableChecksum()) {
-			throw new Error(
+			throw new CGeoDataIndexMismatchError(
 				"search index was built from a different .bin file (checksum mismatch); rebuild it with build-search-index",
 			);
 		}
 		if (index.placeCount !== this.placeTable.totalPlaces) {
-			throw new Error(
+			throw new CGeoDataIndexMismatchError(
 				`search index covers ${index.placeCount} places, but this file has ${this.placeTable.totalPlaces}`,
 			);
 		}
@@ -453,8 +456,10 @@ export class CGeoDataReader {
 					this.useLocateIndex(path);
 				} catch (error) {
 					this.pendingLocateIndexPath = path;
-					throw new Error(
-						`${path}: ${(error as Error).message} (or delete it to locate without an index)`,
+					throw withContext(
+						error,
+						`${path}: `,
+						" (or delete it to locate without an index)",
 					);
 				}
 			}
@@ -464,19 +469,19 @@ export class CGeoDataReader {
 
 	private checkLocateIndex(index: LocateIndex): void {
 		if (index.sourceChecksum !== this.prefixChecksum()) {
-			throw new Error(
+			throw new CGeoDataIndexMismatchError(
 				"locate index was built from a different .bin file (checksum mismatch); rebuild it with build-locate-index",
 			);
 		}
 		const { totalPlaces } = this.placeTable;
 		if (index.placeCount !== totalPlaces) {
-			throw new Error(
+			throw new CGeoDataIndexMismatchError(
 				`locate index covers ${index.placeCount} places, but this file has ${totalPlaces}`,
 			);
 		}
 		const expectedWidth = locateEntryWidth(this.header);
 		if (index.entryWidth !== expectedWidth) {
-			throw new Error(
+			throw new CGeoDataIndexMismatchError(
 				`locate index has ${index.entryWidth}-byte entries, but this file's grid needs ${expectedWidth}`,
 			);
 		}
@@ -841,7 +846,7 @@ export class CGeoDataReader {
 		const { totalPlaces } = this.placeTable;
 		for (const placeId of chunk.palette) {
 			if (placeId >= totalPlaces) {
-				throw new Error(
+				throw new CGeoDataFormatError(
 					`chunk ${index}'s palette references place ${placeId}, beyond this file's ${totalPlaces} places`,
 				);
 			}
@@ -861,7 +866,7 @@ export class CGeoDataReader {
 		}
 		const entry = block[globalId - blockIndex * blockSize];
 		if (!entry)
-			throw new Error(
+			throw new CGeoDataFormatError(
 				`name block ${blockIndex} ended before reaching place ${globalId}`,
 			);
 		return entry;
@@ -876,6 +881,17 @@ function checkId(id: number, lo: number, hi: number, what: string): void {
 			`${id} is not a ${what} id for this file (${what} ids are ${lo} <= id < ${hi})`,
 		);
 	}
+}
+
+/** `error` with `prefix` and `suffix` added to its message, keeping its
+ * class -- so a stale index next to the file still throws a
+ * `CGeoDataIndexMismatchError`, and says which file it was. */
+function withContext(error: unknown, prefix: string, suffix: string): unknown {
+	if (!(error instanceof Error)) return error;
+	const message = `${prefix}${error.message}${suffix}`;
+	if (error.stack) error.stack = error.stack.replace(error.message, message);
+	error.message = message;
+	return error;
 }
 
 function unknownResult(

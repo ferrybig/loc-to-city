@@ -1,12 +1,12 @@
 import { createInterface } from "node:readline";
 import type { CGeoDataReader, QueryResult } from "../reader.ts";
 import {
-	parse,
-	openReader,
-	names,
-	writeLine,
-	UsageError,
 	type Command,
+	names,
+	openReader,
+	parse,
+	UsageError,
+	writeLine,
 } from "./shared.ts";
 
 interface Point {

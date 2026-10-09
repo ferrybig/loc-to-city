@@ -15,7 +15,10 @@
  * table block a query needs, each cached behind a WeakRef like the
  * reader's name blocks.
  */
+
+import { CGeoDataFormatError, CGeoDataVersionError } from "./errors.ts";
 import type { CGeoDataReader, PlaceLevel } from "./reader.ts";
+import type { Needle } from "./relevance.ts";
 import {
 	foldDiacritics,
 	LEVEL_BONUS,
@@ -23,7 +26,6 @@ import {
 	prepareNeedle,
 	QUALITY_MAX,
 } from "./relevance.ts";
-import type { Needle } from "./relevance.ts";
 import { openSource, type RandomAccessSource } from "./source.ts";
 import { readVarint, writeVarint } from "./varint.ts";
 
@@ -468,11 +470,15 @@ export class SearchIndex {
 	private static parseHeader(source: RandomAccessSource): SearchIndex {
 		const data = source.readSync(0, Math.min(MAX_HEADER_LENGTH, source.size));
 		if (data.length < SIGNATURE.length + 1) {
-			throw new Error("search index file is too short to be valid");
+			throw new CGeoDataFormatError(
+				"search index file is too short to be valid",
+			);
 		}
 		for (let i = 0; i < SIGNATURE.length; i++) {
 			if (data[i] !== SIGNATURE[i]) {
-				throw new Error("not a CGEODATA search index file (wrong magic bytes)");
+				throw new CGeoDataFormatError(
+					"not a CGEODATA search index file (wrong magic bytes)",
+				);
 			}
 		}
 		let off = SIGNATURE.length;
@@ -483,7 +489,9 @@ export class SearchIndex {
 		};
 		const u8 = (what: string): number => {
 			if (off >= data.length)
-				throw new Error(`search index file is too short for ${what}`);
+				throw new CGeoDataFormatError(
+					`search index file is too short for ${what}`,
+				);
 			return data[off++]!;
 		};
 
@@ -491,21 +499,24 @@ export class SearchIndex {
 		const kind = Math.floor(storedVersion / 16);
 		const version = storedVersion % 16;
 		if (kind !== KIND_SEARCH_INDEX) {
-			throw new Error(
+			throw new CGeoDataFormatError(
 				`not a text search index file (kind ${kind}, expected ${KIND_SEARCH_INDEX})`,
 			);
 		}
 		if (version !== FORMAT_VERSION) {
-			throw new Error(
+			throw new CGeoDataVersionError(
 				version === 0
 					? "search index is the old bigram layout (kind 1, version 0); rebuild it with build-search-index"
 					: version === 1
 						? "search index predates diacritic folding (kind 1, version 1); rebuild it with build-search-index"
 						: `unsupported search index version ${version} (expected ${FORMAT_VERSION})`,
+				version,
 			);
 		}
 		if (data.length < off + 8)
-			throw new Error("search index file is too short for source checksum");
+			throw new CGeoDataFormatError(
+				"search index file is too short for source checksum",
+			);
 		const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
 		const sourceChecksum =
 			BigInt(dv.getUint32(off, true)) |
@@ -516,9 +527,11 @@ export class SearchIndex {
 		const topCount = u8("top_count");
 		const topBlockExp = u8("top_block_exp");
 		if (hashExp < 1 || hashExp > MAX_EXP)
-			throw new Error(`hash_exp must be from 1 to ${MAX_EXP}, not ${hashExp}`);
+			throw new CGeoDataFormatError(
+				`hash_exp must be from 1 to ${MAX_EXP}, not ${hashExp}`,
+			);
 		if (topBlockExp > MAX_EXP)
-			throw new Error(
+			throw new CGeoDataFormatError(
 				`top_block_exp must be at most ${MAX_EXP}, not ${topBlockExp}`,
 			);
 		const listDirectoryLength = varint();
@@ -530,17 +543,19 @@ export class SearchIndex {
 		const tableDirectoryStart = listsStart + listsLength;
 		const tableBlocksStart = tableDirectoryStart + tableDirectoryLength;
 		if (tableBlocksStart > source.size) {
-			throw new Error(
+			throw new CGeoDataFormatError(
 				`search index header's section lengths run to byte ${tableBlocksStart}, past the end of the ${source.size}-byte file`,
 			);
 		}
 		const tableBlocksLength = source.size - tableBlocksStart;
 		if (topCount === 0 && tableDirectoryLength + tableBlocksLength > 0) {
-			throw new Error("search index has a short-query table but top_count 0");
+			throw new CGeoDataFormatError(
+				"search index has a short-query table but top_count 0",
+			);
 		}
 		const presenceLength = Math.ceil((LATIN_LISTS + 2 ** hashExp) / 8);
 		if (listDirectoryLength < presenceLength) {
-			throw new Error(
+			throw new CGeoDataFormatError(
 				`search index list directory is ${listDirectoryLength} bytes, shorter than its ${presenceLength}-byte presence bitmap`,
 			);
 		}
@@ -655,7 +670,7 @@ export class SearchIndex {
 				if ((bits & (1 << bit)) === 0) continue;
 				const l = byte * 8 + bit;
 				if (l >= listCount)
-					throw new Error(
+					throw new CGeoDataFormatError(
 						`search index presence bitmap marks list ${l}, beyond its ${listCount} lists`,
 					);
 				present.push(l);
@@ -676,11 +691,11 @@ export class SearchIndex {
 			const length = Math.floor(value / 2);
 			const encoding = value % 2;
 			if (length === 0)
-				throw new Error(
+				throw new CGeoDataFormatError(
 					`search index stores list ${present[slot]} with length 0`,
 				);
 			if (encoding === ENCODING_BITMAP && length !== bitmapLength) {
-				throw new Error(
+				throw new CGeoDataFormatError(
 					`search index bitmap for list ${present[slot]} is ${length} bytes, expected ${bitmapLength}`,
 				);
 			}
@@ -690,12 +705,12 @@ export class SearchIndex {
 			listOffset += length;
 		}
 		if (off !== data.length) {
-			throw new Error(
+			throw new CGeoDataFormatError(
 				`search index list directory has ${data.length - off} bytes after its last entry`,
 			);
 		}
 		if (listOffset !== this.listsLength) {
-			throw new Error(
+			throw new CGeoDataFormatError(
 				`search index list lengths add up to ${listOffset}, but lists_length is ${this.listsLength}`,
 			);
 		}
@@ -725,10 +740,12 @@ export class SearchIndex {
 			const { value, bytesRead } = readVarint(list, off);
 			off += bytesRead;
 			if (ids.length > 0 && value === 0)
-				throw new Error("search index id list is not strictly increasing");
+				throw new CGeoDataFormatError(
+					"search index id list is not strictly increasing",
+				);
 			id += value;
 			if (id >= this.placeCount)
-				throw new Error(
+				throw new CGeoDataFormatError(
 					`search index lists place ${id}, beyond its ${this.placeCount} places`,
 				);
 			ids.push(id);
@@ -745,7 +762,7 @@ export class SearchIndex {
 				if ((bits & (1 << bit)) === 0) continue;
 				const id = byte * 8 + bit;
 				if (id >= this.placeCount)
-					throw new Error(
+					throw new CGeoDataFormatError(
 						`search index bitmap sets place ${id}, beyond its ${this.placeCount} places`,
 					);
 				ids.push(id);
@@ -770,14 +787,16 @@ export class SearchIndex {
 		for (let b = 0; b < blockCount; b++) {
 			const end = data.indexOf(0, off);
 			if (end < 0)
-				throw new Error("search index table directory ends inside a key");
+				throw new CGeoDataFormatError(
+					"search index table directory ends inside a key",
+				);
 			const firstKey = data.slice(off, end);
 			off = end + 1;
 			const { value: length, bytesRead: lb } = readVarint(data, off);
 			off += lb;
 			const prev = dir.firstKeys[b - 1];
 			if (prev && compareBytes(prev, firstKey) >= 0)
-				throw new Error(
+				throw new CGeoDataFormatError(
 					"search index table directory keys are not in increasing order",
 				);
 			dir.firstKeys.push(firstKey);
@@ -786,12 +805,12 @@ export class SearchIndex {
 			blockOffset += length;
 		}
 		if (off !== data.length) {
-			throw new Error(
+			throw new CGeoDataFormatError(
 				`search index table directory has ${data.length - off} bytes after its last block`,
 			);
 		}
 		if (blockOffset !== this.tableBlocksLength) {
-			throw new Error(
+			throw new CGeoDataFormatError(
 				`search index table block lengths add up to ${blockOffset}, but the table is ${this.tableBlocksLength} bytes`,
 			);
 		}
@@ -812,21 +831,25 @@ export class SearchIndex {
 		while (off < data.length) {
 			const end = data.indexOf(0, off);
 			if (end < 0)
-				throw new Error(`search index table block ${b} ends inside a key`);
+				throw new CGeoDataFormatError(
+					`search index table block ${b} ends inside a key`,
+				);
 			const keyBytes = data.subarray(off, end);
 			if (
 				prevKey
 					? compareBytes(prevKey, keyBytes) >= 0
 					: compareBytes(dir.firstKeys[b]!, keyBytes) !== 0
 			) {
-				throw new Error(`search index table block ${b} is not in key order`);
+				throw new CGeoDataFormatError(
+					`search index table block ${b} is not in key order`,
+				);
 			}
 			prevKey = keyBytes;
 			off = end + 1;
 			const { value: count, bytesRead } = readVarint(data, off);
 			off += bytesRead;
 			if (count < 1 || count > this.topCount) {
-				throw new Error(
+				throw new CGeoDataFormatError(
 					`search index table entry has ${count} places, expected 1 to ${this.topCount}`,
 				);
 			}
@@ -835,7 +858,7 @@ export class SearchIndex {
 				const { value: id, bytesRead: ib } = readVarint(data, off);
 				off += ib;
 				if (id >= this.placeCount)
-					throw new Error(
+					throw new CGeoDataFormatError(
 						`search index table lists place ${id}, beyond its ${this.placeCount} places`,
 					);
 				ids.push(id);
@@ -843,7 +866,7 @@ export class SearchIndex {
 			entries.set(utf8Decoder.decode(keyBytes), ids);
 		}
 		if (entries.size > 2 ** this.topBlockExp) {
-			throw new Error(
+			throw new CGeoDataFormatError(
 				`search index table block ${b} has ${entries.size} entries, more than 2^${this.topBlockExp}`,
 			);
 		}

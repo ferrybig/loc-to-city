@@ -1,5 +1,6 @@
+import { CGeoDataFormatError } from "./errors.ts";
 import type { RandomAccessSource } from "./source.ts";
-import { readVarint, readVarintList, IncompleteBufferError } from "./varint.ts";
+import { IncompleteBufferError, readVarint, readVarintList } from "./varint.ts";
 import { safeInflate } from "./zlibUtil.ts";
 
 export interface PlaceTableInfo {
@@ -214,7 +215,7 @@ export function readNameBlock(
 		start = end + 1;
 	}
 	if (start !== inflated.length) {
-		throw new Error(
+		throw new CGeoDataFormatError(
 			`name block ${blockIndex} has ${inflated.length - start} trailing bytes after its last NUL terminator`,
 		);
 	}
@@ -248,7 +249,7 @@ export function readNameEntry(
 	for (let i = 0; i < withinBlock; i++) {
 		const nul = inflated.indexOf(0, start);
 		if (nul === -1) {
-			throw new Error(
+			throw new CGeoDataFormatError(
 				`name block ${blockIndex} ended before reaching entry ${withinBlock}`,
 			);
 		}
@@ -256,7 +257,7 @@ export function readNameEntry(
 	}
 	const end = inflated.indexOf(0, start);
 	if (end === -1) {
-		throw new Error(
+		throw new CGeoDataFormatError(
 			`name entry for place ${globalId} is missing its NUL terminator`,
 		);
 	}

@@ -7,6 +7,12 @@ export {
 export { type ChunkRecords, parseChunk } from "./chunk.ts";
 export { readHeaderAndDirectory } from "./container.ts";
 export { type CGeoDataDirectory, parseDirectory } from "./directory.ts";
+export {
+	CGeoDataError,
+	CGeoDataFormatError,
+	CGeoDataIndexMismatchError,
+	CGeoDataVersionError,
+} from "./errors.ts";
 export { type CGeoDataHeader, parseHeader } from "./header.ts";
 export {
 	type BuildLocateIndexOptions,
@@ -32,9 +38,9 @@ export {
 	type ChunkRecord,
 	type Place,
 	type PlaceCounts,
+	type PlaceFilter,
 	type PlaceIdResult,
 	type PlaceIds,
-	type PlaceFilter,
 	type PlaceLevel,
 	type PlaceRef,
 	type QueryResult,
@@ -45,8 +51,8 @@ export {
 	EXACT_SPELLING_BONUS,
 	foldDiacritics,
 	LEVEL_BONUS,
-	nameMatchQuality,
 	type Needle,
+	nameMatchQuality,
 	placeMatchQuality,
 	prepareNeedle,
 	QUALITY_EXACT,

@@ -1,3 +1,4 @@
+import { CGeoDataFormatError } from "./errors.ts";
 import {
 	readDeltaVarintList,
 	readDeltaVarintsInto,
@@ -89,21 +90,21 @@ export function parseChunk(buf: Uint8Array, maxDepth: number): ChunkRecords {
 	// Every code takes at least one byte, so a count the block can't hold
 	// fails here instead of allocating for it.
 	if (offset + recordCount > buf.length) {
-		throw new RangeError("chunk codes run past end of block");
+		throw new CGeoDataFormatError("chunk codes run past end of block");
 	}
 	const codesStart = offset;
 	const codes = new Float64Array(recordCount);
 	const codesBytesRead =
 		readDeltaVarintsInto(buf, codesStart, codes) - codesStart;
 	if (codesBytesRead !== codesLength) {
-		throw new Error(
+		throw new CGeoDataFormatError(
 			`chunk codes_length mismatch: header says ${codesLength}, decoding consumed ${codesBytesRead}`,
 		);
 	}
 	offset = codesStart + codesLength;
 
 	if (offset + recordCount > buf.length) {
-		throw new RangeError("chunk depths array runs past end of block");
+		throw new CGeoDataFormatError("chunk depths array runs past end of block");
 	}
 	// A copy, not a view, so the inflated block can be freed. Not
 	// `buf.slice()`: the block is a Buffer, whose `slice` returns a view.
@@ -113,7 +114,9 @@ export function parseChunk(buf: Uint8Array, maxDepth: number): ChunkRecords {
 	const indexWidth = paletteIndexWidth(paletteCount);
 	const indicesBytes = recordCount * indexWidth;
 	if (offset + indicesBytes > buf.length) {
-		throw new RangeError("chunk palette_indices array runs past end of block");
+		throw new CGeoDataFormatError(
+			"chunk palette_indices array runs past end of block",
+		);
 	}
 	const paletteIndices = readLittleEndianInto(
 		buf,
@@ -124,7 +127,9 @@ export function parseChunk(buf: Uint8Array, maxDepth: number): ChunkRecords {
 	offset += indicesBytes;
 
 	if (offset !== buf.length) {
-		throw new Error("chunk block has trailing bytes after palette_indices");
+		throw new CGeoDataFormatError(
+			"chunk block has trailing bytes after palette_indices",
+		);
 	}
 
 	// span[d]: how many max-depth cells a depth-d record covers, 4^(D-d).
@@ -138,32 +143,34 @@ export function parseChunk(buf: Uint8Array, maxDepth: number): ChunkRecords {
 		const depth = depths[j]!;
 		const code = codes[j]!;
 		if (depth > maxDepth) {
-			throw new Error(`record ${j} has depth ${depth} > max_depth ${maxDepth}`);
+			throw new CGeoDataFormatError(
+				`record ${j} has depth ${depth} > max_depth ${maxDepth}`,
+			);
 		}
 		if (!isMultipleOf(code, span[depth]!)) {
-			throw new Error(
+			throw new CGeoDataFormatError(
 				`record ${j}'s code is not a valid stored code for depth ${depth}`,
 			);
 		}
 		if (code >= maxCode) {
-			throw new Error(
+			throw new CGeoDataFormatError(
 				`record ${j}'s code ${code} is not less than 4^max_depth`,
 			);
 		}
 		if (paletteIndices[j]! > paletteCount) {
-			throw new Error(
+			throw new CGeoDataFormatError(
 				`record ${j} has palette index ${paletteIndices[j]} > P (${paletteCount})`,
 			);
 		}
 		if (j > 0) {
 			const prevCode = codes[j - 1]!;
 			if (!(prevCode < code)) {
-				throw new Error(
+				throw new CGeoDataFormatError(
 					`chunk codes are not strictly increasing at record ${j}`,
 				);
 			}
 			if (prevCode + span[depths[j - 1]!]! > code) {
-				throw new Error(`record ${j - 1} overlaps record ${j}`);
+				throw new CGeoDataFormatError(`record ${j - 1} overlaps record ${j}`);
 			}
 		}
 	}

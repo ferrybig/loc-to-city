@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+	CGeoDataFormatError,
 	IncompleteBufferError,
 	readDeltaVarintsInto,
 	readVarint,
@@ -33,13 +34,13 @@ test("readVarint rejects a varint longer than 8 bytes", () => {
 	const buf = Uint8Array.from([
 		0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01,
 	]);
-	assert.throws(() => readVarint(buf, 0), RangeError);
+	assert.throws(() => readVarint(buf, 0), CGeoDataFormatError);
 });
 
 test("readVarint rejects a non-minimal encoding", () => {
 	// 0 encoded as two bytes instead of one.
 	const buf = Uint8Array.from([0x80, 0x00]);
-	assert.throws(() => readVarint(buf, 0), RangeError);
+	assert.throws(() => readVarint(buf, 0), CGeoDataFormatError);
 });
 
 test("writeVarint rejects values >= 2^53", () => {
@@ -61,13 +62,13 @@ for (const [what, bytes, error] of [
 	[
 		"longer than 8 bytes",
 		[0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01],
-		RangeError,
+		CGeoDataFormatError,
 	],
-	["non-minimal", [0x80, 0x00], RangeError],
+	["non-minimal", [0x80, 0x00], CGeoDataFormatError],
 	[
 		"2^53 or more",
 		[0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x10],
-		RangeError,
+		CGeoDataFormatError,
 	],
 	["cut off", [0x80], IncompleteBufferError],
 ] as const) {

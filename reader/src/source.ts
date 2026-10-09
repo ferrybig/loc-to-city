@@ -1,4 +1,5 @@
-import { openSync, readSync, closeSync, fstatSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readSync } from "node:fs";
+import { CGeoDataError } from "./errors.ts";
 
 /**
  * A random-access byte source. This is what lets the reader honour Section
@@ -48,7 +49,7 @@ class FileSource implements RandomAccessSource {
 			// varints -- a silently wrong answer instead of an error.
 			const bytesRead = readSync(this.fd, buf, 0, clampedLength, offset);
 			if (bytesRead !== clampedLength) {
-				throw new Error(
+				throw new CGeoDataError(
 					`short read: wanted ${clampedLength} bytes at offset ${offset}, got ${bytesRead}`,
 				);
 			}

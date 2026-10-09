@@ -1,11 +1,11 @@
 import {
-	parse,
-	openReader,
-	parseId,
-	formatPlaceBlock,
-	writeLine,
-	UsageError,
 	type Command,
+	formatPlaceBlock,
+	openReader,
+	parse,
+	parseId,
+	UsageError,
+	writeLine,
 } from "./shared.ts";
 
 export const show: Command = {
