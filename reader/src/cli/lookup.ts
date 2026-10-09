@@ -77,10 +77,9 @@ function formatJson(point: Point, result: QueryResult): string {
 		lat: point.lat,
 		lon: point.lon,
 		...(point.tag ? { tag: point.tag } : {}),
-		// Name lists, as this output has always printed them; scripts read it.
-		country: result.country?.names ?? null,
-		region: result.region?.names ?? null,
-		city: result.city?.names ?? null,
+		country: result.country,
+		region: result.region,
+		city: result.city,
 		boundingBox: result.boundingBox,
 		chunkIndex: result.chunkIndex,
 	});

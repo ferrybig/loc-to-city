@@ -77,9 +77,24 @@ test("lookup: --json emits one object per point with the input echoed back", () 
 	assert.deepEqual(JSON.parse(stdout), {
 		lat: 20,
 		lon: 100,
-		country: ["Nederland", "The Netherlands"],
-		region: ["Noord-Holland"],
-		city: ["Zaandam"],
+		country: {
+			id: 0,
+			localName: "Nederland",
+			internationalName: "The Netherlands",
+			names: ["Nederland", "The Netherlands"],
+		},
+		region: {
+			id: 2,
+			localName: "Noord-Holland",
+			internationalName: "Noord-Holland",
+			names: ["Noord-Holland"],
+		},
+		city: {
+			id: 5,
+			localName: "Zaandam",
+			internationalName: "Zaandam",
+			names: ["Zaandam"],
+		},
 		boundingBox: { minLon: 90, maxLon: 135, minLat: 0, maxLat: 22.5 },
 		chunkIndex: 3,
 	});
@@ -104,9 +119,15 @@ test("lookup: with no points, reads them from stdin, carries tags through, and s
 	const lines = jsonLines(stdout);
 	assert.equal(lines.length, 3);
 	assert.equal(lines[0]?.["tag"], "zaandam-by-comma");
-	assert.deepEqual(lines[0]?.["city"], ["Zaandam"]);
+	assert.deepEqual(
+		(lines[0]?.["city"] as { names: string[] } | undefined)?.names,
+		["Zaandam"],
+	);
 	assert.equal(lines[1]?.["tag"], "zaandam-by-tab\twith\ttabs");
-	assert.deepEqual(lines[1]?.["city"], ["Zaandam"]);
+	assert.deepEqual(
+		(lines[1]?.["city"] as { names: string[] } | undefined)?.names,
+		["Zaandam"],
+	);
 	assert.equal(
 		lines[2]?.["tag"],
 		undefined,
@@ -125,7 +146,7 @@ test("lookup: the file itself can come from stdin as '-', but not together with 
 		APPENDIX_A_BYTES,
 	);
 	assert.equal(status, 0);
-	assert.deepEqual(JSON.parse(stdout)["city"], ["Zaandam"]);
+	assert.deepEqual(JSON.parse(stdout)["city"]["names"], ["Zaandam"]);
 
 	const both = run(["lookup", "-"], APPENDIX_A_BYTES);
 	assert.equal(both.status, 2);
