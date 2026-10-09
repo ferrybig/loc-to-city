@@ -28,6 +28,18 @@ export interface CountryAdminLevels {
    * primary has no coverage, never where a peer already does. A region
    * not listed here is unaffected and keeps using `city` as normal. */
   overrides?: Record<string, number[]>;
+  /** Per-region exception to `overrides`' primary level: named relations
+   * at `level` that are a whole, real city even though the region's own
+   * primary tier subdivides them. Keyed by the same region name as
+   * `overrides`. A listed relation is promoted to primary, and every other
+   * primary candidate whose representative point falls inside it is
+   * dropped (`findSuppressedByWholeUnits`), so the city resolves as one
+   * unit instead of as its sub-units. Wales is the case: communities
+   * (level 10) are the right town grain almost everywhere (Pontypridd),
+   * but Cardiff, Swansea and Newport are cities whose communities are
+   * only neighbourhoods ("Castle", "Uplands"). Without the exception the
+   * choice is Pontypridd or Cardiff, never both. */
+  wholeUnits?: Record<string, { level: number; names: readonly string[] }>;
 }
 
 /**
@@ -140,27 +152,35 @@ export interface CountryAdminLevels {
  *   previously had almost no city tier at all, not just the region
  *   granularity.
  * - GB (Wales, Northern Ireland, Scotland): the country-wide city pick
- *   (level 10, parishes) is right for England but wrong for these three --
- *   Cardiff has its own level-6 relation ("Cardiff") and Belfast its own
- *   level-7 ("Belfast City District"), both real town-level units, but
- *   both lost their own cell to a co-located level-10 sub-town unit
- *   ("Castle", "Town Parks") because gap-fill only reaches cells no
- *   *primary* (level 10) already covers, and 10 does cover these --
- *   just with the wrong grain. Scotland has the same problem: its level
- *   10 is a handful of islands plus city-centre areas ("Old Town" in
- *   Edinburgh, "City Centre" in Aberdeen, "Crown and City Centre" in
- *   Inverness) that beat the real unit, the level-6 council area ("City
- *   of Edinburgh", "Aberdeen City", "Highland"); Glasgow and Dundee
- *   resolved to no city at all. Region-scoped `overrides` fixes this the
- *   New York way: `"Cymru / Wales": [6, 10]`, `"Northern Ireland /
- *   Tuaisceart Éireann": [7, 10]` and `"Alba / Scotland": [6, 10]` make
- *   6/7 primary only inside their own region (Wales 58.4%, NI 74.1%,
- *   Scotland's 32 council areas ~47.5% of an outline that includes
- *   territorial waters, i.e. all of its land -- below the national 60% bar
- *   10 clears, but the correct administrative tier regardless),
- *   gap-filling 10 for the rest. Level 6/7 stay unavailable everywhere
- *   else in GB, so rural England (where 10 is the right grain) is
- *   unaffected.
+ *   (level 10, parishes) is right for England but wrong for these three,
+ *   each in its own way; region-scoped `overrides` handles them the New
+ *   York way (`[primary, ...gapFill]`, see that field's doc comment).
+ *   - Northern Ireland: Belfast has its own level-7 relation ("Belfast
+ *     City District") but lost its cell to a co-located level-10 townland
+ *     ("Town Parks"). `[7, 10]`: the 11 districts primary. Level 10 is
+ *     townlands (Lisnagarvy, "Corporation"), not towns, so Lisburn and
+ *     Bangor still resolve to their district -- OSM has no polygon for
+ *     them, see README.
+ *   - Scotland: level 10 is ~150 islands plus a few city-centre areas
+ *     ("Old Town" in Edinburgh, "City Centre" in Aberdeen) that beat the
+ *     real unit, the level-6 council area; Glasgow and Dundee resolved to
+ *     no city. `[6, 10]`: the 32 council areas (~47.5% of an outline that
+ *     includes territorial waters, i.e. all of its land) primary. No OSM
+ *     polygon exists for a town like Melrose, so it resolves to "Scottish
+ *     Borders".
+ *   - Wales: level 10 is 878 communities tessellating the whole country
+ *     (Pontypridd, `place=town`), the right town grain -- an earlier
+ *     `[6, 10]` (to fix Cardiff) hid it behind 22 principal areas. `[10, 6]`
+ *     makes communities primary; `wholeUnits` keeps Cardiff, Swansea and
+ *     Newport (cities whose communities are only neighbourhoods) as single
+ *     units. Tradeoff: Swansea's rural Gower resolves to "Swansea" too.
+ *   Level 6/7 stay unavailable everywhere else in GB, so England (where 10
+ *   is the right grain) is unaffected.
+ * - IE: level 10 is 51,414 townlands (Galway resolved to "Townparks").
+ *   `[8, 7]`: 98 municipal districts primary (97% of the land), level 7
+ *   (the `place=city` relations Dublin, Cork, ...; no district covers
+ *   them) gap-fills. Names are OSM's, e.g. "The Municipal District of
+ *   Kilkenny City".
  * - CU, MD, NI: found by `report-place-tag-mismatches.ts` (README's
  *   "place=city/town/village tie-break" item) -- each country's configured
  *   level already tessellates the country (Cuba's 117 level-6
@@ -470,26 +490,18 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   GB: {
     region: [4],
     city: [6, 8, 10], // region 166.0%, city 64.7% (10) + gap-fill 8/6 -- see override note above
-    // Wales, Northern Ireland and Scotland's real town tier sits coarser
-    // than the rest of GB: Cardiff (level 6, "Cardiff"), Belfast
-    // (level 7, "Belfast City District") and Edinburgh (level 6, "City of
-    // Edinburgh") all lose their own cell to a co-located level-10
-    // sub-town unit ("Castle", "Town Parks", "Old Town") under the plain
-    // country-wide list, since 10 clears the national 60% threshold and
-    // gap-fill only reaches cells no primary already covers.
-    // `[primary, ...gapFill]` scopes this to each region only -- level 6/7
-    // stay unavailable everywhere else in GB, where 10 (parishes) is the
-    // right grain. Coverage within-region: Wales level 6 58.4%, NI level 7
-    // 74.1%, Scotland level 6 ~47.5% (of an outline that includes
-    // territorial waters; the 32 council areas tile all its land) -- all
-    // below the country-wide 60% bar 10 clears, but the better
-    // real administrative tier regardless (same tradeoff as GB's own
-    // level 10 pick, or US counties vs. places).
+    // See the GB entry in the override note above for why each nation
+    // gets its own list. `[primary, ...gapFill]` scopes each to its region
+    // only: level 6/7 stay unavailable everywhere else in GB, where 10
+    // (parishes) is the right grain.
     overrides: {
-      "Cymru / Wales": [6, 10],
+      "Cymru / Wales": [10, 6],
       "Northern Ireland / Tuaisceart Éireann": [7, 10],
       "Alba / Scotland": [6, 10],
     },
+    // Wales' communities (level 10) are the town grain everywhere except
+    // inside its three cities -- see `CountryAdminLevels.wholeUnits`.
+    wholeUnits: { "Cymru / Wales": { level: 6, names: ["Cardiff", "Swansea", "Newport"] } },
   },
   GD: { region: [6], city: [] }, // region 101.8%, city 0.0%
   GE: { region: [6], city: [8] }, // region 102.9%, city 4.3%
@@ -511,7 +523,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   HT: { region: [4], city: [10] }, // region 100.6%, city 100.4%
   HU: { region: [4], city: [8] }, // region 99.8%, city 99.9%
   ID: { region: [4], city: [5] }, // region 280.1%, city 108.2%
-  IE: { region: [6], city: [10] }, // region 101.2%, city 98.8%
+  IE: { region: [6], city: [8, 7] }, // region 101.2%; city 8 (municipal districts) primary, 7 (Dublin, Cork, ...) gap-fills -- 10 was townlands, 51,414 of them
   IL: { region: [5], city: [8] }, // region 100.4%, city 95.7%
   IM: { region: [6], city: [8] }, // region 99.7%, city 99.7%
   IN: { region: [4], city: [6] }, // region 100.2%, city 97.4%
@@ -681,6 +693,25 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
  * first could paper over a second, different bug the way Slovenia's
  * region gap once did for its city tier. */
 export const VORONOI_CITY_FALLBACK: ReadonlySet<string> = new Set(["LY", "EG", "TD", "ER"]);
+
+/** The same GeoNames-point fallback as `VORONOI_CITY_FALLBACK`, scoped to
+ * named regions of a country whose other regions keep their real OSM city
+ * tier: country code -> region names (as in `overrides`). For a region
+ * whose OSM city tier is a district/council-area level with no polygon for
+ * the towns inside it -- Scotland's 32 council areas, Northern Ireland's 11
+ * districts (Melrose, Lisburn and Bangor have no admin polygon at all;
+ * README's "Wales, Northern Ireland, Scotland and Ireland" entry).
+ * Unlike the country-wide fallback it is clipped per *container*: each
+ * primary city polygon in a listed region (the district itself) gets a
+ * Voronoi tessellation of the cities500 points inside it
+ * (`buildContainerFallback`), so cells never cross a district border. The
+ * cells replace the district (it is not emitted alongside them -- see
+ * prepare-world.ts for why a backstop would win border cells at max
+ * depth); a district without any point stays as itself. Same opt-in
+ * philosophy as the country-wide list. */
+export const VORONOI_CITY_FALLBACK_WITHIN_REGIONS: ReadonlyMap<string, readonly string[]> = new Map([
+  ["GB", ["Alba / Scotland", "Northern Ireland / Tuaisceart Éireann"]],
+]);
 
 /** Countries with `region: []` -- no usable region tier in OSM at all --
  * where `voronoiFallback.ts`'s `buildRegionFallback` synthesizes one from

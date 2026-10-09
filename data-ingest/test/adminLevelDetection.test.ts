@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import RBush from "rbush";
-import { selectRegionLevels, selectPrimaryLevels, detectGapFill } from "../src/lib/adminLevelDetection.ts";
+import type { Feature, Polygon } from "geojson";
+import { selectRegionLevels, selectPrimaryLevels, detectGapFill, findSuppressedByWholeUnits } from "../src/lib/adminLevelDetection.ts";
 import type { PrimaryGeometryIndex, PrimaryGeometryItem, PrimaryLevelResult } from "../src/lib/adminLevelDetection.ts";
 import type { AdminBoundaryIndex, CityCandidateMeta } from "../src/lib/adminBoundaryIndex.ts";
 import { COUNTRY_ADMIN_LEVELS } from "../src/lib/countryAdminLevels.ts";
@@ -235,4 +236,35 @@ test("selectPrimaryLevels: a non-overridden region in the same country is unaffe
   });
   const { primaryIds } = selectPrimaryLevels(index, countries, undefined, () => "Ohio");
   assert.equal(primaryIds.has(ohioCandidate.id), true);
+});
+
+test("whole units: Welsh Cardiff is promoted to primary and its communities are suppressed, Pontypridd is not", () => {
+  assert.deepEqual(COUNTRY_ADMIN_LEVELS.GB?.overrides?.["Cymru / Wales"], [10, 6], "test assumes Wales' real override");
+  const unit = (id: string, level: number, name: string, repPoint: [number, number], bbox: [number, number, number, number]) => ({
+    ...fakeCandidate("GB", level, 1),
+    id,
+    name,
+    repPoint,
+    bbox,
+  });
+  const cardiff = unit("cardiff", 6, "Cardiff", [-3.18, 51.48], [-3.3, 51.4, -3.1, 51.56]);
+  const castle = unit("castle", 10, "Castle", [-3.18, 51.48], [-3.19, 51.47, -3.17, 51.49]);
+  const pontypridd = unit("pontypridd", 10, "Pontypridd", [-3.34, 51.6], [-3.4, 51.55, -3.3, 51.65]);
+  const rct = unit("rct", 6, "Rhondda Cynon Taf", [-3.4, 51.65], [-3.7, 51.5, -3.2, 51.8]);
+  const index = fakeIndex({ cityCandidates: [cardiff, castle, pontypridd, rct] });
+  const resolveRegion = () => "Cymru / Wales";
+
+  const primary = selectPrimaryLevels(index, fakeCountries({ GB: 243_000 }), undefined, resolveRegion);
+  assert.deepEqual([...primary.primaryIds].sort(), ["cardiff", "castle", "pontypridd"]);
+
+  const square = (b: [number, number, number, number]): Feature<Polygon> => ({
+    type: "Feature",
+    properties: {},
+    geometry: { type: "Polygon", coordinates: [[[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]], [b[0], b[1]]]] },
+  });
+  const byId = new Map(index.cityCandidates.map((c) => [c.id, square(c.bbox as [number, number, number, number])]));
+  const geom = { tree: new RBush<PrimaryGeometryItem>(), byId } as PrimaryGeometryIndex;
+
+  const suppressed = findSuppressedByWholeUnits(index, primary, geom, undefined, resolveRegion);
+  assert.deepEqual([...suppressed], ["castle"]);
 });

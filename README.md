@@ -937,43 +937,54 @@ section, since those are spec decisions rather than pipeline work.
   Nederland first, because the country has no `Nederland` field to match
   against at all, exact-match bonus or not.
 
-- **Wales, Northern Ireland and Scotland resolved to sub-town units instead
-  of the town.** GB's country-wide city pick (level 10, civil parishes) is
-  right for England but wrong for these three: Cardiff has its own
-  level-6 relation ("Cardiff") and Belfast its own level-7 ("Belfast City
-  District"), both real town-level units, but both lost their own cell to
-  a co-located level-10 sub-town unit ("Castle", a Welsh community;
-  "Town Parks", a townland) -- gap-fill only reaches cells no *primary*
-  (level 10) already covers, and 10 does cover Cardiff/Belfast, just with
-  the wrong grain; widening GB's country-wide `city` list can't fix this
-  without also breaking rural England, where 10 is the right grain.
+- **Wales, Northern Ireland, Scotland and Ireland resolved to the wrong
+  grain.** GB's country-wide city pick (level 10, civil parishes) is right
+  for England but not for the other three nations; each got a region-scoped
+  `overrides` entry (the New York way), measured against the planet
+  extract and checked on `data/03-final/world.bin`:
+  - **Northern Ireland** `[7, 10]`: Belfast lost its cell to a level-10
+    townland ("Town Parks"); now `Belfast City District`. Level 10 is
+    townlands, never towns.
+  - **Scotland** `[6, 10]`: level 10 is ~150 islands plus city-centre areas
+    ("Old Town", "City Centre"); Glasgow and Dundee had no city. Level 6
+    (32 council areas, 79,814 km², 47.5% of an outline that includes
+    territorial waters, i.e. all its land) is primary: `City of Edinburgh`,
+    `Glasgow City`.
+  - **Wales** `[10, 6]` + `wholeUnits`: level 10 is 878 communities
+    tessellating the country (Pontypridd is a `place=town` one). The first
+    fix, `[6, 10]`, made the 22 principal areas primary and Pontypridd
+    became `Rhondda Cynon Taf`. Communities are primary now, and
+    `CountryAdminLevels.wholeUnits` promotes Cardiff, Swansea and Newport
+    (cities whose communities are neighbourhoods like "Castle") and drops
+    their communities (`findSuppressedByWholeUnits`; 106 suppressed).
+    Tradeoff: Swansea's rural Gower also resolves to `Swansea`.
+  - **Ireland** `city: [8, 7]` (was `[10]`): level 10 is 51,414 townlands
+    (Galway resolved to `Townparks`). The 98 municipal districts are
+    primary (97% of the land); the level-7 `place=city` relations (Dublin,
+    Cork) gap-fill, since no district covers them. Names are OSM's:
+    `The Municipal District of Kilkenny City`, `The Municipal District of
+    Clane — Maynooth`.
 
-  Fixed the New York way: a region-scoped `overrides` entry --
-  `"Cymru / Wales": [6, 10]` and `"Northern Ireland / Tuaisceart Éireann":
-  [7, 10]` -- makes level 6/7 primary only inside their own region
-  (measured coverage there: Wales level 6 58.4%, NI level 7 74.1% --
-  below the national 60% bar level 10 clears, but the correct
-  administrative tier regardless, the same tradeoff as GB's own level-10
-  pick or the US's counties-vs-places one), gap-filling level 10 for
-  whatever it doesn't cover. Level 6/7 stay unavailable everywhere else in
-  GB, so England/Scotland (Westminster, Guildford, ...) are unaffected --
-  verified on `data/03-final/world.bin`: Cardiff now resolves to `city: Cardiff`,
-  Belfast to `city: Belfast City District`, London and parished towns
-  unchanged.
+  - **Towns in Northern Ireland and Scotland** (region-scoped Voronoi from
+    cities500, `VORONOI_CITY_FALLBACK_WITHIN_REGIONS`): OSM has no polygon
+    for a town like Lisburn, Bangor or Melrose -- the only containing
+    polygons are the council area/district and, in NI, a townland -- so each
+    council area/district (the region's primary polygon) is replaced by a
+    Voronoi tessellation of the cities500 points inside it
+    (`buildContainerFallback`), clipped to that container so cells never
+    cross a district border. 792 cells; a container with no point stays as
+    itself. Checked on `world.bin`: Melrose, Lisburn, Bangor, Belfast,
+    Edinburgh, Glasgow, Aberdeen, Inverness, Dundee, Fort William.
+    Two things found on the way: the container must *not* also be emitted
+    as a backstop -- at max depth a border leaf between two cells is won by
+    the candidate with the largest share, always the container, which made
+    ~5% of random Highland lookups return `Highland`; and the cells use
+    GeoNames' own names and points, so a rural cell is named for the
+    nearest village (`Strathpeffer` at 57.6,-4.5), and Derry is GeoNames'
+    `Londonderry County Borough`.
 
-  Scotland was added to the same override afterwards
-  (`"Alba / Scotland": [6, 10]`). Its level 10 is not parishes at all but
-  ~150 islands plus a few city-centre areas, and on the previous build
-  Edinburgh resolved to `Old Town`, Aberdeen to `City Centre` and
-  Inverness to `Crown and City Centre`, while Glasgow and Dundee resolved
-  to no city. Measured directly against the planet extract: Scotland's 32
-  level-6 council areas sum to 79,814 km² (47.5% of the `Alba / Scotland`
-  outline, which includes territorial waters, so effectively all of its
-  land); level 10 is 152 features, 1.7%. Level 6 primary with level 10
-  gap-filled gives `City of Edinburgh`, `Aberdeen City`, `Glasgow City`,
-  `Dundee City` and `Highland`. **Not yet verified on a rebuilt
-  `world.bin`** -- the numbers above are from the extract, the
-  after-state is expected, not observed.
+  **Still open:** Maghaberry is not in cities500 (it resolves to `Moira`);
+  it would need OSM `place` nodes as the point source.
 
 - **Uzbekistan and Laos's region tier was a district level, not a
   province level.** Both picked up `region: [6]` from the generated

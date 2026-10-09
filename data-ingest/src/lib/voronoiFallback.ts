@@ -1,5 +1,6 @@
 import { Delaunay } from "d3-delaunay";
 import bbox from "@turf/bbox";
+import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import intersect from "@turf/intersect";
 import union from "@turf/union";
 import { featureCollection, polygon as turfPolygon } from "@turf/helpers";
@@ -66,6 +67,27 @@ export function buildCityFallback(
     });
   }
   return candidates;
+}
+
+/** The region-scoped half of the city fallback
+ * (`VORONOI_CITY_FALLBACK_WITHIN_REGIONS`): the same Voronoi tessellation
+ * as `buildCityFallback`, but over just the `points` that fall inside one
+ * real OSM `container` polygon (a Scottish council area, a Northern Irish
+ * district), clipped to that container instead of the country outline. The
+ * region keeps its real internal borders -- a cell never crosses from one
+ * district into the next. A container's cells tile it exactly, so they
+ * replace it; with no point inside, this returns nothing and the caller
+ * keeps the container as the city. */
+export function buildContainerFallback(
+  container: Feature<Polygon | MultiPolygon>,
+  points: Cities500Row[],
+): VoronoiCityCandidate[] {
+  const [minX, minY, maxX, maxY] = bbox(container);
+  const inside = points.filter(
+    ({ point: [x, y] }) =>
+      x >= minX && x <= maxX && y >= minY && y <= maxY && booleanPointInPolygon([x, y], container),
+  );
+  return buildCityFallback(container, inside);
 }
 
 /** One synthesized region: the union of every cities500 point's Voronoi

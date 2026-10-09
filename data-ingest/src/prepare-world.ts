@@ -38,6 +38,7 @@ import {
   selectPrimaryLevels,
   loadPrimaryGeometries,
   detectGapFill,
+  findSuppressedByWholeUnits,
   fetchFinalGeometries,
 } from "./lib/adminLevelDetection.ts";
 import type { PrimaryLevelResult } from "./lib/adminLevelDetection.ts";
@@ -45,8 +46,12 @@ import { buildRegionIndex, assignCityRegion } from "./lib/regionPolygons.ts";
 import { streamCities500 } from "./lib/cities500.ts";
 import type { Cities500Row } from "./lib/cities500.ts";
 import { loadAdmin1Names } from "./lib/admin1Codes.ts";
-import { buildCityFallback, buildRegionFallback } from "./lib/voronoiFallback.ts";
-import { VORONOI_CITY_FALLBACK, VORONOI_REGION_FALLBACK } from "./lib/countryAdminLevels.ts";
+import { buildCityFallback, buildContainerFallback, buildRegionFallback } from "./lib/voronoiFallback.ts";
+import {
+  VORONOI_CITY_FALLBACK,
+  VORONOI_CITY_FALLBACK_WITHIN_REGIONS,
+  VORONOI_REGION_FALLBACK,
+} from "./lib/countryAdminLevels.ts";
 import type { LonLat } from "./lib/geo.ts";
 import type { RegionCandidate } from "./lib/adminBoundaryIndex.ts";
 
@@ -249,6 +254,24 @@ async function main(): Promise<void> {
   let skippedNoGeometry = 0;
   const gapFillByCountryBatch: CityCandidateMeta[][] = [];
 
+  // Region-scoped Voronoi city fallback (VORONOI_CITY_FALLBACK_WITHIN_REGIONS'
+  // doc comment): only the opted-in countries' points are kept, and the
+  // cells are built per container polygon inside the batch loop below,
+  // where the primary geometries are loaded.
+  const withinRegionPoints = new Map<string, Cities500Row[]>();
+  if (VORONOI_CITY_FALLBACK_WITHIN_REGIONS.size > 0) {
+    for await (const row of streamCities500(CITIES500_SOURCE)) {
+      if (!VORONOI_CITY_FALLBACK_WITHIN_REGIONS.has(row.countryCode)) continue;
+      let points = withinRegionPoints.get(row.countryCode);
+      if (!points) {
+        points = [];
+        withinRegionPoints.set(row.countryCode, points);
+      }
+      points.push(row);
+    }
+  }
+  let withinRegionCount = 0;
+
   for (const [batchIndex, batch] of batches.entries()) {
     console.error(
       `  batch ${batchIndex + 1}/${batches.length}: ${batch.countries.size} countries, ${batch.primaryCount.toLocaleString()} primaries`,
@@ -257,16 +280,43 @@ async function main(): Promise<void> {
     const gapFill = detectGapFill(index, primary, primaryGeom, batch.countries, resolveCandidateRegion);
     gapFillByCountryBatch.push(gapFill);
 
+    const suppressed = findSuppressedByWholeUnits(index, primary, primaryGeom, batch.countries, resolveCandidateRegion);
     for (const candidate of index.cityCandidates) {
       if (!batch.primaryIds.has(candidate.id)) continue;
+      if (suppressed.has(candidate.id)) continue;
       const geometry = primaryGeom.byId.get(candidate.id);
       if (!geometry) {
         skippedNoGeometry++;
         continue;
       }
-      const emitted = await emitCity(candidate, geometry);
-      if (emitted) cityCount++;
+      // A container in a within-region fallback region is replaced by its
+      // cells. Emitting it as well, as a backstop, would be worse than no
+      // backstop: at the compressor's max depth a leaf cell on a border
+      // between two cells is won by the candidate covering the largest
+      // share of it, which is always the container (100%) over either
+      // neighbouring cell -- measured as ~5% of random Highland lookups
+      // returning "Highland". The cells tile the container, so nothing is
+      // lost; a container with no point at all is still emitted as itself.
+      const withinRegions = VORONOI_CITY_FALLBACK_WITHIN_REGIONS.get(candidate.country);
+      const points = withinRegionPoints.get(candidate.country);
+      const region = withinRegions && points ? resolveCandidateRegion(candidate) : null;
+      const cells =
+        region && withinRegions!.includes(region) ? buildContainerFallback(geometry, points!) : [];
+      if (cells.length === 0) {
+        const emitted = await emitCity(candidate, geometry);
+        if (emitted) cityCount++;
+      }
+      for (const cell of cells) {
+        const emittedCell = await emitCity(cell, { type: "Feature", properties: {}, geometry: cell.geometry });
+        if (emittedCell) {
+          cityCount++;
+          withinRegionCount++;
+        }
+      }
     }
+  }
+  if (withinRegionCount > 0) {
+    console.error(`Voronoi within-region fallback: ${withinRegionCount.toLocaleString()} synthesized cities emitted`);
   }
 
   console.error("Pass 3/4: gap-fill geometry...");

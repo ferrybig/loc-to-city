@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import area from "@turf/area";
 import type { Feature, Polygon } from "geojson";
-import { buildCityFallback, buildRegionFallback } from "../src/lib/voronoiFallback.ts";
+import { buildCityFallback, buildContainerFallback, buildRegionFallback } from "../src/lib/voronoiFallback.ts";
 import type { Cities500Row } from "../src/lib/cities500.ts";
 
 function square(minX: number, minY: number, maxX: number, maxY: number): Feature<Polygon> {
@@ -157,4 +157,29 @@ test("buildRegionFallback: a point with no admin1 code at all is excluded from e
 test("buildRegionFallback: no points produces no candidates", () => {
   const country = square(0, 0, 10, 10);
   assert.deepEqual(buildRegionFallback(country, [], new Map()), []);
+});
+
+test("buildContainerFallback: only points inside the container get cells, and no cell leaves it", () => {
+  const container = square(0, 0, 10, 10);
+  const candidates = buildContainerFallback(container, [
+    point("1", "West", 2, 5),
+    point("2", "East", 8, 5),
+    point("3", "Outside", 15, 5), // nearer to East than West from outside, but not in the container
+  ]);
+  assert.deepEqual(candidates.map((c) => c.name).sort(), ["East", "West"]);
+  const containerArea = area(container);
+  let total = 0;
+  for (const c of candidates) {
+    const cell: Feature<Polygon> = { type: "Feature", properties: {}, geometry: c.geometry as Polygon };
+    total += area(cell);
+    assert.ok(booleanPointInPolygon(c.repPoint, cell), `${c.name}'s own site lies in its cell`);
+  }
+  // The cells tile the container exactly: the outside point didn't take any of it.
+  assert.ok(Math.abs(total - containerArea) / containerArea < 0.001);
+  const west = candidates.find((c) => c.name === "West")!;
+  assert.ok(!booleanPointInPolygon([8, 5], { type: "Feature", properties: {}, geometry: west.geometry }));
+});
+
+test("buildContainerFallback: a container with no point yields nothing (it stays as its own city)", () => {
+  assert.deepEqual(buildContainerFallback(square(0, 0, 10, 10), [point("1", "Far", 50, 50)]), []);
 });

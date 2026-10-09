@@ -139,6 +139,9 @@ export function selectPrimaryLevels(
       // level in the same list is intentionally excluded from
       // primaryIds, even for a candidate that matches it exactly.
       if (overrideLevels[0] === candidate.level) primaryIds.add(candidate.id);
+      // A whole unit sits at a *later* (gap-fill) level in the list, so the
+      // line above doesn't catch it -- promoted by name instead.
+      else if (isWholeUnit(candidate, region!)) primaryIds.add(candidate.id);
     } else if (primaryLevelByCountry.get(candidate.country) === candidate.level) {
       primaryIds.add(candidate.id);
     }
@@ -149,6 +152,11 @@ export function selectPrimaryLevels(
       `${primaryIds.size} primary cities`,
   );
   return { primaryLevelByCountry, primaryIds };
+}
+
+function isWholeUnit(candidate: CityCandidateMeta, region: string): boolean {
+  const unit = COUNTRY_ADMIN_LEVELS[candidate.country]?.wholeUnits?.[region];
+  return !!unit && unit.level === candidate.level && candidate.name !== undefined && unit.names.includes(candidate.name);
 }
 
 export interface PrimaryGeometryItem {
@@ -305,4 +313,52 @@ export async function* fetchFinalGeometries(
   for await (const { id, feature } of streamMergedAdminBoundaries(files)) {
     if (ids.has(id)) yield { id, feature: feature as Feature<Polygon | MultiPolygon> };
   }
+}
+
+/** Ids of primary candidates to drop because a `wholeUnits` relation
+ * contains them: every primary candidate of the same country, at any other
+ * level, whose representative point lies inside a promoted whole unit
+ * (`selectPrimaryLevels` put the unit itself in `primaryIds`). Needs the
+ * batch's loaded primary geometry for the unit outline, so it runs per
+ * batch, after `loadPrimaryGeometries`. `countries` restricts the scan to
+ * the batch, same as `detectGapFill`. */
+export function findSuppressedByWholeUnits(
+  index: AdminBoundaryIndex,
+  primary: PrimaryLevelResult,
+  primaryGeom: PrimaryGeometryIndex,
+  countries?: ReadonlySet<string> | undefined,
+  resolveRegion?: (candidate: CityCandidateMeta) => string | null,
+): Set<string> {
+  const suppressed = new Set<string>();
+  if (!resolveRegion) return suppressed;
+
+  const units: { candidate: CityCandidateMeta; feature: Feature<Polygon | MultiPolygon> }[] = [];
+  for (const candidate of index.cityCandidates) {
+    if (countries && !countries.has(candidate.country)) continue;
+    if (!COUNTRY_ADMIN_LEVELS[candidate.country]?.wholeUnits) continue;
+    if (!primary.primaryIds.has(candidate.id)) continue;
+    const region = resolveRegion(candidate);
+    if (!region || !isWholeUnit(candidate, region)) continue;
+    const feature = primaryGeom.byId.get(candidate.id);
+    if (feature) units.push({ candidate, feature });
+  }
+  if (units.length === 0) return suppressed;
+
+  for (const candidate of index.cityCandidates) {
+    if (!primary.primaryIds.has(candidate.id)) continue;
+    for (const unit of units) {
+      if (unit.candidate.country !== candidate.country || unit.candidate.id === candidate.id) continue;
+      if (unit.candidate.level === candidate.level) continue;
+      const [x, y] = candidate.repPoint;
+      const [minX, minY, maxX, maxY] = unit.candidate.bbox;
+      if (x < minX || x > maxX || y < minY || y > maxY) continue;
+      if (booleanPointInPolygon(candidate.repPoint, unit.feature)) {
+        suppressed.add(candidate.id);
+        break;
+      }
+    }
+  }
+
+  console.error(`findSuppressedByWholeUnits: ${units.length} whole units, ${suppressed.size} sub-units suppressed`);
+  return suppressed;
 }
