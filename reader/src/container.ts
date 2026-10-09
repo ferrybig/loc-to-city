@@ -1,7 +1,7 @@
 import { type CGeoDataDirectory, parseDirectory } from "./directory.ts";
 import { CGeoDataFormatError } from "./errors.ts";
 import { type CGeoDataHeader, parseHeader } from "./header.ts";
-import type { RandomAccessSource } from "./source.ts";
+import type { ByteSource } from "./source.ts";
 import { IncompleteBufferError } from "./varint.ts";
 
 /**
@@ -12,13 +12,13 @@ import { IncompleteBufferError } from "./varint.ts";
  * probe read and grows it until both parse cleanly -- never reading more of
  * the file than these two small, fixed-at-load-time sections actually need.
  */
-export function readHeaderAndDirectory(source: RandomAccessSource): {
+export async function readHeaderAndDirectory(source: ByteSource): Promise<{
 	header: CGeoDataHeader;
 	directory: CGeoDataDirectory;
-} {
+}> {
 	let size = Math.min(1024, source.size);
 	for (;;) {
-		const buf = source.readSync(0, size);
+		const buf = await source.read(0, size);
 		try {
 			const header = parseHeader(buf);
 			checkDirectoryFits(header, source.size);

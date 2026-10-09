@@ -1,7 +1,9 @@
 import { CGeoDataFormatError } from "./errors.ts";
-import type { RandomAccessSource } from "./source.ts";
+import { type Inflater, inflateBlock } from "./inflate.ts";
+import type { ByteSource } from "./source.ts";
 import { IncompleteBufferError, readVarint, readVarintList } from "./varint.ts";
-import { safeInflate } from "./zlibUtil.ts";
+
+const utf8 = new TextDecoder();
 
 export interface PlaceTableInfo {
 	countryCount: number;
@@ -35,15 +37,15 @@ function prefixSum(values: number[]): number[] {
 /** Parses Section 7.2's uncompressed prefix (counts + block_lengths),
  * growing the read like readHeaderAndDirectory does, since its size depends
  * on country_count/region_counts which aren't known up front. */
-export function parsePlaceTable(
-	source: RandomAccessSource,
+export async function parsePlaceTable(
+	source: ByteSource,
 	placeTableStart: number,
 	placeTableLength: number,
 	keyframeExp: number,
-): PlaceTableInfo {
+): Promise<PlaceTableInfo> {
 	let size = Math.min(1024, placeTableLength);
 	for (;;) {
-		const buf = source.readSync(placeTableStart, size);
+		const buf = await source.read(placeTableStart, size);
 		try {
 			return parsePrefix(buf, placeTableStart, placeTableLength, keyframeExp);
 		} catch (err) {
@@ -192,43 +194,54 @@ export function resolveIdentifier(
 /** Inflates one whole name block (Section 7.3) and splits it into its
  * entries, each split on `|` (Section 7.4). For walking many consecutive
  * ids this is one inflate per block instead of one per id. */
-export function readNameBlock(
-	source: RandomAccessSource,
+export async function readNameBlock(
+	source: ByteSource,
 	info: PlaceTableInfo,
 	blockIndex: number,
-): string[][] {
+	inflater: Inflater,
+	/** Where the CPU-bound part runs; see `TurnQueue`. */
+	decode: <T>(work: () => Promise<T>) => Promise<T> = (work) => work(),
+): Promise<string[][]> {
 	const { blockOffsets, blockLengths } = info;
 	if (blockIndex < 0 || blockIndex >= blockOffsets.length) {
 		throw new RangeError(
 			`name block ${blockIndex} is out of range for this file (0 <= block < ${blockOffsets.length})`,
 		);
 	}
-	const inflated = safeInflate(
-		source.readSync(blockOffsets[blockIndex]!, blockLengths[blockIndex]!),
+	const compressed = await source.read(
+		blockOffsets[blockIndex]!,
+		blockLengths[blockIndex]!,
 	);
-	const entries: string[][] = [];
-	let start = 0;
-	for (;;) {
-		const end = inflated.indexOf(0, start);
-		if (end === -1) break;
-		entries.push(inflated.toString("utf8", start, end).split("|"));
-		start = end + 1;
-	}
-	if (start !== inflated.length) {
+	return decode(async () =>
+		splitNameBlock(await inflateBlock(inflater, compressed), blockIndex),
+	);
+}
+
+/** An inflated name block (Section 7.3) split into its entries, each
+ * split on `|` (Section 7.4). */
+function splitNameBlock(inflated: Uint8Array, blockIndex: number): string[][] {
+	const end = inflated.lastIndexOf(0) + 1;
+	if (end !== inflated.length) {
 		throw new CGeoDataFormatError(
-			`name block ${blockIndex} has ${inflated.length - start} trailing bytes after its last NUL terminator`,
+			`name block ${blockIndex} has ${inflated.length - end} trailing bytes after its last NUL terminator`,
 		);
 	}
-	return entries;
+	if (end === 0) return [];
+	// One decode for the whole block: NUL and `|` are single bytes that
+	// never occur inside a multi-byte UTF-8 sequence, so splitting the
+	// decoded text finds the same boundaries splitting the bytes would.
+	const entries = utf8.decode(inflated.subarray(0, end - 1)).split("\0");
+	return entries.map((entry) => entry.split("|"));
 }
 
 /** Recovers a place's name entry (Section 7.4, split on `|`) by inflating
  * only the one name block (Section 7.3) that contains it. */
-export function readNameEntry(
-	source: RandomAccessSource,
+export async function readNameEntry(
+	source: ByteSource,
 	info: PlaceTableInfo,
 	globalId: number,
-): string[] {
+	inflater: Inflater,
+): Promise<string[]> {
 	const { keyframeExp, totalPlaces, blockOffsets, blockLengths } = info;
 	if (globalId < 0 || globalId >= totalPlaces) {
 		throw new RangeError(
@@ -239,11 +252,11 @@ export function readNameEntry(
 	const blockIndex = Math.floor(globalId / blockSize);
 	const withinBlock = globalId - blockIndex * blockSize;
 
-	const compressed = source.readSync(
+	const compressed = await source.read(
 		blockOffsets[blockIndex]!,
 		blockLengths[blockIndex]!,
 	);
-	const inflated = safeInflate(compressed);
+	const inflated = await inflateBlock(inflater, compressed);
 
 	let start = 0;
 	for (let i = 0; i < withinBlock; i++) {
@@ -261,5 +274,5 @@ export function readNameEntry(
 			`name entry for place ${globalId} is missing its NUL terminator`,
 		);
 	}
-	return inflated.toString("utf8", start, end).split("|");
+	return utf8.decode(inflated.subarray(start, end)).split("|");
 }

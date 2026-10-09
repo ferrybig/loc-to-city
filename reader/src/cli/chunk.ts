@@ -21,7 +21,7 @@ region, country. A record that resolves to no place has "-" columns.
 An empty chunk prints just the header.
 
   --json   the header as one JSON object, then one object per record`,
-	run(argv) {
+	async run(argv) {
 		const { values, positionals } = parse(argv, {
 			json: { type: "boolean", default: false },
 		});
@@ -31,9 +31,9 @@ An empty chunk prints just the header.
 			throw new UsageError(`unexpected argument ${JSON.stringify(extra[0])}`);
 		const index = parseId(indexArg, "index");
 
-		const reader = openReader(file);
+		const reader = await openReader(file);
 		try {
-			const records = reader.chunk(index); // also range-checks the index
+			const records = await reader.chunk(index); // also range-checks the index
 			const box = reader.chunkBoundingBox(index);
 			const { width } = reader.header;
 			const header = {
@@ -47,7 +47,7 @@ An empty chunk prints just the header.
 			};
 			if (values.json) {
 				writeLine(JSON.stringify(header));
-				for (const record of reader.chunkRecords(index))
+				for await (const record of reader.chunkRecords(index))
 					writeLine(JSON.stringify(record));
 				return 0;
 			}
@@ -55,7 +55,7 @@ An empty chunk prints just the header.
 				`chunk ${index}  (col ${header.col}, row ${header.row})  lat ${box.minLat}..${box.maxLat}  lon ${box.minLon}..${box.maxLon}  ` +
 					`${header.compressedBytes} bytes, ${header.paletteSize} palette entries, ${header.recordCount} records`,
 			);
-			for (const {
+			for await (const {
 				code,
 				depth,
 				boundingBox: cell,
@@ -75,7 +75,7 @@ An empty chunk prints just the header.
 			}
 			return 0;
 		} finally {
-			reader.close();
+			await reader.close();
 		}
 	},
 };

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
-import { openSource, readHeaderAndDirectory, parsePlaceTable, readNameEntry, resolveIdentifier } from "@loc-to-city/reader";
+import { toSource, readHeaderAndDirectory, parsePlaceTable, readNameEntry, streamInflater, resolveIdentifier } from "@loc-to-city/reader";
 import { parseChunkSelection } from "../src/chunkSelection.ts";
 import { buildCGeoDataFile } from "../src/build.ts";
 import { buildCGeoDataFileParallel } from "../src/buildParallel.ts";
@@ -83,12 +83,12 @@ const options = {
 const CHUNK_SQUARE_1 = 10;
 const CHUNK_SQUARE_2 = 15;
 
-test("onlyChunks builds just the selected chunk and leaves the other empty", () => {
+test("onlyChunks builds just the selected chunk and leaves the other empty", async () => {
   const all = buildCGeoDataFile(hierarchy, cities, options);
   const one = buildCGeoDataFile(hierarchy, cities, { ...options, onlyChunks: new Set([CHUNK_SQUARE_1]) });
 
-  const allDir = readHeaderAndDirectory(openSource(all.bytes)).directory;
-  const oneDir = readHeaderAndDirectory(openSource(one.bytes)).directory;
+  const allDir = (await readHeaderAndDirectory(toSource(all.bytes))).directory;
+  const oneDir = (await readHeaderAndDirectory(toSource(one.bytes))).directory;
 
   // Both squares are real chunks in a full build...
   assert.ok(allDir.chunkLengths[CHUNK_SQUARE_1]! > 0);
@@ -101,7 +101,7 @@ test("onlyChunks builds just the selected chunk and leaves the other empty", () 
   assert.equal(all.stats.nonEmptyChunkCount, 2);
 });
 
-test("an empty onlyChunks still writes a complete, readable place table", () => {
+test("an empty onlyChunks still writes a complete, readable place table", async () => {
   const { bytes, stats } = buildCGeoDataFile(hierarchy, cities, { ...options, onlyChunks: new Set() });
 
   assert.equal(stats.nonEmptyChunkCount, 0);
@@ -112,14 +112,14 @@ test("an empty onlyChunks still writes a complete, readable place table", () => 
   assert.equal(stats.regionCount, 1);
   assert.equal(stats.cityCount, 1);
 
-  const source = openSource(bytes);
-  const { header, directory } = readHeaderAndDirectory(source);
+  const source = toSource(bytes);
+  const { header, directory } = await readHeaderAndDirectory(source);
   assert.ok(directory.chunkLengths.every((length) => length === 0), "every chunk should be empty");
 
-  const placeTable = parsePlaceTable(source, directory.placeTableStart, directory.placeTableLength, header.keyframeExp);
-  assert.deepEqual(readNameEntry(source, placeTable, 0), ["Parallelland"]);
-  assert.deepEqual(readNameEntry(source, placeTable, 1), ["Zone"]);
-  assert.deepEqual(readNameEntry(source, placeTable, 2), ["Twins"]);
+  const placeTable = await parsePlaceTable(source, directory.placeTableStart, directory.placeTableLength, header.keyframeExp);
+  assert.deepEqual(await readNameEntry(source, placeTable, 0, streamInflater), ["Parallelland"]);
+  assert.deepEqual(await readNameEntry(source, placeTable, 1, streamInflater), ["Zone"]);
+  assert.deepEqual(await readNameEntry(source, placeTable, 2, streamInflater), ["Twins"]);
   assert.deepEqual(resolveIdentifier(placeTable, 2), { level: "city", countryId: 0, regionId: 0, cityId: 0 });
 });
 

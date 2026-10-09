@@ -1,9 +1,9 @@
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { APPENDIX_A_BYTES } from "./fixtures/appendixA.ts";
 

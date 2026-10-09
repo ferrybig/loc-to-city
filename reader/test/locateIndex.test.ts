@@ -7,15 +7,15 @@ import { fileURLToPath } from "node:url";
 import {
 	buildLocateIndex,
 	buildSearchIndex,
-	CGeoDataReader,
 	type CGeoDataHeader,
+	CGeoDataReader,
 	decodeLocateEntry,
 	encodeLocateEntry,
 	LocateIndex,
 	locateEntryWidth,
-	locateIndexPathFor,
 } from "../src/index.ts";
 import { type CellList, representativeCell } from "../src/locateIndex.ts";
+import { locateIndexPathFor, openFile } from "../src/node.ts";
 import { APPENDIX_A_BYTES } from "./fixtures/appendixA.ts";
 
 function hexBytes(hex: string): Uint8Array {
@@ -46,46 +46,46 @@ function referenceFnv1a64(data: Uint8Array): bigint {
 	return h;
 }
 
-test("buildLocateIndex: reproduces the Appendix C.8 file byte for byte", () => {
-	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
-	assert.deepEqual(buildLocateIndex(reader), APPENDIX_C_BYTES);
-	reader.close();
+test("buildLocateIndex: reproduces the Appendix C.8 file byte for byte", async () => {
+	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
+	assert.deepEqual(await buildLocateIndex(reader), APPENDIX_C_BYTES);
+	await reader.close();
 });
 
-test("prefixChecksum: FNV-1a of everything before the first chunk (C.8.1)", () => {
-	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
-	assert.equal(reader.prefixChecksum(), 0x334bf7a76cac66ean);
+test("prefixChecksum: FNV-1a of everything before the first chunk (C.8.1)", async () => {
+	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
+	assert.equal(await reader.prefixChecksum(), 0x334bf7a76cac66ean);
 	assert.equal(
-		reader.prefixChecksum(),
+		await reader.prefixChecksum(),
 		referenceFnv1a64(APPENDIX_A_BYTES.subarray(0, 131)),
 	);
-	reader.close();
+	await reader.close();
 });
 
-test("locate: Appendix C.8's coordinates, with and without the index", () => {
+test("locate: Appendix C.8's coordinates, with and without the index", async () => {
 	const noGeometry = [1, 3, 4, 6]; // België, Antwerpen (region), Amsterdam, Antwerpen (city)
 	for (const withIndex of [false, true]) {
-		const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
-		if (withIndex) reader.useLocateIndex(APPENDIX_C_BYTES);
-		assert.equal(reader.hasLocateIndex, withIndex);
+		const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
+		if (withIndex) await reader.useLocateIndex(APPENDIX_C_BYTES);
+		assert.equal(await reader.hasLocateIndex(), withIndex);
 		// C.8.4: Nederland has no records of its own; its area is Noord-Holland's.
 		for (const id of [0, 2]) {
-			assert.deepEqual(reader.locate(id), {
+			assert.deepEqual(await reader.locate(id), {
 				lat: 33.75,
 				lon: 67.5,
 				boundingBox: { minLon: 45, maxLon: 90, minLat: 22.5, maxLat: 45 },
 			});
 		}
 		// C.8.3: the median falls in a gap and is moved to the lower row.
-		assert.deepEqual(reader.locate(5), {
+		assert.deepEqual(await reader.locate(5), {
 			lat: 11.25,
 			lon: 112.5,
 			boundingBox: { minLon: 90, maxLon: 135, minLat: 0, maxLat: 22.5 },
 		});
 		for (const id of noGeometry)
-			assert.equal(reader.locate(id), null, `id ${id}`);
-		assert.throws(() => reader.locate(7), RangeError);
-		reader.close();
+			assert.equal(await reader.locate(id), null, `id ${id}`);
+		await assert.rejects(async () => await reader.locate(7), RangeError);
+		await reader.close();
 	}
 });
 
@@ -328,53 +328,62 @@ test("representativeCell: the result is in the area and doesn't depend on record
 
 // ── LocateIndex file (Sections C.4, C.6) ─────────────────────────────────────
 
-test("LocateIndex.open: reads the header and entries of the C.8 file", () => {
-	const index = LocateIndex.open(APPENDIX_C_BYTES);
+test("LocateIndex.open: reads the header and entries of the C.8 file", async () => {
+	const index = await LocateIndex.open(APPENDIX_C_BYTES);
 	assert.equal(index.sourceChecksum, 0x334bf7a76cac66ean);
 	assert.equal(index.entryWidth, 1);
 	assert.equal(index.placeCount, 7);
 	assert.deepEqual(
-		[0, 1, 2, 3, 4, 5, 6].map((id) => index.entry(id)),
+		await Promise.all([0, 1, 2, 3, 4, 5, 6].map((id) => index.entry(id))),
 		[0x73, 0, 0x73, 0, 0, 0x74, 0],
 	);
-	assert.throws(() => index.entry(7), RangeError);
+	await assert.rejects(async () => await index.entry(7), RangeError);
 });
 
-test("LocateIndex.open: rejects malformed files", () => {
-	assert.throws(() => LocateIndex.open(new Uint8Array(5)), /too short/);
-	assert.throws(
-		() => LocateIndex.open(new Uint8Array(40)),
+test("LocateIndex.open: rejects malformed files", async () => {
+	await assert.rejects(
+		async () => await LocateIndex.open(new Uint8Array(5)),
+		/too short/,
+	);
+	await assert.rejects(
+		async () => await LocateIndex.open(new Uint8Array(40)),
 		/wrong magic bytes/,
 	);
-	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
-	assert.throws(
-		() => LocateIndex.open(buildSearchIndex(reader)),
+	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
+	await assert.rejects(
+		async () => await LocateIndex.open(await buildSearchIndex(reader)),
 		/kind 1, expected 2/,
 	);
-	reader.close();
-	assert.throws(
-		() => LocateIndex.open(APPENDIX_C_BYTES.subarray(0, 25)),
+	await reader.close();
+	await assert.rejects(
+		async () => await LocateIndex.open(APPENDIX_C_BYTES.subarray(0, 25)),
 		/header implies 26/,
 	);
 	const wide = APPENDIX_C_BYTES.slice();
 	wide[17] = 7; // entry_width
-	assert.throws(() => LocateIndex.open(wide), /entry width 7/);
+	await assert.rejects(
+		async () => await LocateIndex.open(wide),
+		/entry width 7/,
+	);
 });
 
-test("useLocateIndex: rejects an index with the wrong checksum, place count or width", () => {
-	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
+test("useLocateIndex: rejects an index with the wrong checksum, place count or width", async () => {
+	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
 	const badChecksum = APPENDIX_C_BYTES.slice();
 	badChecksum[9]! ^= 0xff; // first checksum byte, after "CGEODATA" + version 0x20
-	assert.throws(() => reader.useLocateIndex(badChecksum), /checksum mismatch/);
-	assert.equal(reader.hasLocateIndex, false);
+	await assert.rejects(
+		async () => await reader.useLocateIndex(badChecksum),
+		/checksum mismatch/,
+	);
+	assert.equal(await reader.hasLocateIndex(), false);
 
 	const fewer = Uint8Array.from([
 		...APPENDIX_C_BYTES.subarray(0, 18),
 		6,
 		...APPENDIX_C_BYTES.subarray(19, 25),
 	]);
-	assert.throws(
-		() => reader.useLocateIndex(fewer),
+	await assert.rejects(
+		async () => await reader.useLocateIndex(fewer),
 		/covers 6 places, but this file has 7/,
 	);
 
@@ -384,14 +393,14 @@ test("useLocateIndex: rejects an index with the wrong checksum, place count or w
 		7,
 		...[...APPENDIX_C_BYTES.subarray(19)].flatMap((b) => [b, 0]),
 	]);
-	assert.throws(
-		() => reader.useLocateIndex(wider),
+	await assert.rejects(
+		async () => await reader.useLocateIndex(wider),
 		/2-byte entries, but this file's grid needs 1/,
 	);
-	reader.close();
+	await reader.close();
 });
 
-test("open: picks up <name>.locate-index.bin next to the file; a stale one throws on locate", () => {
+test("open: picks up <name>.locate-index.bin next to the file; a stale one throws on locate", async () => {
 	const dir = mkdtempSync(path.join(tmpdir(), "cgeodata-locate-index-"));
 	const binPath = path.join(dir, "fixture.bin");
 	writeFileSync(binPath, APPENDIX_A_BYTES);
@@ -400,34 +409,34 @@ test("open: picks up <name>.locate-index.bin next to the file; a stale one throw
 		path.join(dir, "fixture.locate-index.bin"),
 	);
 
-	const without = CGeoDataReader.open(binPath);
-	assert.equal(without.hasLocateIndex, false);
-	without.close();
+	const without = await openFile(binPath);
+	assert.equal(await without.hasLocateIndex(), false);
+	await without.close();
 
 	writeFileSync(locateIndexPathFor(binPath), APPENDIX_C_BYTES);
-	const withIndex = CGeoDataReader.open(binPath);
-	assert.equal(withIndex.hasLocateIndex, true);
-	assert.equal(withIndex.locate(5)?.lat, 11.25);
-	withIndex.close();
+	const withIndex = await openFile(binPath);
+	assert.equal(await withIndex.hasLocateIndex(), true);
+	assert.equal((await withIndex.locate(5))?.lat, 11.25);
+	await withIndex.close();
 
 	const stale = APPENDIX_C_BYTES.slice();
 	stale[9]! ^= 0xff;
 	writeFileSync(locateIndexPathFor(binPath), stale);
-	const reader = CGeoDataReader.open(binPath); // opening alone doesn't touch it
-	assert.throws(
-		() => reader.locate(5),
+	const reader = await openFile(binPath); // opening alone doesn't touch it
+	await assert.rejects(
+		async () => await reader.locate(5),
 		/fixture\.locate-index\.bin: .*checksum mismatch/,
 	);
-	assert.throws(() => reader.locate(5), /checksum mismatch/); // every time
-	reader.useLocateIndex(undefined); // opting out still works
-	assert.equal(reader.locate(5)?.lat, 11.25);
-	reader.close();
+	await assert.rejects(async () => await reader.locate(5), /checksum mismatch/); // every time
+	await reader.useLocateIndex(undefined); // opting out still works
+	assert.equal((await reader.locate(5))?.lat, 11.25);
+	await reader.close();
 });
 
 // ── Reader helpers ───────────────────────────────────────────────────────────
 
-test("subtreeIdRanges: a place, then its children's ranges", () => {
-	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
+test("subtreeIdRanges: a place, then its children's ranges", async () => {
+	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
 	assert.deepEqual(reader.subtreeIdRanges(0), [
 		[0, 1],
 		[2, 3],
@@ -444,14 +453,17 @@ test("subtreeIdRanges: a place, then its children's ranges", () => {
 	]);
 	assert.deepEqual(reader.subtreeIdRanges(5), [[5, 6]]);
 	assert.throws(() => reader.subtreeIdRanges(7), RangeError);
-	reader.close();
+	await reader.close();
 });
 
-test("chunk: cache false parses the same records without caching them", () => {
-	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
-	assert.deepEqual(reader.chunk(3, { cache: false }), reader.chunk(3));
-	assert.equal(reader.chunk(0, { cache: false }), undefined);
-	reader.close();
+test("chunk: cache false parses the same records without caching them", async () => {
+	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
+	assert.deepEqual(
+		await reader.chunk(3, { cache: false }),
+		await reader.chunk(3),
+	);
+	assert.equal(await reader.chunk(0, { cache: false }), undefined);
+	await reader.close();
 });
 
 // ── Real data ────────────────────────────────────────────────────────────────
@@ -462,24 +474,24 @@ const ZH_BIN = fileURLToPath(
 	new URL("../../data/03-final/zuid-holland.bin", import.meta.url),
 );
 if (existsSync(ZH_BIN)) {
-	test("zuid-holland.bin: index and scan agree, in any batch size, and every point is inside its place", () => {
-		const scan = CGeoDataReader.open(ZH_BIN);
-		scan.useLocateIndex(undefined);
-		const bytes = buildLocateIndex(scan);
-		assert.deepEqual(buildLocateIndex(scan, { batchRecords: 1 }), bytes);
-		const indexed = CGeoDataReader.open(ZH_BIN);
-		indexed.useLocateIndex(bytes);
-		assert.equal(LocateIndex.open(bytes).entryWidth, 5);
+	test("zuid-holland.bin: index and scan agree, in any batch size, and every point is inside its place", async () => {
+		const scan = await openFile(ZH_BIN);
+		await scan.useLocateIndex(undefined);
+		const bytes = await buildLocateIndex(scan);
+		assert.deepEqual(await buildLocateIndex(scan, { batchRecords: 1 }), bytes);
+		const indexed = await openFile(ZH_BIN);
+		await indexed.useLocateIndex(bytes);
+		assert.equal((await LocateIndex.open(bytes)).entryWidth, 5);
 
 		const { countries, regions, cities } = scan.placeCounts;
 		let located = 0;
 		for (let id = 0; id < countries + regions + cities; id++) {
-			const point = indexed.locate(id);
-			assert.deepEqual(point, scan.locate(id), `id ${id}`);
+			const point = await indexed.locate(id);
+			assert.deepEqual(point, await scan.locate(id), `id ${id}`);
 			if (!point) continue;
 			located++;
-			const place = indexed.place(id);
-			const found = indexed.query(point.lat, point.lon);
+			const place = await indexed.place(id);
+			const found = await indexed.query(point.lat, point.lon);
 			const names = {
 				country: found.country,
 				region: found.region,
@@ -495,7 +507,7 @@ if (existsSync(ZH_BIN)) {
 			located > (countries + regions + cities) / 2,
 			`only ${located} places located`,
 		);
-		scan.close();
-		indexed.close();
+		await scan.close();
+		await indexed.close();
 	});
 }

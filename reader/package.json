@@ -6,7 +6,8 @@
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
 	"exports": {
-		".": "./dist/index.js"
+		".": "./dist/index.js",
+		"./node": "./dist/node.js"
 	},
 	"bin": {
 		"cgeodata": "./dist/cli.js"

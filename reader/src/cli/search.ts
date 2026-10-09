@@ -9,6 +9,7 @@ import {
 	parseLevel,
 	resolveCountry,
 	UsageError,
+	useIndexFile,
 	writeLine,
 } from "./shared.ts";
 
@@ -45,7 +46,7 @@ grep's convention.
   --no-index     scan every city even if a search index exists -- the
                  baseline an index is measured against
   --json         one JSON object per match instead of the text form`,
-	run(argv) {
+	async run(argv) {
 		const { values, positionals } = parse(argv, {
 			level: { type: "string" },
 			country: { type: "string" },
@@ -71,12 +72,12 @@ grep's convention.
 			);
 		}
 
-		const reader = openReader(file);
+		const reader = await openReader(file);
 		try {
 			const country =
 				values.country === undefined
 					? undefined
-					: resolveCountry(reader, values.country);
+					: await resolveCountry(reader, values.country);
 			const searchOptions = {
 				...(level !== undefined ? { level } : {}),
 				...(country !== undefined ? { country } : {}),
@@ -84,23 +85,19 @@ grep's convention.
 				sort: values.sort,
 			};
 
-			if (values["no-index"]) reader.useSearchIndex(undefined);
-			if (values.index !== undefined) {
-				try {
-					reader.useSearchIndex(values.index);
-				} catch (error) {
-					throw new Error(
-						`--index ${values.index}: ${(error as Error).message}`,
-					);
-				}
-			}
+			if (values["no-index"]) await reader.useSearchIndex(undefined);
+			if (values.index !== undefined)
+				await useIndexFile(
+					(index) => reader.useSearchIndex(index),
+					values.index,
+				);
 
 			let matched = 0;
-			for (const place of reader.search(text, searchOptions)) {
+			for await (const place of reader.search(text, searchOptions)) {
 				matched++;
 				if (values.json) {
 					if (values.locate) {
-						const pos = reader.locate(place.id);
+						const pos = await reader.locate(place.id);
 						writeLine(
 							JSON.stringify(
 								pos ? { ...place, lat: pos.lat, lon: pos.lon } : place,
@@ -110,7 +107,7 @@ grep's convention.
 						writeLine(JSON.stringify(place));
 					}
 				} else if (values.locate) {
-					const pos = reader.locate(place.id);
+					const pos = await reader.locate(place.id);
 					if (pos) {
 						const p = coordPrecision(pos.boundingBox);
 						writeLine(
@@ -125,7 +122,7 @@ grep's convention.
 			}
 			return matched > 0 ? EXIT_OK : EXIT_NO_MATCH;
 		} finally {
-			reader.close();
+			await reader.close();
 		}
 	},
 };

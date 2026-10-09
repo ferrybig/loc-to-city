@@ -12,7 +12,7 @@ straight into the compressor's --only-chunks.
 
   --top N  how many of the largest chunks to list (0 for none)
   --json   one JSON object instead of the readable form`,
-	run(argv) {
+	async run(argv) {
 		const { values, positionals } = parse(argv, {
 			top: { type: "string", default: "10" },
 			json: { type: "boolean", default: false },
@@ -23,7 +23,7 @@ straight into the compressor's --only-chunks.
 				`--top must be a non-negative integer, not ${JSON.stringify(values.top)}`,
 			);
 
-		const reader = openReader(positionals[0]);
+		const reader = await openReader(positionals[0]);
 		try {
 			const { header, directory } = reader;
 			const chunkLengths = directory.chunkLengths;
@@ -89,7 +89,7 @@ straight into the compressor's --only-chunks.
 			for (const line of lines) writeLine(line);
 			return 0;
 		} finally {
-			reader.close();
+			await reader.close();
 		}
 	},
 };

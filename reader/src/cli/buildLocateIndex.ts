@@ -22,7 +22,7 @@ from that path) use it automatically; elsewhere, pass it with
 read of one entry.
 
   --output F  write to F instead of stdout`,
-	run(argv) {
+	async run(argv) {
 		const { values, positionals } = parse(argv, {
 			output: { type: "string" },
 		});
@@ -30,7 +30,7 @@ read of one entry.
 		if (extra.length > 0)
 			throw new UsageError(`unexpected argument ${JSON.stringify(extra[0])}`);
 
-		const reader = openReader(file);
+		const reader = await openReader(file);
 		const { countries, regions, cities } = reader.placeCounts;
 		process.stderr.write(
 			`building locate index over ${countries + regions + cities} places...\n`,
@@ -38,9 +38,9 @@ read of one entry.
 		const t0 = performance.now();
 		let bytes: Uint8Array;
 		try {
-			bytes = buildLocateIndex(reader);
+			bytes = await buildLocateIndex(reader);
 		} finally {
-			reader.close();
+			await reader.close();
 		}
 		process.stderr.write(
 			`done in ${((performance.now() - t0) / 1000).toFixed(1)} s, ${(bytes.length / 1024 / 1024).toFixed(1)} MiB\n`,

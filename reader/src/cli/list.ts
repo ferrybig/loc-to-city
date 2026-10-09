@@ -12,12 +12,12 @@ import {
 
 const DEPTH: Record<PlaceLevel, number> = { country: 0, region: 1, city: 2 };
 
-function printTree(
+async function printTree(
 	reader: CGeoDataReader,
 	place: Place,
 	deepest: PlaceLevel,
 	json: boolean,
-): void {
+): Promise<void> {
 	const depth = DEPTH[place.level];
 	writeLine(
 		json
@@ -29,7 +29,8 @@ function printTree(
 		place.level === "country"
 			? reader.places({ level: "region", country: place.id })
 			: reader.places({ level: "city", region: place.id });
-	for (const child of children) printTree(reader, child, deepest, json);
+	for await (const child of children)
+		await printTree(reader, child, deepest, json);
 }
 
 export const list: Command = {
@@ -47,7 +48,7 @@ a column that doesn't apply is "-".
   --tree       print the hierarchy indented instead of flat, down to
                --level (default with --tree: city); lines are "id<TAB>names"
   --json       one JSON object per place instead of the text form`,
-	run(argv) {
+	async run(argv) {
 		const { values, positionals } = parse(argv, {
 			level: { type: "string" },
 			country: { type: "string" },
@@ -57,27 +58,28 @@ a column that doesn't apply is "-".
 		const level =
 			parseLevel(values.level) ?? (values.tree ? "city" : "country");
 
-		const reader = openReader(positionals[0]);
+		const reader = await openReader(positionals[0]);
 		try {
 			const country =
 				values.country === undefined
 					? undefined
-					: resolveCountry(reader, values.country);
+					: await resolveCountry(reader, values.country);
 			if (values.tree) {
 				const roots =
 					country === undefined
 						? reader.places({ level: "country" })
-						: [reader.place(country)];
-				for (const root of roots) printTree(reader, root, level, values.json);
+						: [await reader.place(country)];
+				for await (const root of roots)
+					await printTree(reader, root, level, values.json);
 				return 0;
 			}
 			const filter = country === undefined ? { level } : { level, country };
-			for (const place of reader.places(filter)) {
+			for await (const place of reader.places(filter)) {
 				writeLine(values.json ? JSON.stringify(place) : formatPlaceLine(place));
 			}
 			return 0;
 		} finally {
-			reader.close();
+			await reader.close();
 		}
 	},
 };

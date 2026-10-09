@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { ByteBudgetCache } from "./cache.ts";
 import {
 	type BoundingBox,
@@ -10,12 +9,12 @@ import { readHeaderAndDirectory } from "./container.ts";
 import type { CGeoDataDirectory } from "./directory.ts";
 import { CGeoDataFormatError, CGeoDataIndexMismatchError } from "./errors.ts";
 import type { CGeoDataHeader } from "./header.ts";
+import { type Inflater, inflateBlock, streamInflater } from "./inflate.ts";
 import {
 	computeLocateCell,
 	decodeLocateEntry,
 	LocateIndex,
 	locateEntryWidth,
-	locateIndexPathFor,
 } from "./locateIndex.ts";
 import { mortonDecode, mortonEncode, shiftRight } from "./morton.ts";
 import {
@@ -31,11 +30,11 @@ import {
 	placeMatchQuality,
 	prepareNeedle,
 } from "./relevance.ts";
-import { SearchIndex, searchIndexPathFor } from "./searchIndex.ts";
-import { openSource, type RandomAccessSource } from "./source.ts";
-import { safeInflate } from "./zlibUtil.ts";
+import { SearchIndex } from "./searchIndex.ts";
+import { type ByteSource, type SourceInput, toSource } from "./source.ts";
+import { TurnQueue } from "./turns.ts";
 
-/** `queryPlaceId()`'s result: where a point resolves, without names. */
+/** `lookup()`'s result: where a point resolves, without names. */
 export interface PlaceIdResult {
 	/** The global id (Section 7.5) of the finest place resolved -- the city,
 	 * else the region, else the country -- or null where nothing resolved.
@@ -139,6 +138,24 @@ export interface PlaceCounts {
 	cities: number;
 }
 
+/** `locate()`'s result: a point inside a place, and the cell it's the
+ * centre of. */
+export interface Location {
+	lat: number;
+	lon: number;
+	boundingBox: BoundingBox;
+}
+
+/**
+ * A sidecar index for `OpenOptions`: the index itself (an open one stays
+ * the caller's to close), its file as a source, or a function that finds
+ * it on first use and resolves to undefined when there is none.
+ */
+export type IndexOption<I> =
+	| I
+	| SourceInput
+	| (() => Promise<I | SourceInput | undefined>);
+
 /** Options for `CGeoDataReader.open()`. */
 export interface OpenOptions {
 	/**
@@ -150,95 +167,132 @@ export interface OpenOptions {
 	 * recently used chunk.
 	 */
 	cacheBytes?: number;
+	/** How compressed blocks are inflated. Default `streamInflater`, which
+	 * works everywhere; on Node.js, `nodeInflater` from `./node` is
+	 * several times faster. */
+	inflater?: Inflater;
+	/** A search index (Appendix B) for `search()`; see `useSearchIndex()`.
+	 * Not read until the first search that can use it. */
+	searchIndex?: IndexOption<SearchIndex>;
+	/** A locate index (Appendix C) for `locate()`; see `useLocateIndex()`.
+	 * Not read until the first `locate()`. */
+	locateIndex?: IndexOption<LocateIndex>;
 }
 
 /** `OpenOptions.cacheBytes` when not given. */
 export const DEFAULT_CACHE_BYTES = 64 * 2 ** 20;
 
+/** A sidecar index slot: what's attached, and what's still to be tried. */
+interface IndexSlot<I> {
+	index: I | undefined;
+	/** Whether `index` was opened here, and so is closed here. */
+	owned: boolean;
+	/** Finds the index on first use; see `IndexOption`. */
+	pending: (() => Promise<I | SourceInput | undefined>) | undefined;
+	/** The attempt to use `pending` in progress, shared by everything that
+	 * needs the index meanwhile -- two attempts at once would each open it,
+	 * and the second would close the first's while it's being read. */
+	activating: Promise<I | undefined> | undefined;
+}
+
 export class CGeoDataReader {
 	/** Decoded chunks (keyed by chunk index) and name blocks (keyed by
 	 * `-1 - blockIndex`) under one byte budget. */
 	private readonly cache: ByteBudgetCache<ChunkRecords | string[][]>;
+	/** Loads in flight, under the same keys as `cache`, so concurrent
+	 * lookups in one chunk decode it once. */
+	private readonly loading = new Map<
+		number,
+		Promise<ChunkRecords | string[][]>
+	>();
 	/** The chunk the last lookup used, held outside `cache`: lookups close
 	 * together (a tile's samples) mostly land in the same chunk, and this
 	 * answers those without touching the LRU's bookkeeping. */
 	private lastChunkIndex = -1;
 	private lastChunk: ChunkRecords | undefined;
-	/** Narrows `search()`'s city scan; see `useSearchIndex()`. */
-	private searchIndex: SearchIndex | undefined;
-	/** Whether `searchIndex` was opened here, and so is closed here. */
-	private ownsSearchIndex = false;
-	/** A `.search-index.bin` next to the file, still to be tried on the
-	 * first search that needs it. */
-	private pendingSearchIndexPath: string | undefined;
-	private cachedPlaceTableChecksum: bigint | undefined;
-	/** Answers `locate()` without a chunk scan; see `useLocateIndex()`. */
-	private locateIndex: LocateIndex | undefined;
-	private ownsLocateIndex = false;
-	/** A `.locate-index.bin` next to the file, still to be tried on the
-	 * first `locate()`. */
-	private pendingLocateIndexPath: string | undefined;
-	private cachedPrefixChecksum: bigint | undefined;
+	/** Decodes take turns, one per macrotask; see `TurnQueue`. */
+	private readonly decodes = new TurnQueue();
+	/** The full-precision cell of the point `gridCell()` last placed; read
+	 * right after, in the same synchronous run. */
+	private gx = 0;
+	private gy = 0;
+	private readonly search_: IndexSlot<SearchIndex>;
+	private readonly locate_: IndexSlot<LocateIndex>;
+	private placeTableChecksumPromise: Promise<bigint> | undefined;
+	private prefixChecksumPromise: Promise<bigint> | undefined;
 
-	private readonly source: RandomAccessSource;
+	private readonly source: ByteSource;
+	private readonly inflater: Inflater;
 	readonly header: CGeoDataHeader;
 	readonly directory: CGeoDataDirectory;
 	private readonly placeTable: PlaceTableInfo;
 
 	private constructor(
-		source: RandomAccessSource,
+		source: ByteSource,
 		header: CGeoDataHeader,
 		directory: CGeoDataDirectory,
 		placeTable: PlaceTableInfo,
 		cacheBytes: number,
+		options: OpenOptions,
 	) {
 		this.cache = new ByteBudgetCache(cacheBytes);
 		this.source = source;
+		this.inflater = options.inflater ?? streamInflater;
 		this.header = header;
 		this.directory = directory;
 		this.placeTable = placeTable;
+		this.search_ = pendingSlot(options.searchIndex);
+		this.locate_ = pendingSlot(options.locateIndex);
 	}
 
-	static open(
-		input: string | Uint8Array,
+	/**
+	 * Opens a CGEODATA file: reads and validates its header, directory and
+	 * the uncompressed part of its place table (Sections 5-7.2), and
+	 * nothing else -- chunks and names are read on first use. The reader
+	 * takes ownership of `input`, if it's a `ByteSource`: `close()` closes
+	 * it, as does a failed open.
+	 */
+	static async open(
+		input: SourceInput,
 		options: OpenOptions = {},
-	): CGeoDataReader {
+	): Promise<CGeoDataReader> {
 		const { cacheBytes = DEFAULT_CACHE_BYTES } = options;
-		// Checked before opening, so a bad option doesn't leak a file handle.
 		if (!(cacheBytes >= 0)) {
 			throw new RangeError(
 				`cacheBytes must be a non-negative number, not ${cacheBytes}`,
 			);
 		}
-		const source = openSource(input);
-		const { header, directory } = readHeaderAndDirectory(source);
-		const placeTable = parsePlaceTable(
-			source,
-			directory.placeTableStart,
-			directory.placeTableLength,
-			header.keyframeExp,
-		);
-		const reader = new CGeoDataReader(
-			source,
-			header,
-			directory,
-			placeTable,
-			cacheBytes,
-		);
-		if (typeof input === "string") {
-			reader.pendingSearchIndexPath = searchIndexPathFor(input);
-			reader.pendingLocateIndexPath = locateIndexPathFor(input);
+		const source = toSource(input);
+		try {
+			const { header, directory } = await readHeaderAndDirectory(source);
+			const placeTable = await parsePlaceTable(
+				source,
+				directory.placeTableStart,
+				directory.placeTableLength,
+				header.keyframeExp,
+			);
+			return new CGeoDataReader(
+				source,
+				header,
+				directory,
+				placeTable,
+				cacheBytes,
+				options,
+			);
+		} catch (error) {
+			await source.close?.();
+			throw error;
 		}
-		return reader;
 	}
 
-	close(): void {
-		this.useSearchIndex(undefined);
-		this.useLocateIndex(undefined);
+	/** Closes the source, and any index this reader opened itself. */
+	async close(): Promise<void> {
+		await this.useSearchIndex(undefined);
+		await this.useLocateIndex(undefined);
 		this.cache.clear();
 		this.lastChunk = undefined;
 		this.lastChunkIndex = -1;
-		this.source.close?.();
+		await this.source.close?.();
 	}
 
 	get placeCounts(): PlaceCounts {
@@ -250,13 +304,14 @@ export class CGeoDataReader {
 		};
 	}
 
-	/** Section 9's lookup procedure. */
-	query(lat: number, lon: number): QueryResult {
-		const result = this.queryPlaceId(lat, lon);
+	/** Section 9's lookup procedure, with the names resolved: `lookup()`
+	 * followed by `place()`. */
+	async query(lat: number, lon: number): Promise<QueryResult> {
+		const result = await this.lookup(lat, lon);
 		if (result.placeId === null) {
 			return { ...result, country: null, region: null, city: null };
 		}
-		const place = this.place(result.placeId);
+		const place = await this.place(result.placeId);
 		return {
 			...result,
 			country: place.country.names,
@@ -266,12 +321,46 @@ export class CGeoDataReader {
 	}
 
 	/**
-	 * `query()` without resolving the place's names: just its id, for a
-	 * caller doing many lookups that resolves each distinct place once
-	 * (with `place()`, `placeIds()` or `placeNames()`) rather than once per
-	 * lookup, as a tile renderer sampling a grid of points does.
+	 * Section 9's lookup procedure: the place a point lies in, as an id, and
+	 * the cell the answer holds for. Reads and decodes the point's chunk if
+	 * it isn't cached; resolve the id with `place()` or `placeIds()`.
 	 */
-	queryPlaceId(lat: number, lon: number): PlaceIdResult {
+	async lookup(lat: number, lon: number): Promise<PlaceIdResult> {
+		const chunkIndex = this.gridCell(lat, lon);
+		let chunk = this.loadedChunk(chunkIndex);
+		if (chunk === undefined) {
+			chunk = await this.loadChunk(chunkIndex, true);
+			this.gridCell(lat, lon); // another lookup may have run meanwhile
+		}
+		return this.resolve(chunkIndex, chunk);
+	}
+
+	/**
+	 * `lookup()` answered from memory only: the same result when the
+	 * point's chunk is already decoded, undefined when answering would
+	 * need a read. For callers doing many lookups close together, which
+	 * mostly hit the same few chunks:
+	 *
+	 * ```ts
+	 * const result = reader.lookupCached(lat, lon) ?? (await reader.lookup(lat, lon));
+	 * ```
+	 *
+	 * waits only for the lookups that actually read something.
+	 */
+	lookupCached(lat: number, lon: number): PlaceIdResult | undefined {
+		const chunkIndex = this.gridCell(lat, lon);
+		const chunk = this.loadedChunk(chunkIndex);
+		return chunk === undefined ? undefined : this.resolve(chunkIndex, chunk);
+	}
+
+	/** The index of the chunk a point lies in (Section 6.1). */
+	chunkIndexAt(lat: number, lon: number): number {
+		return this.gridCell(lat, lon);
+	}
+
+	/** Validates a point and places it on the full-precision grid
+	 * (`this.gx`, `this.gy`), returning its chunk's index. */
+	private gridCell(lat: number, lon: number): number {
 		if (!(lat >= -90 && lat < 90)) {
 			throw new RangeError(
 				`latitude ${lat} is outside the valid range [-90, 90)`,
@@ -282,25 +371,29 @@ export class CGeoDataReader {
 				`longitude ${lon} is outside the valid range [-180, 180)`,
 			);
 		}
-
 		const { width: W, height: H, maxDepth: D } = this.header;
 		const NX = W * 2 ** D;
 		const NY = H * 2 ** D;
+		const gx = Math.floor(((lon + 180) / 360) * NX);
+		const gy = Math.floor(((lat + 90) / 180) * NY);
+		this.gx = Math.min(Math.max(gx, 0), NX - 1);
+		this.gy = Math.min(Math.max(gy, 0), NY - 1);
+		return Math.floor(this.gy / 2 ** D) * W + Math.floor(this.gx / 2 ** D);
+	}
 
-		let gx = Math.floor(((lon + 180) / 360) * NX);
-		let gy = Math.floor(((lat + 90) / 180) * NY);
-		gx = Math.min(Math.max(gx, 0), NX - 1);
-		gy = Math.min(Math.max(gy, 0), NY - 1);
-
+	/** Section 9 steps 5-8 for the point `gridCell()` just placed, in its
+	 * (decoded, or null for empty) chunk. */
+	private resolve(
+		chunkIndex: number,
+		chunk: ChunkRecords | null,
+	): PlaceIdResult {
+		const { width: W, height: H, maxDepth: D } = this.header;
 		const cellsPerChunkSide = 2 ** D;
-		const c = Math.floor(gx / cellsPerChunkSide);
-		const r = Math.floor(gy / cellsPerChunkSide);
-		const x = gx - c * cellsPerChunkSide;
-		const y = gy - r * cellsPerChunkSide;
-		const chunkIndex = r * W + c;
+		const c = chunkIndex % W;
+		const r = Math.floor(chunkIndex / W);
+		const x = this.gx - c * cellsPerChunkSide;
+		const y = this.gy - r * cellsPerChunkSide;
 		const chunkBox = chunkBoundingBox(c, r, W, H);
-
-		const chunk = this.getChunk(chunkIndex);
 		if (!chunk) return unknownResult(chunkBox, chunkIndex); // whole chunk is empty
 
 		const q = mortonEncode(x, y, D);
@@ -308,14 +401,15 @@ export class CGeoDataReader {
 		// Neither of these two "no record covers this" cases can recover the
 		// gap's true extent without redoing the encoder's own subdivision
 		// work, so fall back to the single finest cell around the query point.
-		const finestCellBox = () => cellBoundingBox(chunkBox, x, y, D);
-		if (j < 0) return unknownResult(finestCellBox(), chunkIndex);
+		if (j < 0)
+			return unknownResult(cellBoundingBox(chunkBox, x, y, D), chunkIndex);
 
 		const depth = chunk.depths[j]!;
 		const shift = 2 * (D - depth);
 		const code = chunk.codes[j]!;
 		if (shiftRight(q, shift) !== shiftRight(code, shift)) {
-			return unknownResult(finestCellBox(), chunkIndex); // gap between records
+			// gap between records
+			return unknownResult(cellBoundingBox(chunkBox, x, y, D), chunkIndex);
 		}
 
 		// A real record matched: recover its exact cell (Section 8.1) for a
@@ -333,107 +427,72 @@ export class CGeoDataReader {
 	}
 
 	/** The names of one place by global id, without resolving its ancestors.
-	 * Much cheaper than `place()` when only the names are needed. */
-	placeNames(id: number): string[] {
-		if (!Number.isInteger(id) || id < 0 || id >= this.placeTable.totalPlaces) {
-			throw new RangeError(
-				`${id} is not a place id for this file (0 <= id < ${this.placeTable.totalPlaces})`,
-			);
-		}
-		return this.names(id);
+	 * Cheaper than `place()` when only the names are needed. */
+	async placeNames(id: number): Promise<string[]> {
+		this.checkPlaceId(id);
+		return this.loadedNames(id) ?? (await this.loadNames(id));
 	}
 
 	/** FNV-1a 64-bit hash of the place table bytes, as defined by
 	 * binary-format.md Section B.6. Used to bind a search index to its source. */
-	placeTableChecksum(): bigint {
-		if (this.cachedPlaceTableChecksum === undefined) {
+	placeTableChecksum(): Promise<bigint> {
+		this.placeTableChecksumPromise ??= (async () => {
 			const { placeTableStart, placeTableLength } = this.directory;
-			this.cachedPlaceTableChecksum = fnv1a64(
-				this.source.readSync(placeTableStart, placeTableLength),
-			);
-		}
-		return this.cachedPlaceTableChecksum;
+			return fnv1a64(await this.source.read(placeTableStart, placeTableLength));
+		})();
+		return this.placeTableChecksumPromise;
 	}
 
 	/** FNV-1a 64-bit hash of everything before the first chunk -- header,
 	 * directory and place table -- as defined by binary-format.md Section
 	 * C.4. Binds a locate index to its source: the chunk lengths it covers
 	 * change whenever the chunks do. */
-	prefixChecksum(): bigint {
-		if (this.cachedPrefixChecksum === undefined) {
+	prefixChecksum(): Promise<bigint> {
+		this.prefixChecksumPromise ??= (async () => {
 			const { placeTableStart, placeTableLength } = this.directory;
-			this.cachedPrefixChecksum = fnv1a64(
-				this.source.readSync(0, placeTableStart + placeTableLength),
+			return fnv1a64(
+				await this.source.read(0, placeTableStart + placeTableLength),
 			);
-		}
-		return this.cachedPrefixChecksum;
+		})();
+		return this.prefixChecksumPromise;
 	}
 
 	/**
 	 * Attaches a text search index (Appendix B, built by `buildSearchIndex`
-	 * / `cgeodata build-search-index`) so `search()` only checks the cities
-	 * the index says could match instead of every city. Results are
+	 * / `cgeodata build-search-index`) so `search()` only checks the places
+	 * the index says could match instead of every place. Results are
 	 * identical with or without it -- only the speed differs.
 	 *
-	 * A reader opened from a path already picks up `<name>.search-index.bin`
-	 * next to it (`searchIndexPathFor`) on the first search that needs it;
-	 * call this to use a different index, or with `undefined` to search
-	 * without one. Takes a path (read on demand, like the .bin itself), the
-	 * file's bytes, or an open `SearchIndex` (which the caller keeps
-	 * ownership of); throws if it was built from a different file.
+	 * Takes the index's file (as for `open()`; read on demand) or an open
+	 * `SearchIndex` (which the caller keeps ownership of), or undefined to
+	 * search without one. Replaces `OpenOptions.searchIndex`. Rejects with
+	 * a `CGeoDataIndexMismatchError` if it was built from a different file.
 	 */
-	useSearchIndex(index: string | Uint8Array | SearchIndex | undefined): void {
-		this.pendingSearchIndexPath = undefined;
-		if (this.ownsSearchIndex) this.searchIndex?.close();
-		this.searchIndex = undefined;
-		this.ownsSearchIndex = false;
-		if (index === undefined) return;
-
-		const owned = !(index instanceof SearchIndex);
-		const opened =
-			index instanceof SearchIndex ? index : SearchIndex.open(index);
-		try {
-			this.checkSearchIndex(opened);
-		} catch (error) {
-			if (owned) opened.close();
-			throw error;
-		}
-		this.searchIndex = opened;
-		this.ownsSearchIndex = owned;
+	async useSearchIndex(
+		index: SearchIndex | SourceInput | undefined,
+	): Promise<void> {
+		await this.attach(this.search_, index, SearchIndex.open, (opened) =>
+			this.checkSearchIndex(opened),
+		);
 	}
 
-	/** Whether `search()` will use an index. Opens (and validates) the
-	 * `.search-index.bin` next to the file if that hasn't happened yet. */
-	get hasSearchIndex(): boolean {
-		return this.activeSearchIndex() !== undefined;
+	/** Whether `search()` will use an index. Reads (and validates) the one
+	 * from `OpenOptions.searchIndex` if that hasn't happened yet. */
+	async hasSearchIndex(): Promise<boolean> {
+		return (await this.activeSearchIndex()) !== undefined;
 	}
 
-	/** The attached search index, opening the one next to the file on
-	 * first use. One that's there but unusable (stale, corrupt) throws on
+	/** The attached search index, opening `OpenOptions.searchIndex` on
+	 * first use. One that's there but unusable (stale, corrupt) rejects on
 	 * every call rather than silently falling back to a linear scan. */
-	private activeSearchIndex(): SearchIndex | undefined {
-		const path = this.pendingSearchIndexPath;
-		if (path !== undefined) {
-			if (!existsSync(path)) {
-				this.pendingSearchIndexPath = undefined;
-			} else {
-				try {
-					this.useSearchIndex(path);
-				} catch (error) {
-					this.pendingSearchIndexPath = path;
-					throw withContext(
-						error,
-						`${path}: `,
-						" (or delete it to search without an index)",
-					);
-				}
-			}
-		}
-		return this.searchIndex;
+	private activeSearchIndex(): Promise<SearchIndex | undefined> {
+		return this.activate(this.search_, "search", (index) =>
+			this.useSearchIndex(index),
+		);
 	}
 
-	private checkSearchIndex(index: SearchIndex): void {
-		if (index.sourceChecksum !== this.placeTableChecksum()) {
+	private async checkSearchIndex(index: SearchIndex): Promise<void> {
+		if (index.sourceChecksum !== (await this.placeTableChecksum())) {
 			throw new CGeoDataIndexMismatchError(
 				"search index was built from a different .bin file (checksum mismatch); rebuild it with build-search-index",
 			);
@@ -451,65 +510,36 @@ export class CGeoDataReader {
 	 * of scanning every chunk. Results are identical with or without it --
 	 * only the speed differs.
 	 *
-	 * A reader opened from a path already picks up `<name>.locate-index.bin`
-	 * next to it (`locateIndexPathFor`) on the first `locate()`; call this
-	 * to use a different index, or with `undefined` to locate without one.
-	 * Takes a path (read on demand, like the .bin itself), the file's bytes,
-	 * or an open `LocateIndex` (which the caller keeps ownership of); throws
-	 * if it was built from a different file.
+	 * Takes the index's file (as for `open()`; read on demand) or an open
+	 * `LocateIndex` (which the caller keeps ownership of), or undefined to
+	 * locate without one. Replaces `OpenOptions.locateIndex`. Rejects with
+	 * a `CGeoDataIndexMismatchError` if it was built from a different file.
 	 */
-	useLocateIndex(index: string | Uint8Array | LocateIndex | undefined): void {
-		this.pendingLocateIndexPath = undefined;
-		if (this.ownsLocateIndex) this.locateIndex?.close();
-		this.locateIndex = undefined;
-		this.ownsLocateIndex = false;
-		if (index === undefined) return;
-
-		const owned = !(index instanceof LocateIndex);
-		const opened =
-			index instanceof LocateIndex ? index : LocateIndex.open(index);
-		try {
-			this.checkLocateIndex(opened);
-		} catch (error) {
-			if (owned) opened.close();
-			throw error;
-		}
-		this.locateIndex = opened;
-		this.ownsLocateIndex = owned;
+	async useLocateIndex(
+		index: LocateIndex | SourceInput | undefined,
+	): Promise<void> {
+		await this.attach(this.locate_, index, LocateIndex.open, (opened) =>
+			this.checkLocateIndex(opened),
+		);
 	}
 
-	/** Whether `locate()` will use an index. Opens (and validates) the
-	 * `.locate-index.bin` next to the file if that hasn't happened yet. */
-	get hasLocateIndex(): boolean {
-		return this.activeLocateIndex() !== undefined;
+	/** Whether `locate()` will use an index. Reads (and validates) the one
+	 * from `OpenOptions.locateIndex` if that hasn't happened yet. */
+	async hasLocateIndex(): Promise<boolean> {
+		return (await this.activeLocateIndex()) !== undefined;
 	}
 
-	/** The attached locate index, opening the one next to the file on
-	 * first use. One that's there but unusable (stale, corrupt) throws on
+	/** The attached locate index, opening `OpenOptions.locateIndex` on
+	 * first use. One that's there but unusable (stale, corrupt) rejects on
 	 * every call rather than silently falling back to a chunk scan. */
-	private activeLocateIndex(): LocateIndex | undefined {
-		const path = this.pendingLocateIndexPath;
-		if (path !== undefined) {
-			if (!existsSync(path)) {
-				this.pendingLocateIndexPath = undefined;
-			} else {
-				try {
-					this.useLocateIndex(path);
-				} catch (error) {
-					this.pendingLocateIndexPath = path;
-					throw withContext(
-						error,
-						`${path}: `,
-						" (or delete it to locate without an index)",
-					);
-				}
-			}
-		}
-		return this.locateIndex;
+	private activeLocateIndex(): Promise<LocateIndex | undefined> {
+		return this.activate(this.locate_, "locate", (index) =>
+			this.useLocateIndex(index),
+		);
 	}
 
-	private checkLocateIndex(index: LocateIndex): void {
-		if (index.sourceChecksum !== this.prefixChecksum()) {
+	private async checkLocateIndex(index: LocateIndex): Promise<void> {
+		if (index.sourceChecksum !== (await this.prefixChecksum())) {
 			throw new CGeoDataIndexMismatchError(
 				"locate index was built from a different .bin file (checksum mismatch); rebuild it with build-locate-index",
 			);
@@ -528,29 +558,119 @@ export class CGeoDataReader {
 		}
 	}
 
-	/** Resolves one place id (Section 7.5) to its names and ancestors. */
-	place(id: number): Place {
-		const ids = this.placeIds(id);
-		const ref = (globalId: number): PlaceRef => ({
-			id: globalId,
-			names: this.names(globalId),
+	/** `useSearchIndex`/`useLocateIndex`, for either slot. */
+	private async attach<I extends SearchIndex | LocateIndex>(
+		slot: IndexSlot<I>,
+		index: I | SourceInput | undefined,
+		open: (input: SourceInput) => Promise<I>,
+		check: (index: I) => Promise<void>,
+	): Promise<void> {
+		slot.pending = undefined;
+		if (slot.owned) await slot.index?.close();
+		slot.index = undefined;
+		slot.owned = false;
+		if (index === undefined) return;
+
+		const owned = !(
+			index instanceof SearchIndex || index instanceof LocateIndex
+		);
+		const opened = owned ? await open(index as SourceInput) : (index as I);
+		try {
+			await check(opened);
+		} catch (error) {
+			if (owned) await opened.close();
+			throw error;
+		}
+		slot.index = opened;
+		slot.owned = owned;
+	}
+
+	/** The slot's index, trying its pending one first. */
+	private activate<I extends SearchIndex | LocateIndex>(
+		slot: IndexSlot<I>,
+		what: "search" | "locate",
+		use: (index: I | SourceInput) => Promise<void>,
+	): Promise<I | undefined> {
+		if (slot.pending === undefined) return Promise.resolve(slot.index);
+		slot.activating ??= this.tryPending(slot, what, use).finally(() => {
+			slot.activating = undefined;
 		});
-		const country = ref(ids.country);
-		const region = ids.region === null ? null : ref(ids.region);
-		const city = ids.city === null ? null : ref(ids.city);
-		return {
-			id,
-			names: (city ?? region ?? country).names,
-			level: ids.level,
-			country,
-			region,
-			city,
-		};
+		return slot.activating;
+	}
+
+	private async tryPending<I extends SearchIndex | LocateIndex>(
+		slot: IndexSlot<I>,
+		what: "search" | "locate",
+		use: (index: I | SourceInput) => Promise<void>,
+	): Promise<I | undefined> {
+		const pending = slot.pending!;
+		let input: I | SourceInput | undefined;
+		try {
+			input = await pending();
+			if (input === undefined) slot.pending = undefined;
+			else await use(input);
+		} catch (error) {
+			slot.pending = pending; // `use` cleared it; try again next time
+			const name = indexName(input);
+			throw name === undefined
+				? error
+				: withContext(
+						error,
+						`${name}: `,
+						` (or delete it to ${what} without an index)`,
+					);
+		}
+		return slot.index;
+	}
+
+	/** Resolves one place id (Section 7.5) to its names and ancestors. */
+	async place(id: number): Promise<Place> {
+		const loaded = this.loadedPlace(id);
+		if (loaded) return loaded;
+		const ids = this.placeIds(id);
+		await Promise.all(
+			[ids.country, ids.region, ids.city].map((globalId) =>
+				globalId === null || this.loadedNames(globalId)
+					? undefined
+					: this.loadNames(globalId),
+			),
+		);
+		// Loaded, though not necessarily still cached: rebuild from the
+		// blocks if the budget already let one go.
+		return this.loadedPlace(id) ?? this.placeFrom(ids, id);
+	}
+
+	/** `place()` when every name it needs is cached, else undefined. */
+	private loadedPlace(id: number): Place | undefined {
+		const ids = this.placeIds(id);
+		const country = this.loadedNames(ids.country);
+		if (!country) return undefined;
+		let region: string[] | undefined;
+		if (ids.region !== null) {
+			region = this.loadedNames(ids.region);
+			if (!region) return undefined;
+		}
+		let city: string[] | undefined;
+		if (ids.city !== null) {
+			city = this.loadedNames(ids.city);
+			if (!city) return undefined;
+		}
+		return assemblePlace(id, ids, country, region, city);
+	}
+
+	/** `place()` loading each name block in turn, for when the cache is
+	 * too small to hold them all at once. */
+	private async placeFrom(ids: PlaceIds, id: number): Promise<Place> {
+		const country = await this.loadNames(ids.country);
+		const region =
+			ids.region === null ? undefined : await this.loadNames(ids.region);
+		const city = ids.city === null ? undefined : await this.loadNames(ids.city);
+		return assemblePlace(id, ids, country, region, city);
 	}
 
 	/** `place()` without the names: the place's level and the global ids
 	 * of it and its ancestors, from the place table's counts alone, so no
-	 * name block is read. */
+	 * name block is read -- and so synchronous. */
 	placeIds(id: number): PlaceIds {
 		const resolved = resolveIdentifier(this.placeTable, id);
 		const C = this.placeTable.countryCount;
@@ -569,11 +689,12 @@ export class CGeoDataReader {
 	 * level's ids for a given parent are contiguous (Section 7.5), so a
 	 * filtered walk only touches the ids it yields.
 	 */
-	*places(filter: PlaceFilter = {}): IterableIterator<Place> {
+	async *places(filter: PlaceFilter = {}): AsyncIterableIterator<Place> {
 		for (const level of LEVELS) {
 			if (filter.level !== undefined && filter.level !== level) continue;
 			const [start, end] = this.idRange(level, filter);
-			for (let id = start; id < end; id++) yield this.place(id);
+			for (let id = start; id < end; id++)
+				yield this.loadedPlace(id) ?? (await this.place(id));
 		}
 	}
 
@@ -585,7 +706,10 @@ export class CGeoDataReader {
 	 * the name blocks; with one (`useSearchIndex()`), only the places the
 	 * index can't rule out are compared. Same results either way.
 	 */
-	*search(text: string, options: SearchOptions = {}): IterableIterator<Place> {
+	async *search(
+		text: string,
+		options: SearchOptions = {},
+	): AsyncIterableIterator<Place> {
 		if (options.sort) {
 			yield* this.searchRanked(text, options);
 			return;
@@ -593,17 +717,17 @@ export class CGeoDataReader {
 		const needle = foldDiacritics(text);
 		let remaining = options.limit ?? Infinity;
 		if (remaining <= 0) return;
-		const candidates = this.activeSearchIndex()?.candidates(text);
+		const index = await this.activeSearchIndex();
+		const candidates = await index?.candidates(text);
 		for (const level of LEVELS) {
 			if (options.level !== undefined && options.level !== level) continue;
 			for (const id of this.searchScope(level, options, candidates)) {
 				// Match on the bare names first; resolving parents is only worth
 				// doing for the few that hit.
-				if (
-					!this.names(id).some((name) => foldDiacritics(name).includes(needle))
-				)
+				const names = this.loadedNames(id) ?? (await this.loadNames(id));
+				if (!names.some((name) => foldDiacritics(name).includes(needle)))
 					continue;
-				yield this.place(id);
+				yield this.loadedPlace(id) ?? (await this.place(id));
 				if (--remaining <= 0) return;
 			}
 		}
@@ -613,12 +737,12 @@ export class CGeoDataReader {
 	 * order (Appendix B.5, `relevance.ts`), then yields highest-scored
 	 * first, ties broken by id. `limit` is applied after sorting, not
 	 * during the scan -- the top match can turn up anywhere in id order. */
-	private *searchRanked(
+	private async *searchRanked(
 		text: string,
 		options: SearchOptions,
-	): IterableIterator<Place> {
+	): AsyncIterableIterator<Place> {
 		const needle = foldDiacritics(text);
-		const index = this.activeSearchIndex();
+		const index = await this.activeSearchIndex();
 		// The table is keyed, and was scored, by each key's own folded form
 		// (Section B.6) -- the same needle a live query would use only when
 		// the query itself already equals its folded form, i.e. has no
@@ -637,7 +761,7 @@ export class CGeoDataReader {
 			options.country === undefined &&
 			options.region === undefined &&
 			needle === text.toLowerCase()
-				? index.shortQuery(text)
+				? await index.shortQuery(text)
 				: undefined;
 		if (shortQuery) {
 			// The table already holds the answer (Appendix B.9 step 1); only
@@ -646,23 +770,23 @@ export class CGeoDataReader {
 			let remaining = options.limit ?? Infinity;
 			for (const id of shortQuery) {
 				if (remaining <= 0) return;
-				if (
-					!this.names(id).some((name) => foldDiacritics(name).includes(needle))
-				)
+				const names = this.loadedNames(id) ?? (await this.loadNames(id));
+				if (!names.some((name) => foldDiacritics(name).includes(needle)))
 					continue;
-				yield this.place(id);
+				yield this.loadedPlace(id) ?? (await this.place(id));
 				remaining--;
 			}
 			return;
 		}
 
 		const parsedNeedle = prepareNeedle(text);
-		const candidates = index?.candidates(text);
+		const candidates = await index?.candidates(text);
 		const scored: Array<{ id: number; score: number }> = [];
 		for (const level of LEVELS) {
 			if (options.level !== undefined && options.level !== level) continue;
 			for (const id of this.searchScope(level, options, candidates)) {
-				const quality = placeMatchQuality(this.names(id), parsedNeedle);
+				const names = this.loadedNames(id) ?? (await this.loadNames(id));
+				const quality = placeMatchQuality(names, parsedNeedle);
 				if (quality === 0) continue;
 				scored.push({ id, score: quality + LEVEL_BONUS[level] });
 			}
@@ -672,7 +796,7 @@ export class CGeoDataReader {
 		let remaining = options.limit ?? Infinity;
 		for (const { id } of scored) {
 			if (remaining-- <= 0) return;
-			yield this.place(id);
+			yield this.loadedPlace(id) ?? (await this.place(id));
 		}
 	}
 
@@ -700,10 +824,10 @@ export class CGeoDataReader {
 	 * chunk is empty. Cached like lookups, unless `cache` is false: a
 	 * one-pass walk over every chunk should skip the cache, so it doesn't
 	 * evict everything lookups had cached for chunks it only visits once. */
-	chunk(
+	async chunk(
 		index: number,
 		{ cache = true }: { cache?: boolean } = {},
-	): ChunkRecords | undefined {
+	): Promise<ChunkRecords | undefined> {
 		if (
 			!Number.isInteger(index) ||
 			index < 0 ||
@@ -713,7 +837,11 @@ export class CGeoDataReader {
 				`chunk index ${index} is out of range for this file (0 <= index < ${this.directory.chunkLengths.length})`,
 			);
 		}
-		return this.getChunk(index, cache);
+		const loaded = this.loadedChunk(index);
+		return (
+			(loaded === undefined ? await this.loadChunk(index, cache) : loaded) ??
+			undefined
+		);
 	}
 
 	/** The lat/lon extent of a chunk (Section 6.1). */
@@ -738,18 +866,12 @@ export class CGeoDataReader {
 	 * With a locate index (`useLocateIndex()`) this reads one entry;
 	 * without one it scans every chunk. Same result either way.
 	 */
-	locate(
-		id: number,
-	): { lat: number; lon: number; boundingBox: BoundingBox } | null {
-		if (!Number.isInteger(id) || id < 0 || id >= this.placeTable.totalPlaces) {
-			throw new RangeError(
-				`${id} is not a place id for this file (0 <= id < ${this.placeTable.totalPlaces})`,
-			);
-		}
-		const index = this.activeLocateIndex();
+	async locate(id: number): Promise<Location | null> {
+		this.checkPlaceId(id);
+		const index = await this.activeLocateIndex();
 		const cell = index
-			? decodeLocateEntry(index.entry(id), this.header)
-			: computeLocateCell(this, id);
+			? decodeLocateEntry(await index.entry(id), this.header)
+			: await computeLocateCell(this, id);
 		if (!cell) return null;
 		const box = this.recordBoundingBox(
 			this.chunkBoundingBox(cell.chunkIndex),
@@ -783,19 +905,23 @@ export class CGeoDataReader {
 
 	/** One chunk's records with their cells and places resolved -- what a
 	 * lookup in that chunk can answer with, laid out for inspection. */
-	*chunkRecords(index: number): IterableIterator<ChunkRecord> {
-		const chunk = this.chunk(index);
+	async *chunkRecords(index: number): AsyncIterableIterator<ChunkRecord> {
+		const chunk = await this.chunk(index);
 		if (!chunk) return;
 		const chunkBox = this.chunkBoundingBox(index);
 		for (let j = 0; j < chunk.codes.length; j++) {
 			const code = chunk.codes[j]!;
 			const depth = chunk.depths[j]!;
 			const k = chunk.paletteIndices[j]!;
+			const placeId = k === 0 ? undefined : chunk.palette[k - 1]!;
 			yield {
 				code,
 				depth,
 				boundingBox: this.recordBoundingBox(chunkBox, code, depth),
-				place: k === 0 ? null : this.place(chunk.palette[k - 1]!),
+				place:
+					placeId === undefined
+						? null
+						: (this.loadedPlace(placeId) ?? (await this.place(placeId))),
 			};
 		}
 	}
@@ -865,22 +991,63 @@ export class CGeoDataReader {
 		}
 	}
 
-	private getChunk(index: number, cache = true): ChunkRecords | undefined {
-		const length = this.directory.chunkLengths[index]!;
-		if (length === 0) return undefined;
+	private checkPlaceId(id: number): void {
+		const { totalPlaces } = this.placeTable;
+		if (!Number.isInteger(id) || id < 0 || id >= totalPlaces) {
+			throw new RangeError(
+				`${id} is not a place id for this file (0 <= id < ${totalPlaces})`,
+			);
+		}
+	}
+
+	/** A chunk without reading anything: its records when decoded and
+	 * cached, null when it's empty, undefined when it would need a read. */
+	private loadedChunk(index: number): ChunkRecords | null | undefined {
+		if (this.directory.chunkLengths[index] === 0) return null;
 		if (index === this.lastChunkIndex) return this.lastChunk;
 		const cached = this.cache.get(index) as ChunkRecords | undefined;
 		if (cached) {
 			this.lastChunkIndex = index;
 			this.lastChunk = cached;
-			return cached;
 		}
-		const compressed = this.source.readSync(
+		return cached;
+	}
+
+	/** Reads and decodes a chunk, sharing one decode among concurrent
+	 * callers. */
+	private loadChunk(index: number, cache: boolean): Promise<ChunkRecords> {
+		if (!cache) return this.decodeChunk(index);
+		const inFlight = this.loading.get(index);
+		if (inFlight) return inFlight as Promise<ChunkRecords>;
+		const load = this.decodeChunk(index)
+			.then((chunk) => {
+				this.cache.set(index, chunk, chunkBytes(chunk));
+				this.lastChunkIndex = index;
+				this.lastChunk = chunk;
+				return chunk;
+			})
+			.finally(() => this.loading.delete(index));
+		this.loading.set(index, load);
+		return load;
+	}
+
+	private async decodeChunk(index: number): Promise<ChunkRecords> {
+		const compressed = await this.source.read(
 			this.directory.chunkOffsets[index]!,
-			length,
+			this.directory.chunkLengths[index]!,
 		);
-		const inflated = safeInflate(compressed);
-		const chunk = parseChunk(inflated, this.header.maxDepth);
+		return this.decodes.run(async () =>
+			this.checkPalette(
+				index,
+				parseChunk(
+					await inflateBlock(this.inflater, compressed),
+					this.header.maxDepth,
+				),
+			),
+		);
+	}
+
+	private checkPalette(index: number, chunk: ChunkRecords): ChunkRecords {
 		// Section 11: "every palette entry [MUST be] less than N".
 		// `parseChunk` can't check that -- it has no place table -- and this
 		// is the one place that has both, so a corrupt palette fails here
@@ -896,31 +1063,51 @@ export class CGeoDataReader {
 				);
 			}
 		}
-		if (cache) {
-			this.cache.set(
-				index,
-				chunk,
-				chunk.codes.byteLength +
-					chunk.depths.byteLength +
-					chunk.paletteIndices.byteLength +
-					chunk.palette.length * 8,
-			);
-			this.lastChunkIndex = index;
-			this.lastChunk = chunk;
-		}
 		return chunk;
 	}
 
-	private names(globalId: number): string[] {
-		const { keyframeExp, totalPlaces } = this.placeTable;
-		const blockSize = keyframeExp === 0 ? totalPlaces : 2 ** keyframeExp;
-		const blockIndex = Math.floor(globalId / blockSize);
-		let block = this.cache.get(-1 - blockIndex) as string[][] | undefined;
-		if (!block) {
-			block = readNameBlock(this.source, this.placeTable, blockIndex);
-			this.cache.set(-1 - blockIndex, block, nameBlockBytes(block));
+	/** A place's names when its name block is cached, else undefined. */
+	private loadedNames(globalId: number): string[] | undefined {
+		const blockIndex = Math.floor(globalId / this.nameBlockSize);
+		const block = this.cache.get(-1 - blockIndex) as string[][] | undefined;
+		return block && this.entryOf(block, blockIndex, globalId);
+	}
+
+	/** Reads and decodes a place's name block (sharing one read among
+	 * concurrent callers), and returns its names. */
+	private async loadNames(globalId: number): Promise<string[]> {
+		const blockIndex = Math.floor(globalId / this.nameBlockSize);
+		const key = -1 - blockIndex;
+		let load = this.loading.get(key) as Promise<string[][]> | undefined;
+		if (!load) {
+			load = readNameBlock(
+				this.source,
+				this.placeTable,
+				blockIndex,
+				this.inflater,
+				(work) => this.decodes.run(work),
+			)
+				.then((block) => {
+					this.cache.set(key, block, nameBlockBytes(block));
+					return block;
+				})
+				.finally(() => this.loading.delete(key));
+			this.loading.set(key, load);
 		}
-		const entry = block[globalId - blockIndex * blockSize];
+		return this.entryOf(await load, blockIndex, globalId);
+	}
+
+	private get nameBlockSize(): number {
+		const { keyframeExp, totalPlaces } = this.placeTable;
+		return keyframeExp === 0 ? totalPlaces : 2 ** keyframeExp;
+	}
+
+	private entryOf(
+		block: string[][],
+		blockIndex: number,
+		globalId: number,
+	): string[] {
+		const entry = block[globalId - blockIndex * this.nameBlockSize];
 		if (!entry)
 			throw new CGeoDataFormatError(
 				`name block ${blockIndex} ended before reaching place ${globalId}`,
@@ -930,6 +1117,57 @@ export class CGeoDataReader {
 }
 
 const LEVELS: readonly PlaceLevel[] = ["country", "region", "city"];
+
+function pendingSlot<I>(option: IndexOption<I> | undefined): IndexSlot<I> {
+	return {
+		index: undefined,
+		owned: false,
+		activating: undefined,
+		pending:
+			option === undefined
+				? undefined
+				: typeof option === "function"
+					? (option as () => Promise<I | SourceInput | undefined>)
+					: () => Promise.resolve(option),
+	};
+}
+
+/** What an index's errors are prefixed with, if anything names it. */
+function indexName(input: unknown): string | undefined {
+	const name = (input as { name?: unknown } | undefined)?.name;
+	return typeof name === "string" ? name : undefined;
+}
+
+function assemblePlace(
+	id: number,
+	ids: PlaceIds,
+	country: string[],
+	region: string[] | undefined,
+	city: string[] | undefined,
+): Place {
+	const countryRef = { id: ids.country, names: country };
+	const regionRef =
+		ids.region === null ? null : { id: ids.region, names: region! };
+	const cityRef = ids.city === null ? null : { id: ids.city, names: city! };
+	return {
+		id,
+		names: (cityRef ?? regionRef ?? countryRef).names,
+		level: ids.level,
+		country: countryRef,
+		region: regionRef,
+		city: cityRef,
+	};
+}
+
+/** A decoded chunk's size, for the cache budget. */
+function chunkBytes(chunk: ChunkRecords): number {
+	return (
+		chunk.codes.byteLength +
+		chunk.depths.byteLength +
+		chunk.paletteIndices.byteLength +
+		chunk.palette.length * 8
+	);
+}
 
 /** A rough size of a decoded name block, for the cache budget: two bytes
  * per character (V8's worst case), plus per-string and per-array

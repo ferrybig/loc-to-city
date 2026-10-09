@@ -15,6 +15,12 @@ export {
 } from "./errors.ts";
 export { type CGeoDataHeader, parseHeader } from "./header.ts";
 export {
+	type Inflater,
+	inflateBlock,
+	inflateCeiling,
+	streamInflater,
+} from "./inflate.ts";
+export {
 	type BuildLocateIndexOptions,
 	buildLocateIndex,
 	decodeLocateEntry,
@@ -22,7 +28,6 @@ export {
 	type LocateCell,
 	LocateIndex,
 	locateEntryWidth,
-	locateIndexPathFor,
 } from "./locateIndex.ts";
 export { lowBits, mortonDecode, mortonEncode, shiftRight } from "./morton.ts";
 export {
@@ -37,6 +42,8 @@ export {
 	CGeoDataReader,
 	type ChunkRecord,
 	DEFAULT_CACHE_BYTES,
+	type IndexOption,
+	type Location,
 	type OpenOptions,
 	type Place,
 	type PlaceCounts,
@@ -71,11 +78,16 @@ export {
 	foldSymbols,
 	SearchIndex,
 	type SearchIndexOptions,
-	searchIndexPathFor,
 	trigramListIndex,
 	trigramListIndices,
 } from "./searchIndex.ts";
-export { openSource, type RandomAccessSource } from "./source.ts";
+export {
+	BlobSource,
+	type ByteSource,
+	BytesSource,
+	type SourceInput,
+	toSource,
+} from "./source.ts";
 export {
 	IncompleteBufferError,
 	readDeltaVarintList,
@@ -84,4 +96,3 @@ export {
 	readVarintList,
 	writeVarint,
 } from "./varint.ts";
-export { safeInflate } from "./zlibUtil.ts";

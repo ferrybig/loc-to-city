@@ -24,7 +24,7 @@ import {
 import type { CGeoDataHeader } from "./header.ts";
 import { mortonDecode, mortonEncode, shiftRight } from "./morton.ts";
 import type { CGeoDataReader } from "./reader.ts";
-import { openSource, type RandomAccessSource } from "./source.ts";
+import { type ByteSource, type SourceInput, toSource } from "./source.ts";
 import { readVarint, writeVarint } from "./varint.ts";
 
 // "CGEODATA" — same signature as the main data file.
@@ -271,17 +271,19 @@ function inRanges(
  * representative cell. This is what `locate()` does without an index,
  * and it reads every non-empty chunk.
  */
-export function computeLocateCell(
+export async function computeLocateCell(
 	reader: CGeoDataReader,
 	id: number,
-): LocateCell | null {
+): Promise<LocateCell | null> {
 	const { header } = reader;
 	checkGrid(header);
 	const ranges = reader.subtreeIdRanges(id);
 	const found: Array<[chunkIndex: number, code: number, depth: number]> = [];
 	const chunkCount = reader.directory.chunkLengths.length;
 	for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
-		const chunk = reader.chunk(chunkIndex);
+		// Not cached: a one-pass walk over every chunk would only evict
+		// what lookups had cached.
+		const chunk = await reader.chunk(chunkIndex, { cache: false });
 		if (!chunk) continue;
 		// wanted[k]: whether palette index k is one of the place's.
 		const wanted = new Uint8Array(chunk.palette.length + 1);
@@ -335,10 +337,10 @@ const DEFAULT_BATCH_RECORDS = 8_000_000;
  * so the records of any place and everything under it are one contiguous
  * run, and each place is one call to `representativeCell`.
  */
-export function buildLocateIndex(
+export async function buildLocateIndex(
 	reader: CGeoDataReader,
 	options: BuildLocateIndexOptions = {},
-): Uint8Array {
+): Promise<Uint8Array> {
 	const { header } = reader;
 	checkGrid(header);
 	const budget = options.batchRecords ?? DEFAULT_BATCH_RECORDS;
@@ -372,7 +374,7 @@ export function buildLocateIndex(
 	const recordCount = new Uint32Array(N);
 	const countryChunks: number[][] = Array.from({ length: C }, () => []);
 	for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
-		const chunk = reader.chunk(chunkIndex, { cache: false });
+		const chunk = await reader.chunk(chunkIndex, { cache: false });
 		if (!chunk) continue;
 		for (const k of chunk.paletteIndices) {
 			if (k === 0) continue;
@@ -444,7 +446,7 @@ export function buildLocateIndex(
 			for (const chunkIndex of countryChunks[c]!) batchChunks.add(chunkIndex);
 		}
 		for (const chunkIndex of [...batchChunks].sort((a, b) => a - b)) {
-			const chunk = reader.chunk(chunkIndex, { cache: false })!;
+			const chunk = (await reader.chunk(chunkIndex, { cache: false }))!;
 			const inBatch = chunk.palette.map((placeId) => {
 				const c = countryOf[placeId]!;
 				return c >= firstCountry && c < lastCountry;
@@ -486,7 +488,7 @@ export function buildLocateIndex(
 	}
 
 	return writeLocateIndex(
-		reader.prefixChecksum(),
+		await reader.prefixChecksum(),
 		locateEntryWidth(header),
 		entries,
 	);
@@ -550,40 +552,45 @@ const MAX_HEADER_LENGTH = SIGNATURE.length + 8 + 8 + 1 + 8;
  * `useLocateIndex()` does that against the file it's attached to.
  */
 export class LocateIndex {
-	private readonly source: RandomAccessSource;
+	private readonly source: ByteSource;
+	/** The index file's name, when its source has one (`ByteSource.name`). */
+	readonly name?: string;
 	private readonly entriesStart: number;
 	readonly sourceChecksum: bigint;
 	readonly entryWidth: number;
 	readonly placeCount: number;
 
 	private constructor(
-		source: RandomAccessSource,
+		source: ByteSource,
 		entriesStart: number,
 		sourceChecksum: bigint,
 		entryWidth: number,
 		placeCount: number,
 	) {
 		this.source = source;
+		if (source.name !== undefined) this.name = source.name;
 		this.entriesStart = entriesStart;
 		this.sourceChecksum = sourceChecksum;
 		this.entryWidth = entryWidth;
 		this.placeCount = placeCount;
 	}
 
-	/** Opens a locate index from a file path (read on demand) or bytes.
-	 * Validates signature, kind, version, entry width and length. */
-	static open(input: string | Uint8Array): LocateIndex {
-		const source = openSource(input);
+	/** Opens a locate index file (read on demand, like a `.bin`).
+	 * Validates signature, kind, version, entry width and length. Takes
+	 * ownership of a `ByteSource`: `close()` closes it, as does a failed
+	 * open. */
+	static async open(input: SourceInput): Promise<LocateIndex> {
+		const source = toSource(input);
 		try {
-			return LocateIndex.parseHeader(source);
+			return await LocateIndex.parseHeader(source);
 		} catch (error) {
-			source.close?.();
+			await source.close?.();
 			throw error;
 		}
 	}
 
-	private static parseHeader(source: RandomAccessSource): LocateIndex {
-		const data = source.readSync(0, Math.min(MAX_HEADER_LENGTH, source.size));
+	private static async parseHeader(source: ByteSource): Promise<LocateIndex> {
+		const data = await source.read(0, Math.min(MAX_HEADER_LENGTH, source.size));
 		if (data.length < SIGNATURE.length + 1) {
 			throw new CGeoDataFormatError(
 				"locate index file is too short to be valid",
@@ -646,18 +653,18 @@ export class LocateIndex {
 		return new LocateIndex(source, off, sourceChecksum, entryWidth, placeCount);
 	}
 
-	close(): void {
-		this.source.close?.();
+	async close(): Promise<void> {
+		await this.source.close?.();
 	}
 
 	/** Place `id`'s raw entry (Section C.2); `0` means no geometry. */
-	entry(id: number): number {
+	async entry(id: number): Promise<number> {
 		if (!Number.isInteger(id) || id < 0 || id >= this.placeCount) {
 			throw new RangeError(
 				`${id} is not a place id in this locate index (0 <= id < ${this.placeCount})`,
 			);
 		}
-		const bytes = this.source.readSync(
+		const bytes = await this.source.read(
 			this.entriesStart + id * this.entryWidth,
 			this.entryWidth,
 		);
@@ -666,11 +673,4 @@ export class LocateIndex {
 			value = value * 256 + bytes[b]!;
 		return value;
 	}
-}
-
-/** Where a locate index for `binPath` conventionally lives, and where
- * `CGeoDataReader.open()` looks for one: `data/03-final/world.bin` →
- * `data/03-final/world.locate-index.bin`. */
-export function locateIndexPathFor(binPath: string): string {
-	return `${binPath.replace(/\.bin$/, "")}.locate-index.bin`;
 }

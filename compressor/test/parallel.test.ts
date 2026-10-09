@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
-import { openSource, readHeaderAndDirectory } from "@loc-to-city/reader";
+import { toSource, readHeaderAndDirectory } from "@loc-to-city/reader";
 import { buildCGeoDataFileParallel } from "../src/buildParallel.ts";
 import type { HierarchyCountry } from "../src/hierarchy.ts";
 import type { CityProperties } from "../src/placeIds.ts";
@@ -71,8 +71,8 @@ const CHUNK_INDEX_BBOX_ONLY_B = 14; // col 2, row 3: bbox overlaps, no real area
 
 test("bbox-only chunks stay empty (null), not a zero-record block", async () => {
   const { bytes } = await buildCGeoDataFileParallel(hierarchy, cities, { ...options, workers: 4 });
-  const source = openSource(bytes);
-  const { directory } = readHeaderAndDirectory(source);
+  const source = toSource(bytes);
+  const { directory } = await readHeaderAndDirectory(source);
 
   assert.ok(directory.chunkLengths[CHUNK_INDEX_SQUARE_1]! > 0, "square 1's chunk should have real records");
   assert.ok(directory.chunkLengths[CHUNK_INDEX_SQUARE_2]! > 0, "square 2's chunk should have real records");

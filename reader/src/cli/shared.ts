@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { type ParseArgsConfig, parseArgs } from "node:util";
 import type { BoundingBox } from "../cellBounds.ts";
+import { FileSource, nodeInflater, openFile } from "../node.ts";
 import { CGeoDataReader, type Place, type PlaceLevel } from "../reader.ts";
 
 /** grep's convention: 0 = success/matched, 1 = ran fine but found nothing
@@ -63,9 +64,26 @@ export function parse<O extends Options>(argv: string[], options: O) {
 /** "-" reads the whole file from stdin; the reader needs random access,
  * so that means buffering it, which is fine at the sizes these files come
  * in (the worldwide build is under 10MB). */
-export function openReader(file: string | undefined): CGeoDataReader {
+export async function openReader(
+	file: string | undefined,
+): Promise<CGeoDataReader> {
 	if (file === undefined) throw new UsageError("missing <file.bin>");
-	return CGeoDataReader.open(file === "-" ? readFileSync(0) : file);
+	return file === "-"
+		? CGeoDataReader.open(readFileSync(0), { inflater: nodeInflater })
+		: openFile(file);
+}
+
+/** `--index <file>`: attaches that index file instead of the one next to
+ * the .bin, naming it in any error. */
+export async function useIndexFile(
+	use: (index: FileSource) => Promise<void>,
+	path: string,
+): Promise<void> {
+	try {
+		await use(await FileSource.open(path));
+	} catch (error) {
+		throw new Error(`--index ${path}: ${(error as Error).message}`);
+	}
 }
 
 export function parseLevel(text: string | undefined): PlaceLevel | undefined {
@@ -85,12 +103,16 @@ export function parseId(text: string, what: string): number {
 
 /** `--country` takes an id or a name; a name must match exactly one
  * country, case-insensitively, on any of its names. */
-export function resolveCountry(reader: CGeoDataReader, text: string): number {
+export async function resolveCountry(
+	reader: CGeoDataReader,
+	text: string,
+): Promise<number> {
 	if (/^\d+$/.test(text)) return parseId(text, "--country");
 	const wanted = text.toLowerCase();
-	const matches = [...reader.places({ level: "country" })].filter((c) =>
-		c.names.some((n) => n.toLowerCase() === wanted),
-	);
+	const matches: Place[] = [];
+	for await (const c of reader.places({ level: "country" })) {
+		if (c.names.some((n) => n.toLowerCase() === wanted)) matches.push(c);
+	}
 	if (matches.length === 1) return matches[0]!.id;
 	if (matches.length === 0)
 		throw new UsageError(`no country is named ${JSON.stringify(text)}`);

@@ -5,12 +5,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CGeoDataReader,
-  openSource,
   readHeaderAndDirectory,
   parsePlaceTable,
   readNameEntry,
   type QueryResult,
 } from "@loc-to-city/reader";
+import { FileSource, nodeInflater, openFile } from "@loc-to-city/reader/node";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BIN_PATH = path.resolve(__dirname, "../../data/03-final/zuid-holland.bin");
@@ -31,10 +31,10 @@ function assertUnknown(result: QueryResult): void {
   );
 }
 
-test("zuid-holland.bin: structural facts (1 country, 12 regions)", { skip }, () => {
-  const source = openSource(BIN_PATH);
-  const { header, directory } = readHeaderAndDirectory(source);
-  const placeTable = parsePlaceTable(source, directory.placeTableStart, directory.placeTableLength, header.keyframeExp);
+test("zuid-holland.bin: structural facts (1 country, 12 regions)", { skip }, async () => {
+  const source = await FileSource.open(BIN_PATH);
+  const { header, directory } = await readHeaderAndDirectory(source);
+  const placeTable = await parsePlaceTable(source, directory.placeTableStart, directory.placeTableLength, header.keyframeExp);
 
   assert.equal(placeTable.countryCount, 1);
   assert.equal(placeTable.totalRegions, 12);
@@ -44,10 +44,10 @@ test("zuid-holland.bin: structural facts (1 country, 12 regions)", { skip }, () 
   // an exact historical count the way the old Python-derived fixture had.
   assert.ok(placeTable.totalCities > 2000, `expected >2000 cities, got ${placeTable.totalCities}`);
 
-  assert.deepEqual(readNameEntry(source, placeTable, 0), ["Netherlands"]);
+  assert.deepEqual(await readNameEntry(source, placeTable, 0, nodeInflater), ["Netherlands"]);
 });
 
-test("zuid-holland.bin: every province has real cities, not just Zuid-Holland", { skip }, () => {
+test("zuid-holland.bin: every province has real cities, not just Zuid-Holland", { skip }, async () => {
   // Regression check for the "0-cities-elsewhere" fixture shape: it used
   // to be deliberate (the old Python-derived dataset only had Zuid-Holland's
   // cities), but the worldwide pipeline resolves every Dutch province's
@@ -55,16 +55,16 @@ test("zuid-holland.bin: every province has real cities, not just Zuid-Holland", 
   // -- see compressor/test/build.test.ts's "Beta (0 cities)" for a
   // synthetic fixture that still exercises Section 7.2's "a region MAY
   // have 0 cities" rule independent of this real-world dataset.
-  const source = openSource(BIN_PATH);
-  const { header, directory } = readHeaderAndDirectory(source);
-  const placeTable = parsePlaceTable(source, directory.placeTableStart, directory.placeTableLength, header.keyframeExp);
+  const source = await FileSource.open(BIN_PATH);
+  const { header, directory } = await readHeaderAndDirectory(source);
+  const placeTable = await parsePlaceTable(source, directory.placeTableStart, directory.placeTableLength, header.keyframeExp);
 
   let zuidHollandCityCount: number | undefined;
   let regionsWithZeroCities = 0;
   for (let r = 0; r < placeTable.totalRegions; r++) {
     const count = placeTable.cityRegionPrefix[r + 1]! - placeTable.cityRegionPrefix[r]!;
     const globalId = placeTable.countryCount + r;
-    const [name] = readNameEntry(source, placeTable, globalId);
+    const [name] = await readNameEntry(source, placeTable, globalId, nodeInflater);
     if (name === "Zuid-Holland") zuidHollandCityCount = count;
     if (count === 0) regionsWithZeroCities++;
   }
@@ -73,31 +73,31 @@ test("zuid-holland.bin: every province has real cities, not just Zuid-Holland", 
   assert.equal(regionsWithZeroCities, 0);
 });
 
-test("zuid-holland.bin: a resolved city's ancestor chain classifies correctly", { skip }, () => {
-  const reader = CGeoDataReader.open(BIN_PATH);
+test("zuid-holland.bin: a resolved city's ancestor chain classifies correctly", { skip }, async () => {
+  const reader = await openFile(BIN_PATH);
   // Den Haag city hall, well inside its own boundary.
-  const result = reader.query(52.0799, 4.3113);
+  const result = await reader.query(52.0799, 4.3113);
   assert.deepEqual(result.country, ["Netherlands"]);
   assert.deepEqual(result.region, ["Zuid-Holland", "South Holland"]);
   assert.ok(result.city, "expected a city-level result near Den Haag's city hall");
 });
 
-test("zuid-holland.bin: a point in Utrecht resolves to a real city, not just the region", { skip }, () => {
+test("zuid-holland.bin: a point in Utrecht resolves to a real city, not just the region", { skip }, async () => {
   // The old Python-derived fixture only ever had Zuid-Holland's cities, so
   // this same coordinate used to resolve to just `region: Utrecht, city:
   // null` (the original regression test for the compressor never
   // indexing region/country geometry at all -- see README's "Two real
   // bugs found by browser testing"). The worldwide pipeline resolves a
   // real city here too, now.
-  const reader = CGeoDataReader.open(BIN_PATH);
-  const result = reader.query(52.146973, 5.465698);
+  const reader = await openFile(BIN_PATH);
+  const result = await reader.query(52.146973, 5.465698);
   assert.deepEqual(result.country, ["Netherlands"]);
   assert.deepEqual(result.region, ["Utrecht"]);
   assert.ok(result.city, "expected a city-level result in Utrecht");
 });
 
-test("zuid-holland.bin: outside the Netherlands entirely is unknown", { skip }, () => {
-  const reader = CGeoDataReader.open(BIN_PATH);
-  assertUnknown(reader.query(53.5, 3.5)); // North Sea
-  assertUnknown(reader.query(51.2, 4.4)); // Belgium
+test("zuid-holland.bin: outside the Netherlands entirely is unknown", { skip }, async () => {
+  const reader = await openFile(BIN_PATH);
+  assertUnknown(await reader.query(53.5, 3.5)); // North Sea
+  assertUnknown(await reader.query(51.2, 4.4)); // Belgium
 });

@@ -8,14 +8,16 @@
  *   node --expose-gc reader/bench/bench.ts <file.bin> [section...]
  *
  * Each section runs in its own child process so no section sees another's
- * cache or heap. Sections: open, latency, bulk, tiles, burst, search,
- * memory. CGEODATA_BENCH_CACHE_BYTES sets the reader's cache budget
- * (`OpenOptions.cacheBytes`) where the reader supports one.
+ * cache or heap. Sections: open, latency, bulk, tiles, burst, eventloop,
+ * search, memory. CGEODATA_BENCH_CACHE_BYTES sets the reader's cache
+ * budget (`OpenOptions.cacheBytes`).
  */
 import { execFileSync } from "node:child_process";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { sampleTile } from "../../demo/src/tiles.ts";
-import { CGeoDataReader } from "../src/index.ts";
+import type { CGeoDataReader } from "../src/index.ts";
+import { openFile } from "../src/node.ts";
 
 const SECTIONS: Record<string, (file: string) => void | Promise<void>> = {
 	open,
@@ -23,22 +25,17 @@ const SECTIONS: Record<string, (file: string) => void | Promise<void>> = {
 	bulk,
 	tiles,
 	burst,
+	eventloop,
 	search,
 	memory,
 };
 
 const CACHE_BYTES = process.env.CGEODATA_BENCH_CACHE_BYTES;
 
-function openReader(file: string): CGeoDataReader {
-	// Spelled out as a cast so this file still runs against a reader whose
-	// open() takes no options (for comparing against older commits).
-	const open = CGeoDataReader.open as (
-		input: string,
-		options?: { cacheBytes?: number },
-	) => CGeoDataReader;
+function openReader(file: string): Promise<CGeoDataReader> {
 	return CACHE_BYTES === undefined
-		? open(file)
-		: open(file, { cacheBytes: Number(CACHE_BYTES) });
+		? openFile(file)
+		: openFile(file, { cacheBytes: Number(CACHE_BYTES) });
 }
 
 /** Lets the event loop turn over, as between two tasks of a server. */
@@ -80,17 +77,17 @@ function randomPoints(
 const WORLD: [number, number, number, number] = [-60, 75, -180, 180];
 const EUROPE: [number, number, number, number] = [36, 70, -10, 40];
 
-function open(file: string): void {
+async function open(file: string): Promise<void> {
 	let t = performance.now();
-	const reader = openReader(file);
+	const reader = await openReader(file);
 	row("open", ms(t));
 	t = performance.now();
-	reader.close();
+	await reader.close();
 	row("close", ms(t));
 }
 
-function latency(file: string): void {
-	const reader = openReader(file);
+async function latency(file: string): Promise<void> {
+	const reader = await openReader(file);
 	const points: Array<[string, number, number]> = [
 		["Paris", 48.8566, 2.3522],
 		["Tokyo", 35.6762, 139.6503],
@@ -100,31 +97,37 @@ function latency(file: string): void {
 	];
 	for (const [label, lat, lon] of points) {
 		const t = performance.now();
-		reader.query(lat, lon);
+		await reader.query(lat, lon);
 		row(`query cold   ${label}`, ms(t));
 	}
 	for (const [label, lat, lon] of points) {
 		const t = performance.now();
-		reader.query(lat, lon);
+		await reader.query(lat, lon);
 		row(`query warm   ${label}`, ms(t));
 	}
-	reader.close();
+	await reader.close();
 }
 
-function bulk(file: string): void {
+async function bulk(file: string): Promise<void> {
 	for (const [label, box] of [
 		["world", WORLD],
 		["europe", EUROPE],
 	] as const) {
 		const points = randomPoints(10_000, 1, box);
-		const reader = openReader(file);
-		let t = performance.now();
-		for (const [lat, lon] of points) reader.queryPlaceId(lat, lon);
-		row(`10k queryPlaceId ${label}, first pass`, ms(t));
-		t = performance.now();
-		for (const [lat, lon] of points) reader.queryPlaceId(lat, lon);
-		row(`10k queryPlaceId ${label}, second pass`, ms(t));
-		reader.close();
+		for (const cached of [false, true]) {
+			const how = cached ? "lookupCached ?? lookup" : "await lookup";
+			const reader = await openReader(file);
+			for (const pass of ["first", "second"]) {
+				const t = performance.now();
+				for (const [lat, lon] of points) {
+					if (cached)
+						reader.lookupCached(lat, lon) ?? (await reader.lookup(lat, lon));
+					else await reader.lookup(lat, lon);
+				}
+				row(`10k ${how} ${label}, ${pass}`, ms(t));
+			}
+			await reader.close();
+		}
 	}
 }
 
@@ -140,10 +143,10 @@ const TILES: Array<[z: number, x: number, y: number, resolution: number]> = [
 ];
 
 async function tiles(file: string): Promise<void> {
-	const reader = openReader(file);
+	const reader = await openReader(file);
 	for (const [z, x, y, resolution] of TILES) {
 		let t = performance.now();
-		sampleTile(reader, z, x, y, resolution, 1);
+		await sampleTile(reader, z, x, y, resolution, 1);
 		const cold = ms(t);
 		const reps = 5;
 		let total = 0;
@@ -152,14 +155,14 @@ async function tiles(file: string): Promise<void> {
 		for (let i = 0; i < reps; i++) {
 			await nextTask();
 			t = performance.now();
-			sampleTile(reader, z, x, y, resolution, 1);
+			await sampleTile(reader, z, x, y, resolution, 1);
 			total += performance.now() - t;
 		}
 		const warm = (total / reps).toFixed(2).padStart(9);
 		row(`tile ${z}/${x}/${y} @${resolution} cold`, cold);
 		row(`tile ${z}/${x}/${y} @${resolution} warm (avg of ${reps})`, warm);
 	}
-	reader.close();
+	await reader.close();
 }
 
 /** Leaflet's tile coordinates of a point at zoom `z`. */
@@ -184,7 +187,7 @@ async function burst(file: string): Promise<void> {
 		["initial view z10", 52.05, 4.3, 10],
 		["europe z4", 50, 10, 4],
 	] as const) {
-		const reader = openReader(file);
+		const reader = await openReader(file);
 		const [cx, cy] = tileAt(lat, lon, z);
 		const start = performance.now();
 		let worst = 0;
@@ -192,20 +195,60 @@ async function burst(file: string): Promise<void> {
 			for (let dx = -4; dx < 4; dx++) {
 				await nextTask();
 				const t = performance.now();
-				sampleTile(reader, z, cx + dx, cy + dy, defaultTileResolution(z), 1);
+				await sampleTile(
+					reader,
+					z,
+					cx + dx,
+					cy + dy,
+					defaultTileResolution(z),
+					1,
+				);
 				worst = Math.max(worst, performance.now() - t);
 			}
 		}
 		row(`burst 32 tiles, ${label}`, ms(start));
 		row(`  slowest tile`, worst.toFixed(2).padStart(9));
-		reader.close();
+		await reader.close();
 	}
 }
 
-function search(file: string): void {
-	const reader = openReader(file);
+/**
+ * How long the event loop is held up while lookups decode chunks: the
+ * longest single delay a timer saw (what a server's other requests wait
+ * at worst) during 300 cold lookups scattered over Europe -- one after
+ * another, then all at once.
+ */
+async function eventloop(file: string): Promise<void> {
+	const points = randomPoints(300, 3, EUROPE);
+	for (const concurrent of [false, true]) {
+		const reader = await openReader(file);
+		const histogram = monitorEventLoopDelay({ resolution: 1 });
+		histogram.enable();
+		const t = performance.now();
+		if (concurrent)
+			await Promise.all(points.map(([lat, lon]) => reader.lookup(lat, lon)));
+		else for (const [lat, lon] of points) await reader.lookup(lat, lon);
+		const elapsed = ms(t);
+		// Let the timer that was held up by the last stretch of work fire,
+		// so the histogram records that delay too.
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		histogram.disable();
+		const how = concurrent ? "concurrent" : "sequential";
+		row(`300 cold lookups, ${how}`, elapsed);
+		row(`  max event loop delay`, (histogram.max / 1e6).toFixed(2).padStart(9));
+		row(
+			`  p99 event loop delay`,
+			(histogram.percentile(99) / 1e6).toFixed(2).padStart(9),
+		);
+		await reader.close();
+	}
+}
+
+async function search(file: string): Promise<void> {
+	const reader = await openReader(file);
+	const hasLocateIndex = await reader.hasLocateIndex();
 	console.log(
-		`# search index: ${reader.hasSearchIndex}, locate index: ${reader.hasLocateIndex}`,
+		`# search index: ${await reader.hasSearchIndex()}, locate index: ${hasLocateIndex}`,
 	);
 	for (const [q, sort] of [
 		["berlin", true],
@@ -214,21 +257,27 @@ function search(file: string): void {
 		["den haag", true],
 	] as const) {
 		const t = performance.now();
-		const hits = [...reader.search(q, { sort, limit: 20 })];
+		const hits = await collect(reader.search(q, { sort, limit: 20 }));
 		row(
 			`search ${JSON.stringify(q)} sort=${sort} (${hits.length} hits)`,
 			ms(t),
 		);
 	}
-	if (reader.hasLocateIndex) {
-		const ids = [...reader.search("paris", { sort: true, limit: 20 })].map(
-			(p) => p.id,
-		);
+	if (hasLocateIndex) {
+		const ids = (
+			await collect(reader.search("paris", { sort: true, limit: 20 }))
+		).map((p) => p.id);
 		const t = performance.now();
-		for (const id of ids) reader.locate(id);
+		for (const id of ids) await reader.locate(id);
 		row(`locate x${ids.length} (indexed)`, ms(t));
 	}
-	reader.close();
+	await reader.close();
+}
+
+async function collect<T>(items: AsyncIterable<T>): Promise<T[]> {
+	const out: T[] = [];
+	for await (const item of items) out.push(item);
+	return out;
 }
 
 function mb(bytes: number): string {
@@ -248,21 +297,18 @@ async function memory(file: string): Promise<void> {
 		row(`${label} external+heap`, mb(external + heapUsed), "MB");
 	};
 	const points = randomPoints(5_000, 2, WORLD);
-	const reader = openReader(file);
+	const reader = await openReader(file);
 	await yieldAndGc();
 	report("after open");
-	for (const [lat, lon] of points) reader.query(lat, lon);
-	report("5k scattered, one sync job");
+	for (const [lat, lon] of points) await reader.query(lat, lon);
+	report("5k scattered, one after another");
 	await yieldAndGc();
 	report("  after yield + gc");
-	for (const [lat, lon] of points) {
-		reader.query(lat, lon);
-		await new Promise((resolve) => setImmediate(resolve));
-	}
-	report("5k scattered, one job each");
+	await Promise.all(points.map(([lat, lon]) => reader.query(lat, lon)));
+	report("5k scattered, all at once");
 	await yieldAndGc();
 	report("  after yield + gc");
-	reader.close();
+	await reader.close();
 }
 
 const [file, ...requested] = process.argv.slice(2);

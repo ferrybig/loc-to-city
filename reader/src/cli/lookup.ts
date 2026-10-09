@@ -112,9 +112,9 @@ stderr and skipped rather than aborting the batch.
 				"stdin can't be both the file and the list of points",
 			);
 
-		const reader = openReader(file);
-		const emit = (point: Point): void => {
-			const result = reader.query(point.lat, point.lon);
+		const reader = await openReader(file);
+		const emit = async (point: Point): Promise<void> => {
+			const result = await reader.query(point.lat, point.lon);
 			writeLine(
 				values.json
 					? formatJson(point, result)
@@ -124,7 +124,7 @@ stderr and skipped rather than aborting the batch.
 
 		try {
 			if (!fromStdin) {
-				for (const arg of pointArgs) emit(parsePoint(arg));
+				for (const arg of pointArgs) await emit(parsePoint(arg));
 				return 0;
 			}
 
@@ -140,7 +140,7 @@ stderr and skipped rather than aborting the batch.
 				const line = raw.trim();
 				if (line === "" || line.startsWith("#")) continue;
 				try {
-					emit(parsePoint(line));
+					await emit(parsePoint(line));
 				} catch (err) {
 					skipped++;
 					process.stderr.write(
@@ -154,7 +154,7 @@ stderr and skipped rather than aborting the batch.
 				);
 			return 0;
 		} finally {
-			reader.close();
+			await reader.close();
 		}
 	},
 };

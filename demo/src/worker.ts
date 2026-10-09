@@ -9,55 +9,59 @@
  * reader rejects (an out-of-range coordinate or place id) throws a
  * RangeError, which survives the trip back to the server as one.
  */
-import { existsSync } from "node:fs";
 import { workerData } from "node:worker_threads";
+import type { QueryResult } from "@loc-to-city/reader";
 import {
-	CGeoDataReader,
 	locateIndexPathFor,
-	type QueryResult,
+	openFile,
 	searchIndexPathFor,
-} from "@loc-to-city/reader";
+} from "@loc-to-city/reader/node";
 import { renderTilePng } from "./tiles.ts";
 
 export interface WorkerData {
 	datasetPath: string;
 }
 
-/** Attaches the sidecar index at `indexPath` if there is one, read on
- * demand from the file; one that doesn't match the dataset is skipped.
- * Returns what happened, for the server to log once rather than every
- * worker logging it. */
-function attachIndex(
+/** Opens the sidecar index `openFile()` found next to the dataset, if
+ * there is one; one that doesn't match the dataset is dropped. Returns
+ * what happened, for the server to log once rather than every worker
+ * logging it. */
+async function attachIndex(
 	kind: string,
 	indexPath: string,
-	use: (index: string | undefined) => void,
-): string {
-	if (!existsSync(indexPath)) {
-		return `No ${kind} index at ${indexPath}; ${kind} scans the dataset.`;
-	}
+	has: () => Promise<boolean>,
+	drop: () => Promise<void>,
+): Promise<string> {
 	try {
-		use(indexPath);
-		return `Using ${kind} index ${indexPath}.`;
+		return (await has())
+			? `Using ${kind} index ${indexPath}.`
+			: `No ${kind} index at ${indexPath}; ${kind} scans the dataset.`;
 	} catch (error) {
-		use(undefined);
+		await drop();
 		return `Ignoring ${kind} index ${indexPath}: ${(error as Error).message}`;
 	}
 }
 
 const { datasetPath } = workerData as WorkerData;
-const reader = CGeoDataReader.open(datasetPath);
+const reader = await openFile(datasetPath);
 // Optional sidecars next to the dataset: data/03-final/world.bin pairs
 // with data/03-final/world.search-index.bin (`cgeodata build-search-index`)
 // and data/03-final/world.locate-index.bin (`cgeodata build-locate-index`). They only
 // speed up search() and locate(); results are the same without them.
-// Attached up front so a stale one is skipped instead of failing every
+// Opened up front so a stale one is dropped instead of failing every
 // request.
 const indexStatus = [
-	attachIndex("search", searchIndexPathFor(datasetPath), (index) =>
-		reader.useSearchIndex(index),
+	await attachIndex(
+		"search",
+		searchIndexPathFor(datasetPath),
+		() => reader.hasSearchIndex(),
+		() => reader.useSearchIndex(undefined),
 	),
-	attachIndex("locate", locateIndexPathFor(datasetPath), (index) =>
-		reader.useLocateIndex(index),
+	await attachIndex(
+		"locate",
+		locateIndexPathFor(datasetPath),
+		() => reader.hasLocateIndex(),
+		() => reader.useLocateIndex(undefined),
 	),
 ];
 
@@ -97,37 +101,45 @@ export const tile = skipIfCancelled(
 		x: number;
 		y: number;
 		resolution: number;
-	}): Uint8Array => renderTilePng(reader, z, x, y, resolution),
+	}): Promise<Uint8Array> => renderTilePng(reader, z, x, y, resolution),
 );
 
 export const query = skipIfCancelled(
-	({
+	async ({
 		lat,
 		lon,
 	}: {
 		lat: number;
 		lon: number;
-	}): QueryResult & { query_time_us: number } => {
+	}): Promise<QueryResult & { query_time_us: number }> => {
 		const t0 = performance.now();
-		const result = reader.query(lat, lon);
+		const result = await reader.query(lat, lon);
 		const t1 = performance.now();
 		return { ...result, query_time_us: (t1 - t0) * 1000 };
 	},
 );
 
-export const search = skipIfCancelled(({ q }: { q: string }) =>
-	[...reader.search(q, { sort: true, limit: 5 })].map((place) => ({
-		id: place.id,
-		level: place.level,
-		names: place.names,
-		region: place.region?.names ?? null,
-		country: place.country.names,
-	})),
-);
+export const search = skipIfCancelled(async ({ q }: { q: string }) => {
+	const results = [];
+	for await (const place of reader.search(q, { sort: true, limit: 5 })) {
+		results.push({
+			id: place.id,
+			level: place.level,
+			names: place.names,
+			region: place.region?.names ?? null,
+			country: place.country.names,
+		});
+	}
+	return results;
+});
 
 export const locate = skipIfCancelled(
-	({ id }: { id: number }): { lat: number; lon: number } | null => {
-		const pos = reader.locate(id);
+	async ({
+		id,
+	}: {
+		id: number;
+	}): Promise<{ lat: number; lon: number } | null> => {
+		const pos = await reader.locate(id);
 		return pos && { lat: pos.lat, lon: pos.lon };
 	},
 );

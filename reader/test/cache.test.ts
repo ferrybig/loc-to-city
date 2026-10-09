@@ -33,20 +33,25 @@ test("ByteBudgetCache skips a value bigger than the whole budget", () => {
 	assert.equal(cache.size, 4);
 });
 
-test("open: cacheBytes bounds the cache, and 0 still answers lookups", () => {
-	const unlimited = CGeoDataReader.open(APPENDIX_A_BYTES);
-	const uncached = CGeoDataReader.open(APPENDIX_A_BYTES, { cacheBytes: 0 });
+test("open: cacheBytes bounds the cache, and 0 still answers lookups", async () => {
+	const unlimited = await CGeoDataReader.open(APPENDIX_A_BYTES);
+	const uncached = await CGeoDataReader.open(APPENDIX_A_BYTES, {
+		cacheBytes: 0,
+	});
 	for (const [lat, lon] of [
 		[52.37, 4.9],
 		[51.2, 4.4],
 		[0, 0],
 		[52.37, 4.9],
 	] as const) {
-		assert.deepEqual(uncached.query(lat, lon), unlimited.query(lat, lon));
+		assert.deepEqual(
+			await uncached.query(lat, lon),
+			await unlimited.query(lat, lon),
+		);
 	}
 	for (const cacheBytes of [-1, Number.NaN]) {
-		assert.throws(
-			() => CGeoDataReader.open(APPENDIX_A_BYTES, { cacheBytes }),
+		await assert.rejects(
+			async () => await CGeoDataReader.open(APPENDIX_A_BYTES, { cacheBytes }),
 			RangeError,
 		);
 	}

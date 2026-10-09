@@ -3,11 +3,12 @@ import assert from "node:assert/strict";
 import type { FeatureCollection, Polygon } from "geojson";
 import {
   CGeoDataReader,
-  openSource,
+  toSource,
   readHeaderAndDirectory,
   parsePlaceTable,
   resolveIdentifier,
   readNameEntry,
+  streamInflater,
 } from "@loc-to-city/reader";
 import { buildCGeoDataFile } from "../src/build.ts";
 import type { HierarchyCountry } from "../src/hierarchy.ts";
@@ -62,56 +63,56 @@ const cities: FeatureCollection<Polygon, CityProperties> = {
 
 const options = { attribution: "test fixture", widthExp: 0, heightExp: 0, maxDepth: 10, keyframeExp: 0 };
 
-test("well inside Springfield resolves to Springfield / Alpha / Testland", () => {
+test("well inside Springfield resolves to Springfield / Alpha / Testland", async () => {
   const { bytes } = buildCGeoDataFile(hierarchy, cities, options);
-  const reader = CGeoDataReader.open(bytes);
-  const result = reader.query(0.5, 0.25);
+  const reader = await CGeoDataReader.open(bytes);
+  const result = await reader.query(0.5, 0.25);
   assert.deepEqual(result.country, ["Testland"]);
   assert.deepEqual(result.region, ["Alpha"]);
   assert.deepEqual(result.city, ["Springfield"]);
 });
 
-test("well inside Shelbyville resolves to Shelbyville", () => {
+test("well inside Shelbyville resolves to Shelbyville", async () => {
   const { bytes } = buildCGeoDataFile(hierarchy, cities, options);
-  const reader = CGeoDataReader.open(bytes);
-  const result = reader.query(0.5, 1.75);
+  const reader = await CGeoDataReader.open(bytes);
+  const result = await reader.query(0.5, 1.75);
   assert.deepEqual(result.city, ["Shelbyville"]);
 });
 
-test("far from either square resolves to unknown", () => {
+test("far from either square resolves to unknown", async () => {
   const { bytes } = buildCGeoDataFile(hierarchy, cities, options);
-  const reader = CGeoDataReader.open(bytes);
-  const result = reader.query(50, 50);
+  const reader = await CGeoDataReader.open(bytes);
+  const result = await reader.query(50, 50);
   assert.deepEqual(
     { country: result.country, region: result.region, city: result.city },
     { country: null, region: null, city: null },
   );
 });
 
-test("a cell straddling the shared border still resolves to exactly one city", () => {
+test("a cell straddling the shared border still resolves to exactly one city", async () => {
   const { bytes } = buildCGeoDataFile(hierarchy, cities, options);
-  const reader = CGeoDataReader.open(bytes);
+  const reader = await CGeoDataReader.open(bytes);
   // Right on the shared edge: neither square fully contains a cell here at
   // any depth, so this only succeeds if max-depth area-share resolution
   // picks a winner instead of leaving a gap.
-  const result = reader.query(0.5, 1.0 - 1e-9);
+  const result = await reader.query(0.5, 1.0 - 1e-9);
   assert.ok(result.city?.[0] === "Springfield" || result.city?.[0] === "Shelbyville", `got ${result.city}`);
 });
 
-test("Beta (0 cities) is still present and resolvable by name", () => {
+test("Beta (0 cities) is still present and resolvable by name", async () => {
   const { bytes, stats } = buildCGeoDataFile(hierarchy, cities, options);
   assert.equal(stats.countryCount, 1);
   assert.equal(stats.regionCount, 2);
   assert.equal(stats.cityCount, 2);
 
-  const source = openSource(bytes);
-  const { header, directory } = readHeaderAndDirectory(source);
-  const placeTable = parsePlaceTable(source, directory.placeTableStart, directory.placeTableLength, header.keyframeExp);
+  const source = toSource(bytes);
+  const { header, directory } = await readHeaderAndDirectory(source);
+  const placeTable = await parsePlaceTable(source, directory.placeTableStart, directory.placeTableLength, header.keyframeExp);
 
   // Beta is region index 1 (Alpha is 0), global id = countryCount + 1 = 2.
   const resolved = resolveIdentifier(placeTable, 2);
   assert.deepEqual(resolved, { level: "region", countryId: 0, regionId: 1 });
-  assert.deepEqual(readNameEntry(source, placeTable, 2), ["Beta"]);
+  assert.deepEqual(await readNameEntry(source, placeTable, 2, streamInflater), ["Beta"]);
 
   const betaCityCount = placeTable.cityRegionPrefix[2]! - placeTable.cityRegionPrefix[1]!;
   assert.equal(betaCityCount, 0);
@@ -130,7 +131,7 @@ test("assembleNameEntry", () => {
   assert.equal(assembleNameEntry("Local", "Bad\0Name"), "Local");
 });
 
-test("a region's international name doesn't affect the region/city join, only its displayed name entry", () => {
+test("a region's international name doesn't affect the region/city join, only its displayed name entry", async () => {
   // Alpha's join key (used to match Springfield/Shelbyville) stays the
   // plain local "Alpha" throughout ingest -- regionNames only adds a
   // display-time international name, keyed by that same local name
@@ -152,26 +153,26 @@ test("a region's international name doesn't affect the region/city join, only it
   };
 
   const { bytes } = buildCGeoDataFile(intlHierarchy, intlCities, options);
-  const reader = CGeoDataReader.open(bytes);
+  const reader = await CGeoDataReader.open(bytes);
 
   // The join still resolves correctly -- Springfield is still found inside
   // Alpha despite both having gained an unrelated international name. The
   // reader returns the full split name array (local first, then
   // international), not just the local name.
-  const result = reader.query(0.5, 0.25);
+  const result = await reader.query(0.5, 0.25);
   assert.deepEqual(result.country, ["Testland"]);
   assert.deepEqual(result.region, ["Alpha", "Alpha Province"]);
   assert.deepEqual(result.city, ["Springfield", "Springfield City"]);
 
-  const source = openSource(bytes);
-  const { header, directory } = readHeaderAndDirectory(source);
-  const placeTable = parsePlaceTable(source, directory.placeTableStart, directory.placeTableLength, header.keyframeExp);
+  const source = toSource(bytes);
+  const { header, directory } = await readHeaderAndDirectory(source);
+  const placeTable = await parsePlaceTable(source, directory.placeTableStart, directory.placeTableLength, header.keyframeExp);
 
   // Alpha/Beta are region global ids 1/2 (after country id 0). Cities are
   // sorted by id within a region (placeIds.ts), and "shelbyville" sorts
   // before "springfield", so Shelbyville is city id 3, Springfield id 4.
-  assert.deepEqual(readNameEntry(source, placeTable, 1), ["Alpha", "Alpha Province"]);
-  assert.deepEqual(readNameEntry(source, placeTable, 2), ["Beta"]);
-  assert.deepEqual(readNameEntry(source, placeTable, 3), ["Shelbyville"]);
-  assert.deepEqual(readNameEntry(source, placeTable, 4), ["Springfield", "Springfield City"]);
+  assert.deepEqual(await readNameEntry(source, placeTable, 1, streamInflater), ["Alpha", "Alpha Province"]);
+  assert.deepEqual(await readNameEntry(source, placeTable, 2, streamInflater), ["Beta"]);
+  assert.deepEqual(await readNameEntry(source, placeTable, 3, streamInflater), ["Shelbyville"]);
+  assert.deepEqual(await readNameEntry(source, placeTable, 4, streamInflater), ["Springfield", "Springfield City"]);
 });

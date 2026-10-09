@@ -34,7 +34,7 @@ precomputed table.
   --top-count N       places per 1-2 character query; 0 leaves the
                       table out (default ${topCount})
   --top-block-exp N   2^N table entries per block (default ${topBlockExp})`,
-	run(argv) {
+	async run(argv) {
 		const { values, positionals } = parse(argv, {
 			output: { type: "string" },
 			"hash-exp": { type: "string" },
@@ -61,7 +61,7 @@ precomputed table.
 			options[key] = value;
 		}
 
-		const reader = openReader(file);
+		const reader = await openReader(file);
 		const { countries, regions, cities } = reader.placeCounts;
 		process.stderr.write(
 			`building search index over ${countries + regions + cities} places...\n`,
@@ -69,11 +69,11 @@ precomputed table.
 		const t0 = performance.now();
 		let bytes: Uint8Array;
 		try {
-			bytes = buildSearchIndex(reader, options);
+			bytes = await buildSearchIndex(reader, options);
 		} catch (error) {
 			throw error instanceof RangeError ? new UsageError(error.message) : error;
 		} finally {
-			reader.close();
+			await reader.close();
 		}
 		process.stderr.write(
 			`done in ${((performance.now() - t0) / 1000).toFixed(1)} s, ${(bytes.length / 1024 / 1024).toFixed(1)} MiB\n`,

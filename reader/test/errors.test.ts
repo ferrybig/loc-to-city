@@ -11,10 +11,15 @@ import {
 	CGeoDataIndexMismatchError,
 	CGeoDataReader,
 	CGeoDataVersionError,
-	locateIndexPathFor,
-	searchIndexPathFor,
 } from "../src/index.ts";
+import {
+	locateIndexPathFor,
+	nodeInflater,
+	openFile,
+	searchIndexPathFor,
+} from "../src/node.ts";
 import { APPENDIX_A_BYTES } from "./fixtures/appendixA.ts";
+import { collect } from "./helpers.ts";
 
 /** Appendix A's file with `edit` applied to a copy of its bytes. */
 function tampered(edit: (bytes: Uint8Array) => void): Uint8Array {
@@ -23,12 +28,13 @@ function tampered(edit: (bytes: Uint8Array) => void): Uint8Array {
 	return bytes;
 }
 
-/** Asserts `fn` throws an instance of exactly `cls` (not a subclass). */
-function throwsExactly(
-	fn: () => unknown,
+/** Asserts `fn` rejects with an instance of exactly `cls` (not a
+ * subclass). */
+async function rejectsExactly(
+	fn: () => Promise<unknown>,
 	cls: new (...args: never[]) => Error,
-) {
-	assert.throws(fn, (error: unknown) => {
+): Promise<void> {
+	await assert.rejects(fn, (error: unknown) => {
 		assert.ok(error instanceof cls, `${error} is not a ${cls.name}`);
 		assert.equal((error as Error).constructor, cls);
 		assert.equal((error as Error).name, cls.name);
@@ -36,18 +42,18 @@ function throwsExactly(
 	});
 }
 
-test("a bad signature is a format error", () => {
-	throwsExactly(
+test("a bad signature is a format error", async () => {
+	await rejectsExactly(
 		() => CGeoDataReader.open(tampered((b) => (b[0] = 0x00))),
 		CGeoDataFormatError,
 	);
 });
 
-test("an unknown version is a version error carrying the version", () => {
+test("an unknown version is a version error carrying the version", async () => {
 	// The version varint directly follows the 8-byte signature (Section 5).
 	const bytes = tampered((b) => (b[8] = 3));
-	throwsExactly(() => CGeoDataReader.open(bytes), CGeoDataVersionError);
-	assert.throws(
+	await rejectsExactly(() => CGeoDataReader.open(bytes), CGeoDataVersionError);
+	await assert.rejects(
 		() => CGeoDataReader.open(bytes),
 		(error: unknown) =>
 			error instanceof CGeoDataFormatError &&
@@ -55,12 +61,14 @@ test("an unknown version is a version error carrying the version", () => {
 	);
 });
 
-test("a truncated file is a format error, wherever it's cut", () => {
+test("a truncated file is a format error, wherever it's cut", async () => {
 	for (const length of [4, 12, 20, APPENDIX_A_BYTES.length - 1]) {
-		assert.throws(
-			() => {
-				const reader = CGeoDataReader.open(APPENDIX_A_BYTES.slice(0, length));
-				reader.query(52.37, 4.9);
+		await assert.rejects(
+			async () => {
+				const reader = await CGeoDataReader.open(
+					APPENDIX_A_BYTES.slice(0, length),
+				);
+				await reader.query(52.37, 4.9);
 			},
 			CGeoDataFormatError,
 			`cut at ${length} bytes`,
@@ -68,24 +76,33 @@ test("a truncated file is a format error, wherever it's cut", () => {
 	}
 });
 
-test("a corrupt compressed chunk is a format error, with zlib's error as cause", () => {
-	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
-	const { chunkOffsets, chunkLengths } = reader.directory;
-	const chunk = chunkLengths.findIndex((length) => length > 0);
-	const bytes = tampered((b) => {
-		// Past the 2-byte zlib header, into the deflate data and checksum.
-		for (let i = 2; i < chunkLengths[chunk]!; i++)
-			b[chunkOffsets[chunk]! + i]! ^= 0x5a;
+for (const [inflaterName, inflater] of [
+	["streamInflater", undefined],
+	["nodeInflater", nodeInflater],
+] as const) {
+	test(`a corrupt compressed chunk is a format error, with the inflater's error as cause (${inflaterName})`, async () => {
+		const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
+		const { chunkOffsets, chunkLengths } = reader.directory;
+		const chunk = chunkLengths.findIndex((length) => length > 0);
+		const bytes = tampered((b) => {
+			// Past the 2-byte zlib header, into the deflate data and checksum.
+			for (let i = 2; i < chunkLengths[chunk]!; i++)
+				b[chunkOffsets[chunk]! + i]! ^= 0x5a;
+		});
+		const corrupt = await CGeoDataReader.open(
+			bytes,
+			inflater ? { inflater } : {},
+		);
+		await assert.rejects(
+			() => corrupt.chunk(chunk),
+			(error: unknown) =>
+				error instanceof CGeoDataFormatError && error.cause instanceof Error,
+		);
 	});
-	assert.throws(
-		() => CGeoDataReader.open(bytes).chunk(chunk),
-		(error: unknown) =>
-			error instanceof CGeoDataFormatError && error.cause instanceof Error,
-	);
-});
+}
 
-test("an index built from another file is a mismatch, also when found next to the file", () => {
-	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
+test("an index built from another file is a mismatch, also when found next to the file", async () => {
+	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
 	// The source checksum starts right after the 8-byte signature and the
 	// one-byte version (Appendix B.3 / C.2).
 	const stale = (index: Uint8Array) => {
@@ -93,13 +110,13 @@ test("an index built from another file is a mismatch, also when found next to th
 		bytes[9]! ^= 0xff;
 		return bytes;
 	};
-	const search = stale(buildSearchIndex(reader));
-	const locate = stale(buildLocateIndex(reader));
-	throwsExactly(
+	const search = stale(await buildSearchIndex(reader));
+	const locate = stale(await buildLocateIndex(reader));
+	await rejectsExactly(
 		() => reader.useSearchIndex(search),
 		CGeoDataIndexMismatchError,
 	);
-	throwsExactly(
+	await rejectsExactly(
 		() => reader.useLocateIndex(locate),
 		CGeoDataIndexMismatchError,
 	);
@@ -109,9 +126,12 @@ test("an index built from another file is a mismatch, also when found next to th
 	writeFileSync(binPath, APPENDIX_A_BYTES);
 	writeFileSync(searchIndexPathFor(binPath), search);
 	writeFileSync(locateIndexPathFor(binPath), locate);
-	const fromPath = CGeoDataReader.open(binPath);
-	throwsExactly(() => [...fromPath.search("dam")], CGeoDataIndexMismatchError);
-	assert.throws(
+	const fromPath = await openFile(binPath);
+	await rejectsExactly(
+		() => collect(fromPath.search("dam")),
+		CGeoDataIndexMismatchError,
+	);
+	await assert.rejects(
 		() => fromPath.locate(0),
 		(error: unknown) => {
 			assert.ok(error instanceof CGeoDataIndexMismatchError);
@@ -123,30 +143,41 @@ test("an index built from another file is a mismatch, also when found next to th
 			return true;
 		},
 	);
-	fromPath.close();
+	await fromPath.close();
 });
 
-test("a corrupt index is a format error", () => {
-	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
+test("a corrupt index is a format error", async () => {
+	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
 	const garbage = new Uint8Array(100);
-	throwsExactly(() => reader.useSearchIndex(garbage), CGeoDataFormatError);
-	throwsExactly(() => reader.useLocateIndex(garbage), CGeoDataFormatError);
+	await rejectsExactly(
+		() => reader.useSearchIndex(garbage),
+		CGeoDataFormatError,
+	);
+	await rejectsExactly(
+		() => reader.useLocateIndex(garbage),
+		CGeoDataFormatError,
+	);
 });
 
-test("invalid arguments are RangeErrors, not CGeoDataErrors", () => {
-	const reader = CGeoDataReader.open(APPENDIX_A_BYTES);
+test("invalid arguments are RangeErrors, not CGeoDataErrors", async () => {
+	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
+	const isRangeError = (error: unknown) =>
+		error instanceof RangeError && !(error instanceof CGeoDataError);
 	for (const fn of [
 		() => reader.query(90, 0),
-		() => reader.query(0, 180),
+		() => reader.lookup(0, 180),
 		() => reader.place(-1),
 		() => reader.placeNames(1.5),
 		() => reader.chunk(1e9),
 		() => reader.locate(1e9),
 	]) {
-		assert.throws(
-			fn,
-			(error: unknown) =>
-				error instanceof RangeError && !(error instanceof CGeoDataError),
-		);
+		await assert.rejects(fn, isRangeError);
+	}
+	for (const fn of [
+		() => reader.lookupCached(90, 0),
+		() => reader.placeIds(-1),
+		() => reader.chunkIndexAt(0, -181),
+	]) {
+		assert.throws(fn, isRangeError);
 	}
 });

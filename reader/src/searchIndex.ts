@@ -12,8 +12,7 @@
  *     order, for every 1-2 character query that has any match.
  * Nothing is compressed, and the header records every section's length,
  * so a reader reads the header once and afterwards only the lists or the
- * table block a query needs, each cached behind a WeakRef like the
- * reader's name blocks.
+ * table block a query needs, each cached behind a WeakRef.
  */
 
 import { CGeoDataFormatError, CGeoDataVersionError } from "./errors.ts";
@@ -26,7 +25,7 @@ import {
 	prepareNeedle,
 	QUALITY_MAX,
 } from "./relevance.ts";
-import { openSource, type RandomAccessSource } from "./source.ts";
+import { type ByteSource, type SourceInput, toSource } from "./source.ts";
 import { readVarint, writeVarint } from "./varint.ts";
 
 // ── Symbol folding (Section B.2) ──────────────────────────────────────────────
@@ -204,10 +203,10 @@ function pushTop(top: Ranked[], score: number, id: number, k: number): void {
 /** Builds a search index (Appendix B) over every place in `reader` and
  * returns the file's bytes. A pure function of the place table and the
  * options: the same input always gives the same bytes. */
-export function buildSearchIndex(
+export async function buildSearchIndex(
 	reader: CGeoDataReader,
 	options: SearchIndexOptions = {},
-): Uint8Array {
+): Promise<Uint8Array> {
 	const { hashExp, topCount, topBlockExp } = {
 		...DEFAULT_SEARCH_INDEX_OPTIONS,
 		...options,
@@ -242,7 +241,7 @@ export function buildSearchIndex(
 	const table = new Map<string, Ranked[]>();
 	const keyNeedles = new Map<string, Needle>();
 	for (let id = 0; id < N; id++) {
-		const names = reader.placeNames(id);
+		const names = await reader.placeNames(id);
 		const lists = new Set<number>();
 		const keyQuality = new Map<string, number>();
 		for (const name of names) {
@@ -340,7 +339,7 @@ export function buildSearchIndex(
 	const out = new ByteSink();
 	out.bytes(SIGNATURE);
 	out.varint(STORED_VERSION);
-	const checksum = reader.placeTableChecksum();
+	const checksum = await reader.placeTableChecksum();
 	const checksumBytes = new Uint8Array(8);
 	const dv = new DataView(checksumBytes.buffer);
 	dv.setUint32(0, Number(checksum & 0xffffffffn), true);
@@ -359,13 +358,6 @@ export function buildSearchIndex(
 	out.bytes(tableDirectory.toBytes());
 	out.bytes(tableBlocks.toBytes());
 	return out.toBytes();
-}
-
-/** Where a search index for `binPath` conventionally lives, and where
- * `CGeoDataReader.open()` looks for one: `data/03-final/world.bin` →
- * `data/03-final/world.search-index.bin`. */
-export function searchIndexPathFor(binPath: string): string {
-	return `${binPath.replace(/\.bin$/, "")}.search-index.bin`;
 }
 
 // ── Reader ────────────────────────────────────────────────────────────────────
@@ -406,7 +398,9 @@ export class SearchIndex {
 		WeakRef<Map<string, number[]>>
 	>();
 
-	private readonly source: RandomAccessSource;
+	private readonly source: ByteSource;
+	/** The index file's name, when its source has one (`ByteSource.name`). */
+	readonly name?: string;
 	readonly sourceChecksum: bigint;
 	/** N, the number of places in the source; every one is indexed. */
 	readonly placeCount: number;
@@ -424,7 +418,7 @@ export class SearchIndex {
 	private readonly tableBlocksLength: number;
 
 	private constructor(
-		source: RandomAccessSource,
+		source: ByteSource,
 		sourceChecksum: bigint,
 		placeCount: number,
 		hashExp: number,
@@ -440,6 +434,7 @@ export class SearchIndex {
 		tableBlocksLength: number,
 	) {
 		this.source = source;
+		if (source.name !== undefined) this.name = source.name;
 		this.sourceChecksum = sourceChecksum;
 		this.placeCount = placeCount;
 		this.hashExp = hashExp;
@@ -455,20 +450,21 @@ export class SearchIndex {
 		this.tableBlocksLength = tableBlocksLength;
 	}
 
-	/** Opens a search index from a file path (read on demand) or bytes,
-	 * validating its header (Section B.10). */
-	static open(input: string | Uint8Array): SearchIndex {
-		const source = openSource(input);
+	/** Opens a search index file (read on demand, like a `.bin`),
+	 * validating its header (Section B.10). Takes ownership of a
+	 * `ByteSource`: `close()` closes it, as does a failed open. */
+	static async open(input: SourceInput): Promise<SearchIndex> {
+		const source = toSource(input);
 		try {
-			return SearchIndex.parseHeader(source);
+			return await SearchIndex.parseHeader(source);
 		} catch (error) {
-			source.close?.();
+			await source.close?.();
 			throw error;
 		}
 	}
 
-	private static parseHeader(source: RandomAccessSource): SearchIndex {
-		const data = source.readSync(0, Math.min(MAX_HEADER_LENGTH, source.size));
+	private static async parseHeader(source: ByteSource): Promise<SearchIndex> {
+		const data = await source.read(0, Math.min(MAX_HEADER_LENGTH, source.size));
 		if (data.length < SIGNATURE.length + 1) {
 			throw new CGeoDataFormatError(
 				"search index file is too short to be valid",
@@ -577,8 +573,8 @@ export class SearchIndex {
 		);
 	}
 
-	close(): void {
-		this.source.close?.();
+	async close(): Promise<void> {
+		await this.source.close?.();
 	}
 
 	/** L = 28^3 + 2^hashExp possible list indices. */
@@ -592,10 +588,10 @@ export class SearchIndex {
 	 * has to confirm name by name. Undefined when `text` folds to fewer
 	 * than 3 symbols, i.e. the lists can't rule anything out.
 	 */
-	candidates(text: string): number[] | undefined {
+	async candidates(text: string): Promise<number[] | undefined> {
 		const indices = trigramListIndices(text, this.hashExp);
 		if (indices.length === 0) return undefined;
-		const dir = this.listDirectory();
+		const dir = await this.listDirectory();
 		const slots: number[] = [];
 		for (const l of indices) {
 			const slot = findSlot(dir.indices, l);
@@ -607,7 +603,7 @@ export class SearchIndex {
 		slots.sort((a, b) => dir.lengths[a]! - dir.lengths[b]!);
 		let candidates: number[] | undefined;
 		for (const slot of slots) {
-			const list = this.list(dir, slot);
+			const list = await this.list(dir, slot);
 			if (dir.encodings[slot] === ENCODING_ID_LIST) {
 				const ids = this.decodeIdList(list);
 				candidates = candidates ? intersectSorted(candidates, ids) : ids;
@@ -634,12 +630,12 @@ export class SearchIndex {
 	 * (the query's folded form already equals its plain lowercase form)
 	 * before trusting this; `CGeoDataReader.searchRanked` does.
 	 */
-	shortQuery(text: string): number[] | undefined {
+	async shortQuery(text: string): Promise<number[] | undefined> {
 		if (this.topCount === 0) return undefined;
 		const key = foldDiacritics(text);
 		const length = Array.from(key).length;
 		if (length < 1 || length > 2) return undefined;
-		const dir = this.tableDirectory();
+		const dir = await this.tableDirectory();
 		const keyBytes = utf8Encoder.encode(key);
 		// The last block whose first key is at most `key`.
 		let lo = 0;
@@ -650,13 +646,13 @@ export class SearchIndex {
 			else hi = mid;
 		}
 		if (lo === 0) return [];
-		return this.tableBlock(dir, lo - 1).get(key) ?? [];
+		return (await this.tableBlock(dir, lo - 1)).get(key) ?? [];
 	}
 
-	private listDirectory(): ListDirectory {
+	private async listDirectory(): Promise<ListDirectory> {
 		const cached = this.listDirectoryCache?.deref();
 		if (cached) return cached;
-		const data = this.source.readSync(
+		const data = await this.source.read(
 			this.listDirectoryStart,
 			this.listDirectoryLength,
 		);
@@ -720,11 +716,11 @@ export class SearchIndex {
 
 	/** One stored list's bytes. Shared with later queries through the
 	 * cache: callers MUST NOT modify it. */
-	private list(dir: ListDirectory, slot: number): Uint8Array {
+	private async list(dir: ListDirectory, slot: number): Promise<Uint8Array> {
 		const l = dir.indices[slot]!;
 		const cached = this.listCache.get(l)?.deref();
 		if (cached) return cached;
-		const list = this.source.readSync(
+		const list = await this.source.read(
 			this.listsStart + dir.offsets[slot]!,
 			dir.lengths[slot]!,
 		);
@@ -771,10 +767,10 @@ export class SearchIndex {
 		return ids;
 	}
 
-	private tableDirectory(): TableDirectory {
+	private async tableDirectory(): Promise<TableDirectory> {
 		const cached = this.tableDirectoryCache?.deref();
 		if (cached) return cached;
-		const data = this.source.readSync(
+		const data = await this.source.read(
 			this.tableDirectoryStart,
 			this.tableDirectoryLength,
 		);
@@ -818,10 +814,13 @@ export class SearchIndex {
 		return dir;
 	}
 
-	private tableBlock(dir: TableDirectory, b: number): Map<string, number[]> {
+	private async tableBlock(
+		dir: TableDirectory,
+		b: number,
+	): Promise<Map<string, number[]>> {
 		const cached = this.tableBlockCache.get(b)?.deref();
 		if (cached) return cached;
-		const data = this.source.readSync(
+		const data = await this.source.read(
 			this.tableBlocksStart + dir.offsets[b]!,
 			dir.lengths[b]!,
 		);

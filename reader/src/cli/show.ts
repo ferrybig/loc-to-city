@@ -17,7 +17,7 @@ Resolves each place id (as printed by list, search, lookup or chunk) to
 its level, names and ancestors.
 
   --json   one JSON object per id instead of the readable form`,
-	run(argv) {
+	async run(argv) {
 		const { values, positionals } = parse(argv, {
 			json: { type: "boolean", default: false },
 		});
@@ -25,10 +25,10 @@ its level, names and ancestors.
 		if (idArgs.length === 0) throw new UsageError("missing <id>");
 		const ids = idArgs.map((arg) => parseId(arg, "id"));
 
-		const reader = openReader(file);
+		const reader = await openReader(file);
 		try {
 			for (const id of ids) {
-				const place = reader.place(id);
+				const place = await reader.place(id);
 				if (values.json) {
 					writeLine(JSON.stringify(place));
 					continue;
@@ -38,7 +38,7 @@ its level, names and ancestors.
 			}
 			return 0;
 		} finally {
-			reader.close();
+			await reader.close();
 		}
 	},
 };

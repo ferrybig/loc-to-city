@@ -5,6 +5,7 @@ import {
 	parse,
 	parseId,
 	UsageError,
+	useIndexFile,
 	writeLine,
 } from "./shared.ts";
 
@@ -27,7 +28,7 @@ file. Same result either way.
               <file>.locate-index.bin (used automatically when it exists)
   --no-index  scan the chunks even if a locate index exists -- the
               baseline an index is measured against`,
-	run(argv) {
+	async run(argv) {
 		const { values, positionals } = parse(argv, {
 			index: { type: "string" },
 			"no-index": { type: "boolean", default: false },
@@ -38,21 +39,17 @@ file. Same result either way.
 			throw new UsageError("--index and --no-index can't be combined");
 		const ids = idArgs.map((arg) => parseId(arg, "id"));
 
-		const reader = openReader(file);
+		const reader = await openReader(file);
 		try {
-			if (values["no-index"]) reader.useLocateIndex(undefined);
-			if (values.index !== undefined) {
-				try {
-					reader.useLocateIndex(values.index);
-				} catch (error) {
-					throw new Error(
-						`--index ${values.index}: ${(error as Error).message}`,
-					);
-				}
-			}
+			if (values["no-index"]) await reader.useLocateIndex(undefined);
+			if (values.index !== undefined)
+				await useIndexFile(
+					(index) => reader.useLocateIndex(index),
+					values.index,
+				);
 			let anyMissing = false;
 			for (const id of ids) {
-				const pos = reader.locate(id);
+				const pos = await reader.locate(id);
 				if (!pos) {
 					process.stderr.write(`${id}: no geometry found\n`);
 					anyMissing = true;
@@ -63,7 +60,7 @@ file. Same result either way.
 			}
 			return anyMissing ? 1 : 0;
 		} finally {
-			reader.close();
+			await reader.close();
 		}
 	},
 };

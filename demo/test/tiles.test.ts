@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import {
+import type {
 	CGeoDataReader,
-	type PlaceIdResult,
-	type PlaceIds,
-	type QueryResult,
+	PlaceIdResult,
+	PlaceIds,
+	QueryResult,
 } from "@loc-to-city/reader";
+import { openFile } from "@loc-to-city/reader/node";
 import { placeColor } from "../src/colors.ts";
 import {
 	defaultTileResolution,
@@ -27,18 +28,20 @@ function resultColor(result: QueryResult): [number, number, number, number] {
 }
 
 /** A reader that also answers plain `query()`, which the uncached
- * reference renders below use. */
-type QueryingReader = TileReader & Pick<CGeoDataReader, "query">;
+ * reference renders below use. The synthetic one answers synchronously. */
+type QueryingReader = TileReader & {
+	query(lat: number, lon: number): QueryResult | Promise<QueryResult>;
+};
 
 /** What renderTileGrid should produce: every sample queried on its own,
  * no cache. */
-function uncachedGrid(
+async function uncachedGrid(
 	reader: QueryingReader,
 	z: number,
 	x: number,
 	y: number,
 	resolution: number,
-): Buffer {
+): Promise<Buffer> {
 	const gridSize = Math.floor(256 / resolution);
 	const data = Buffer.alloc(gridSize * gridSize * 4);
 	for (let gy = 0; gy < gridSize; gy++) {
@@ -51,7 +54,10 @@ function uncachedGrid(
 				gy * resolution + resolution / 2,
 			);
 			if (lat < -90 || lat >= 90 || lon < -180 || lon >= 180) continue;
-			data.set(resultColor(reader.query(lat, lon)), (gridSize * gy + gx) << 2);
+			data.set(
+				resultColor(await reader.query(lat, lon)),
+				(gridSize * gy + gx) << 2,
+			);
 		}
 	}
 	return data;
@@ -85,7 +91,8 @@ function syntheticReader(): QueryingReader & { queries: number } {
 	];
 	const reader = {
 		queries: 0,
-		queryPlaceId(lat: number, lon: number): PlaceIdResult {
+		/** Always answers: the synthetic reader has nothing to read. */
+		lookupCached(lat: number, lon: number): PlaceIdResult {
 			reader.queries++;
 			let [minLat, maxLat, minLon, maxLon] = [-90, 90, -180, 180];
 			let row = 0;
@@ -109,6 +116,9 @@ function syntheticReader(): QueryingReader & { queries: number } {
 				chunkIndex: 0,
 			};
 		},
+		async lookup(lat: number, lon: number): Promise<PlaceIdResult> {
+			return reader.lookupCached(lat, lon);
+		},
 		placeIds(id: number): PlaceIds {
 			const { country, region, city } = levels[id]!;
 			// Each country and region has one id, which every place under it
@@ -129,7 +139,7 @@ function syntheticReader(): QueryingReader & { queries: number } {
 		},
 		/** Not counted: only the uncached references call it. */
 		query(lat: number, lon: number): QueryResult {
-			const result = reader.queryPlaceId(lat, lon);
+			const result = reader.lookupCached(lat, lon);
 			reader.queries--;
 			return { ...result, ...levels[result.placeId ?? levels.length - 1]! };
 		},
@@ -148,12 +158,12 @@ const TILES: [z: number, x: number, y: number][] = [
 	[14, 8417, 5432],
 ];
 
-test("the cached tile render matches querying every pixel", () => {
+test("the cached tile render matches querying every pixel", async () => {
 	const reader = syntheticReader();
 	for (const [z, x, y] of TILES) {
 		for (const resolution of [1, 3, 8, 64]) {
-			const cached = renderTileGrid(reader, z, x, y, resolution).data;
-			const expected = uncachedGrid(reader, z, x, y, resolution);
+			const cached = (await renderTileGrid(reader, z, x, y, resolution)).data;
+			const expected = await uncachedGrid(reader, z, x, y, resolution);
 			assert.ok(
 				cached.equals(expected),
 				`tile ${z}/${x}/${y} at res ${resolution} differs`,
@@ -162,9 +172,9 @@ test("the cached tile render matches querying every pixel", () => {
 	}
 });
 
-test("the cache saves queries on a zoomed-in tile", () => {
+test("the cache saves queries on a zoomed-in tile", async () => {
 	const reader = syntheticReader();
-	renderTileGrid(reader, 14, 8417, 5432, 1);
+	await renderTileGrid(reader, 14, 8417, 5432, 1);
 	assert.ok(
 		reader.queries < 256 * 256,
 		`${reader.queries} queries for ${256 * 256} pixels`,
@@ -175,15 +185,15 @@ test("the cache saves queries on a zoomed-in tile", () => {
  * city, 2 region, 3 country), from the pixel's place and the places of
  * the samples left of and above it, which for the first row and column
  * lie in the neighboring tile. */
-function uncachedBorders(
+async function uncachedBorders(
 	reader: QueryingReader,
 	z: number,
 	x: number,
 	y: number,
 	resolution: number,
-): number[] {
+): Promise<number[]> {
 	const gridSize = Math.floor(256 / resolution);
-	const place = (gx: number, gy: number) => {
+	const place = async (gx: number, gy: number) => {
 		const { lat, lon } = tilePixelToLonLat(
 			z,
 			x,
@@ -191,7 +201,7 @@ function uncachedBorders(
 			gx * resolution + resolution / 2,
 			gy * resolution + resolution / 2,
 		);
-		const r = reader.query(lat, lon);
+		const r = await reader.query(lat, lon);
 		return [r.country, r.region, r.city].map((n) => JSON.stringify(n));
 	};
 	const strength = ([c1, r1, t1]: string[], [c2, r2, t2]: string[]): number =>
@@ -199,11 +209,11 @@ function uncachedBorders(
 	const out: number[] = [];
 	for (let gy = 0; gy < gridSize; gy++) {
 		for (let gx = 0; gx < gridSize; gx++) {
-			const here = place(gx, gy);
+			const here = await place(gx, gy);
 			out.push(
 				Math.max(
-					strength(here, place(gx - 1, gy)),
-					strength(here, place(gx, gy - 1)),
+					strength(here, await place(gx - 1, gy)),
+					strength(here, await place(gx, gy - 1)),
 				),
 			);
 		}
@@ -211,7 +221,7 @@ function uncachedBorders(
 	return out;
 }
 
-test("borders darken exactly the pixels whose left or upper neighbor is another place", () => {
+test("borders darken exactly the pixels whose left or upper neighbor is another place", async () => {
 	const reader = syntheticReader();
 	const alpha = [0, 0.3, 0.5, 0.75];
 	for (const [z, x, y] of [
@@ -219,9 +229,10 @@ test("borders darken exactly the pixels whose left or upper neighbor is another 
 		[12, 2104, 1350],
 	] as const) {
 		for (const resolution of [2, 8]) {
-			const plain = renderTileGrid(reader, z, x, y, resolution).data;
-			const bordered = renderTileGrid(reader, z, x, y, resolution, true).data;
-			const expected = uncachedBorders(reader, z, x, y, resolution);
+			const plain = (await renderTileGrid(reader, z, x, y, resolution)).data;
+			const bordered = (await renderTileGrid(reader, z, x, y, resolution, true))
+				.data;
+			const expected = await uncachedBorders(reader, z, x, y, resolution);
 			let drawn = 0;
 			for (const [i, strength] of expected.entries()) {
 				const dark = alpha[strength]!;
@@ -261,8 +272,8 @@ test("the cached tile render matches querying every pixel on real data", {
 	skip:
 		!existsSync(ZUID_HOLLAND) &&
 		"data/03-final/zuid-holland.bin not built (make netherlands)",
-}, () => {
-	const reader = CGeoDataReader.open(ZUID_HOLLAND);
+}, async () => {
+	const reader = await openFile(ZUID_HOLLAND);
 	// Around Den Haag / Rotterdam, from a whole-province view in to
 	// street level.
 	for (const [z, x, y] of [
@@ -271,8 +282,8 @@ test("the cached tile render matches querying every pixel on real data", {
 		[14, 8389, 5397],
 	] as const) {
 		for (const resolution of [1, 4]) {
-			const cached = renderTileGrid(reader, z, x, y, resolution).data;
-			const expected = uncachedGrid(reader, z, x, y, resolution);
+			const cached = (await renderTileGrid(reader, z, x, y, resolution)).data;
+			const expected = await uncachedGrid(reader, z, x, y, resolution);
 			assert.ok(
 				cached.equals(expected),
 				`tile ${z}/${x}/${y} at res ${resolution} differs`,

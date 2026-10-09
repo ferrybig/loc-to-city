@@ -1,10 +1,10 @@
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 import {
-	mortonEncode,
-	mortonDecode,
-	shiftRight,
 	lowBits,
+	mortonDecode,
+	mortonEncode,
+	shiftRight,
 } from "../src/index.ts";
 
 // Section 8.1's D=2 worked example:

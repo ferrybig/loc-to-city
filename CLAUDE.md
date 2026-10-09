@@ -105,6 +105,19 @@ consumer (Immich, the demo) can do through the same methods
 (`query`, `place`, `places`, `search`, `chunkRecords`, ...). Add
 capability to the reader first, then expose it as a subcommand:
 
+The reader's API is async and platform-neutral: nothing under
+`reader/src/` imports `node:*` except `node.ts` (`openFile`,
+`FileSource`, `nodeInflater`, the `*PathFor` sidecar helpers -- the
+package's `./node` export) and `cli/`. Bytes come from a `ByteSource`
+(`source.ts`), blocks are inflated by an `Inflater` (`inflate.ts`;
+`DecompressionStream` by default, sync zlib on Node). Choices that were
+measured (`reader/bench/bench.ts`, see the commit messages) and are easy
+to undo by accident: file reads are async but Node's inflate is sync
+(async zlib cost 15-40% on tile bursts for no gain, since parsing
+dominates); decodes take turns one macrotask each (`turns.ts`), or
+concurrent lookups block the event loop for the whole batch; hot loops
+use `lookupCached() ?? await lookup()` so a cache hit never awaits.
+
 ```bash
 node reader/src/cli.ts help                              # or help <command>
 node reader/src/cli.ts info   data/03-final/world.bin             # header, counts, byte split, largest chunks
@@ -122,7 +135,7 @@ name blocks unless a trigram search index (`binary-format.md` Appendix B,
 `reader/src/searchIndex.ts`) is in use: its trigram lists narrow queries
 of 3+ characters to candidate places, and its short-query table answers
 sorted 1-2 character searches with `--limit` up to its top count (5) and
-no filters outright. A reader opened from a path picks up
+no filters outright. A reader opened with `openFile()` picks up
 `<name>.search-index.bin` next to it (`build-search-index <file.bin>
 --output data/<name>.search-index.bin`) on the first search, reading
 only the lists a query needs; `useSearchIndex()` (the CLI's `--index` /

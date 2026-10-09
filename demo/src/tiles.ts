@@ -14,7 +14,10 @@ import { placeColor } from "./colors.ts";
 const TILE_SIZE = 256;
 
 /** The part of the reader a tile render uses. */
-export type TileReader = Pick<CGeoDataReader, "queryPlaceId" | "placeIds">;
+export type TileReader = Pick<
+	CGeoDataReader,
+	"lookup" | "lookupCached" | "placeIds"
+>;
 
 type Rgba = [r: number, g: number, b: number, a: number];
 
@@ -79,14 +82,14 @@ interface Sample {
  * places. Samples outside the reader's coordinate range (past the poles at
  * low zoom) are null.
  */
-export function sampleTile(
+export async function sampleTile(
 	reader: TileReader,
 	z: number,
 	x: number,
 	y: number,
 	resolution: number,
 	margin = 0,
-): { size: number; samples: (Sample | null)[] } {
+): Promise<{ size: number; samples: (Sample | null)[] }> {
 	const clampedResolution = Math.max(1, Math.min(resolution, TILE_SIZE));
 	const gridSize = Math.max(1, Math.floor(TILE_SIZE / clampedResolution));
 	const size = gridSize + 2 * margin;
@@ -148,7 +151,10 @@ export function sampleTile(
 			const lon = lons[sx]!;
 			if (filled[size * sy + sx] || lon < -180 || lon >= 180) continue;
 
-			const result = reader.queryPlaceId(lat, lon);
+			// Waits only when the sample's chunk isn't decoded yet: a tile's
+			// samples mostly share a few chunks, so most lookups answer here.
+			const result =
+				reader.lookupCached(lat, lon) ?? (await reader.lookup(lat, lon));
 			const sample = sampleOf(result);
 			const { minLat, maxLat, minLon, maxLon } = result.boundingBox;
 			let last = sx;
@@ -195,16 +201,23 @@ export function borderStrength(a: Sample | null, b: Sample | null): number {
  * it is darkened, drawing a one-sample-wide line along the boundary
  * (always on its right/lower side, so lines don't double up).
  */
-export function renderTileGrid(
+export async function renderTileGrid(
 	reader: TileReader,
 	z: number,
 	x: number,
 	y: number,
 	resolution: number,
 	borders = false,
-): PNG {
+): Promise<PNG> {
 	const margin = borders ? 1 : 0;
-	const { size, samples } = sampleTile(reader, z, x, y, resolution, margin);
+	const { size, samples } = await sampleTile(
+		reader,
+		z,
+		x,
+		y,
+		resolution,
+		margin,
+	);
 	const gridSize = size - 2 * margin;
 	const small = new PNG({ width: gridSize, height: gridSize });
 	for (let gy = 0; gy < gridSize; gy++) {
@@ -230,14 +243,14 @@ export function renderTileGrid(
 	return small;
 }
 
-export function renderTilePng(
+export async function renderTilePng(
 	reader: TileReader,
 	z: number,
 	x: number,
 	y: number,
 	resolution: number,
-): Buffer {
-	const small = renderTileGrid(
+): Promise<Buffer> {
+	const small = await renderTileGrid(
 		reader,
 		z,
 		x,

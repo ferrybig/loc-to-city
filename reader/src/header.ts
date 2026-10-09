@@ -1,6 +1,8 @@
 import { CGeoDataFormatError, CGeoDataVersionError } from "./errors.ts";
 import { IncompleteBufferError, readVarint } from "./varint.ts";
 
+const utf8 = new TextDecoder();
+
 // "CGEODATA"
 const SIGNATURE = Uint8Array.from([
 	0x43, 0x47, 0x45, 0x4f, 0x44, 0x41, 0x54, 0x41,
@@ -55,9 +57,7 @@ export function parseHeader(buf: Uint8Array): CGeoDataHeader {
 			"buffer too short for attribution + fixed header fields",
 		);
 	}
-	const attribution = Buffer.from(buf.subarray(offset, attrEnd)).toString(
-		"utf8",
-	);
+	const attribution = utf8.decode(buf.subarray(offset, attrEnd));
 	offset = attrEnd;
 
 	const widthExp = buf[offset]!;
