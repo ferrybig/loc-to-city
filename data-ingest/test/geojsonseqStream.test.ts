@@ -7,6 +7,7 @@ import { streamGeometries } from "../src/lib/adminLevelDetection.ts";
 import {
   peekFeatureId,
   peekLeadingProperties,
+  peekOsmiumProperties,
   splitOsmiumFeature,
   streamGeoJSONSeq,
   streamGeoJSONSeqRecords,
@@ -101,4 +102,13 @@ test("streamGeometries: only the wanted ids, geometry text as written, first fil
     { id: "a3", geometryJson: JSON.stringify({ type: "Polygon", coordinates: shifted }) },
   ]);
   assert.deepEqual(await collect(streamGeometries([first, second], new Set())), []);
+});
+
+test("peekOsmiumProperties: read from the record's end, exact fallback when that doesn't parse", () => {
+  const properties = { admin_level: "2", name: "x" };
+  assert.deepEqual(peekOsmiumProperties(Buffer.from(osmiumRecord("a1", SQUARE, properties))), properties);
+  // A tag *key* "properties" puts an unescaped `,"properties":` inside the
+  // properties object itself.
+  const tricky = { admin_level: "2", properties: "x" };
+  assert.deepEqual(peekOsmiumProperties(Buffer.from(osmiumRecord("a1", SQUARE, tricky))), tricky);
 });

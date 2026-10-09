@@ -18,24 +18,27 @@ interface NECountryProps {
  * turf's `booleanPointInPolygon` walks every one of them on every call
  * (100-200us per lookup on land, measured); with the bbox reject a lookup
  * is dominated by the one or two rings that could actually contain the
- * point. */
+ * point. Vertices are packed `x0, y0, x1, y1, ...` into one Float64Array:
+ * OSM's own country borders (see osmCountryBorders.ts) run to tens of
+ * millions of vertices, which as GeoJSON `[x, y]` arrays would cost
+ * several times the memory. */
 interface IndexedRing {
   minX: number;
   minY: number;
   maxX: number;
   maxY: number;
-  coords: Position[];
+  xy: Float64Array;
   /** Edge indices bucketed by horizontal band, or null for small rings.
    * Rejecting island rings by bbox isn't enough on its own: a mainland
    * outer ring still has tens of thousands of edges, and a ray cast that
    * walks all of them is ~50us. With edges bucketed by the band of y they
    * span, a cast only touches the few hundred edges near the query's y. */
-  bands: number[][] | null;
+  bands: Int32Array[] | null;
   bandHeight: number;
 }
 
 /** One polygon: an outer ring plus its holes. */
-interface IndexedPolygon {
+export interface IndexedPolygon {
   outer: IndexedRing;
   holes: IndexedRing[];
 }
@@ -57,40 +60,54 @@ interface IndexedCountryPolygon {
 const BAND_MIN_VERTICES = 256;
 const VERTICES_PER_BAND = 32;
 
-function indexRing(coords: Position[]): IndexedRing {
+/** Indexes one ring of packed `x, y` pairs (see `IndexedRing`). */
+export function indexPackedRing(xy: Float64Array): IndexedRing {
+  const n = xy.length / 2;
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
-  for (const [x = 0, y = 0] of coords) {
+  for (let i = 0; i < n; i++) {
+    const x = xy[2 * i]!;
+    const y = xy[2 * i + 1]!;
     if (x < minX) minX = x;
     if (x > maxX) maxX = x;
     if (y < minY) minY = y;
     if (y > maxY) maxY = y;
   }
 
-  let bands: number[][] | null = null;
+  let bands: Int32Array[] | null = null;
   let bandHeight = maxY - minY;
-  if (coords.length >= BAND_MIN_VERTICES && bandHeight > 0) {
-    const bandCount = Math.ceil(coords.length / VERTICES_PER_BAND);
+  if (n >= BAND_MIN_VERTICES && bandHeight > 0) {
+    const bandCount = Math.ceil(n / VERTICES_PER_BAND);
     bandHeight /= bandCount;
-    bands = Array.from({ length: bandCount }, () => []);
-    for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
-      const yi = coords[i]![1] ?? 0;
-      const yj = coords[j]![1] ?? 0;
+    const lists: number[][] = Array.from({ length: bandCount }, () => []);
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const yi = xy[2 * i + 1]!;
+      const yj = xy[2 * j + 1]!;
       const lo = Math.floor((Math.min(yi, yj) - minY) / bandHeight);
       const hi = Math.min(bandCount - 1, Math.floor((Math.max(yi, yj) - minY) / bandHeight));
-      for (let b = lo; b <= hi; b++) bands[b]!.push(i);
+      for (let b = lo; b <= hi; b++) lists[b]!.push(i);
     }
+    bands = lists.map((list) => Int32Array.from(list));
   }
-  return { minX, minY, maxX, maxY, coords, bands, bandHeight };
+  return { minX, minY, maxX, maxY, xy, bands, bandHeight };
+}
+
+function packRing(coords: Position[]): Float64Array {
+  const xy = new Float64Array(coords.length * 2);
+  coords.forEach(([x = 0, y = 0], i) => {
+    xy[2 * i] = x;
+    xy[2 * i + 1] = y;
+  });
+  return xy;
 }
 
 function indexPolygons(geometry: Polygon | MultiPolygon): IndexedPolygon[] {
   const polygons = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates;
   return polygons
     .filter((rings) => rings.length > 0)
-    .map((rings) => ({ outer: indexRing(rings[0]!), holes: rings.slice(1).map(indexRing) }));
+    .map((rings) => ({ outer: indexPackedRing(packRing(rings[0]!)), holes: rings.slice(1).map((r) => indexPackedRing(packRing(r))) }));
 }
 
 /** Even-odd ray cast; a point exactly on an edge may land either way,
@@ -98,24 +115,66 @@ function indexPolygons(geometry: Polygon | MultiPolygon): IndexedPolygon[] {
  * callers, and no worse than what turf did. */
 function ringContains(ring: IndexedRing, x: number, y: number): boolean {
   if (x < ring.minX || x > ring.maxX || y < ring.minY || y > ring.maxY) return false;
-  const { coords, bands } = ring;
+  const { xy, bands } = ring;
+  const n = xy.length / 2;
   let inside = false;
   const crosses = (i: number, j: number): void => {
-    const [xi = 0, yi = 0] = coords[i]!;
-    const [xj = 0, yj = 0] = coords[j]!;
+    const xi = xy[2 * i]!;
+    const yi = xy[2 * i + 1]!;
+    const xj = xy[2 * j]!;
+    const yj = xy[2 * j + 1]!;
     if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
   };
   if (bands) {
     const band = bands[Math.min(bands.length - 1, Math.floor((y - ring.minY) / ring.bandHeight))]!;
-    for (const i of band) crosses(i, i === 0 ? coords.length - 1 : i - 1);
+    for (const i of band) crosses(i, i === 0 ? n - 1 : i - 1);
   } else {
-    for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) crosses(i, j);
+    for (let i = 0, j = n - 1; i < n; j = i++) crosses(i, j);
   }
   return inside;
 }
 
 function polygonContains({ outer, holes }: IndexedPolygon, x: number, y: number): boolean {
   return ringContains(outer, x, y) && !holes.some((hole) => ringContains(hole, x, y));
+}
+
+/** Country polygons, one rbush entry per polygon (see
+ * `IndexedCountryPolygon`), answering which codes contain a point. */
+export class CountryPolygonIndex {
+  private readonly items: IndexedCountryPolygon[] = [];
+  private tree: RBush<IndexedCountryPolygon> | null = null;
+  readonly codes = new Set<string>();
+
+  add(code: string, polygons: IndexedPolygon[]): void {
+    for (const polygon of polygons) {
+      const { minX, minY, maxX, maxY } = polygon.outer;
+      this.items.push({ minX, minY, maxX, maxY, code, polygon });
+    }
+    this.codes.add(code);
+    this.tree = null;
+  }
+
+  private search(x: number, y: number): IndexedCountryPolygon[] {
+    if (!this.tree) this.tree = new RBush<IndexedCountryPolygon>().load(this.items);
+    return this.tree.search({ minX: x, minY: y, maxX: x, maxY: y });
+  }
+
+  /** The first containing polygon's code, in rbush order. */
+  first(x: number, y: number): string | null {
+    for (const hit of this.search(x, y)) {
+      if (polygonContains(hit.polygon, x, y)) return hit.code;
+    }
+    return null;
+  }
+
+  /** Every code with a polygon containing the point, in rbush order. */
+  codesAt(x: number, y: number): string[] {
+    const codes: string[] = [];
+    for (const hit of this.search(x, y)) {
+      if (!codes.includes(hit.code) && polygonContains(hit.polygon, x, y)) codes.push(hit.code);
+    }
+    return codes;
+  }
 }
 
 /** Worldwide, indexed country resolution from Natural Earth's admin-0
@@ -182,7 +241,7 @@ export function loadCountryIndex(neCountriesPath: string): CountryIndex {
   const areaByCode = new Map<string, number>();
   const nameByCode = new Map<string, string>();
   const simplifiedFeatureByCode = new Map<string, Feature<Polygon | MultiPolygon, { code: string }>>();
-  const items: IndexedCountryPolygon[] = [];
+  const index = new CountryPolygonIndex();
 
   for (const [code, feature] of byCode) {
     areaByCode.set(code, area(feature) / 1_000_000); // m^2 -> km^2
@@ -191,23 +250,10 @@ export function loadCountryIndex(neCountriesPath: string): CountryIndex {
       COUNTRY_SIMPLIFY_TOLERANCE <= 0 ? feature : simplify(feature, { tolerance: COUNTRY_SIMPLIFY_TOLERANCE });
     simplifiedFeatureByCode.set(code, { ...simplified, properties: { code } });
 
-    for (const polygon of indexPolygons(feature.geometry)) {
-      const { minX, minY, maxX, maxY } = polygon.outer;
-      items.push({ minX, minY, maxX, maxY, code, polygon });
-    }
+    index.add(code, indexPolygons(feature.geometry));
   }
 
-  const tree = new RBush<IndexedCountryPolygon>();
-  tree.load(items);
-
-  function lookup(point: LonLat): string | null {
-    const [x, y] = point;
-    const hits = tree.search({ minX: x, minY: y, maxX: x, maxY: y });
-    for (const hit of hits) {
-      if (polygonContains(hit.polygon, x, y)) return hit.code;
-    }
-    return null;
-  }
+  const lookup = (point: LonLat): string | null => index.first(point[0], point[1]);
 
   return { lookup, areaByCode, nameByCode, simplifiedFeatureByCode };
 }

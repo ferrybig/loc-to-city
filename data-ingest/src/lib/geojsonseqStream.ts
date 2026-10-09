@@ -112,6 +112,30 @@ export function splitOsmiumFeature(record: Buffer): OsmiumFeatureParts | undefin
   };
 }
 
+const OSMIUM_PROPERTIES_TAIL = Buffer.from(OSMIUM_PROPERTIES_KEY);
+
+/** An osmium record's properties, read from the end of the record (osmium
+ * writes them last) without scanning or parsing the geometry before them
+ * -- for a pass that only wants a few records by tag. Undefined when that
+ * doesn't parse; `splitOsmiumFeature` is the exact, slower way. */
+export function peekOsmiumProperties(record: Buffer): Record<string, unknown> | null | undefined {
+  const key = record.lastIndexOf(OSMIUM_PROPERTIES_TAIL);
+  if (key !== -1 && record[record.length - 1] === 0x7d) {
+    try {
+      const properties: unknown = JSON.parse(
+        record.toString("utf8", key + OSMIUM_PROPERTIES_TAIL.length, record.length - 1),
+      );
+      if (typeof properties === "object") return properties as Record<string, unknown> | null;
+    } catch {
+      // fall through
+    }
+  }
+  // Quotes inside a value are escaped, so the last `,"properties":` can
+  // only be something else when a *tag key* is literally "properties" --
+  // find the real boundary the exact way.
+  return splitOsmiumFeature(record)?.properties;
+}
+
 const LEADING_PROPERTIES_PREFIX = Buffer.from('{"type":"Feature","properties":');
 
 /** The `properties` of a record that starts `{"type":"Feature",

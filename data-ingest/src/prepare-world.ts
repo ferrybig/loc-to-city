@@ -31,6 +31,7 @@ import type { Feature, FeatureCollection, MultiPolygon, Polygon } from "geojson"
 import type { CityProperties, HierarchyCountry } from "@loc-to-city/compressor";
 import { discoverAdminGeoJsonFiles } from "./lib/osmFiles.ts";
 import { loadCountryIndex } from "./lib/countryIndex.ts";
+import { loadOsmCountryBorders, withOsmCountryBorders } from "./lib/osmCountryBorders.ts";
 import { buildAdminBoundaryIndex } from "./lib/adminBoundaryIndex.ts";
 import type { CityCandidateMeta } from "./lib/adminBoundaryIndex.ts";
 import {
@@ -72,7 +73,15 @@ async function main(): Promise<void> {
   console.error(`found ${files.length} admin files: ${files.map((f) => path.basename(f)).join(", ")}`);
 
   console.error("Loading country index (Natural Earth, worldwide)...");
-  const countries = loadCountryIndex(COUNTRIES_SOURCE);
+  const naturalEarth = loadCountryIndex(COUNTRIES_SOURCE);
+  // Natural Earth has no room for enclaves (Baarle-Hertog) and only
+  // approximates land borders; OSM's own country borders, already in the
+  // corpus, correct it where the two disagree (see withOsmCountryBorders).
+  console.error("Loading OSM country borders (admin_level=2)...");
+  const countries = withOsmCountryBorders(
+    naturalEarth,
+    await loadOsmCountryBorders(files, new Set(naturalEarth.nameByCode.keys())),
+  );
 
   console.error("Pass 1/4: scanning merged corpus for city/region candidates...");
   const index = await buildAdminBoundaryIndex(files, countries);

@@ -63,7 +63,8 @@ node --test compressor/test/geometry.test.ts
 
 `npm test -w data-ingest` covers the pure, library-shaped parts only
 (`adminLevelDetection`, `placeTagSignal`, `cities500`, `admin1Codes`,
-`polygonCountry`, `voronoiFallback`, `geojsonseqStream`, `pointOnFeature`); the ingest scripts themselves have
+`polygonCountry`, `voronoiFallback`, `geojsonseqStream`, `pointOnFeature`,
+`osmCountryBorders`); the ingest scripts themselves have
 no test coverage — validate those by running a scoped build (see below)
 and reading their diagnostic output.
 
@@ -333,6 +334,18 @@ why a fixed-radius buffer per point was rejected in favor of a real
 tessellation, and a known residual limitation: a real OSM city's
 `repPoint` can land in a neighboring region's Voronoi cell when that
 city's own polygon is large or off-center — confirmed on Ljubljana).
+
+**Country resolution is Natural Earth, corrected by OSM's own borders.**
+`resolvePolygonCountry` (`polygonCountry.ts`) samples points against
+Natural Earth, but `prepare-world.ts` first wraps that index with
+`withOsmCountryBorders` (`osmCountryBorders.ts`): the corpus's own
+`admin_level=2` relations, keyed by their `ISO3166-1:alpha2` tag, override
+Natural Earth only where it names a country whose OSM border doesn't
+contain the point while another country's does. That fixes enclaves
+Natural Earth's 10m outlines don't have (Baarle-Hertog's Belgian enclaves
+inside NL resolved to NL and were dropped) without letting OSM's
+territorial waters or its folding of dependencies into a parent country
+change anything else.
 
 **Multi-file country handling.** OSM relations for a single country (e.g.
 Russia, Turkey) can be split across multiple continent extract files with
