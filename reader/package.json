@@ -15,7 +15,8 @@
     "build": "tsc -p tsconfig.json",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc -p tsconfig.test.json",
-    "dev": "node src/index.ts"
+    "dev": "node src/index.ts",
+    "bench": "node --expose-gc bench/bench.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.13",
