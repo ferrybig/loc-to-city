@@ -1,4 +1,4 @@
-import { mortonEncode } from "@loc-to-city/reader";
+import { mortonEncode } from "@loc-to-city/reader/format";
 import type { IndexedCandidate } from "./candidateIndex.ts";
 import { type CellBounds, classifyCell, countContainedSamples } from "./geometry.ts";
 

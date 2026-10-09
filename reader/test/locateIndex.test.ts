@@ -5,15 +5,16 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-	buildLocateIndex,
-	buildSearchIndex,
-	type CGeoDataHeader,
-	CGeoDataReader,
 	decodeLocateEntry,
 	encodeLocateEntry,
-	LocateIndex,
 	locateEntryWidth,
-} from "../src/index.ts";
+} from "../src/format.ts";
+import { type CGeoDataHeader, CGeoDataReader } from "../src/index.ts";
+import {
+	buildLocateIndex,
+	buildSearchIndex,
+	LocateIndex,
+} from "../src/indexes.ts";
 import { type CellList, representativeCell } from "../src/locateIndex.ts";
 import { locateIndexPathFor, openFile } from "../src/node.ts";
 import { APPENDIX_A_BYTES } from "./fixtures/appendixA.ts";
@@ -492,14 +493,9 @@ if (existsSync(ZH_BIN)) {
 			located++;
 			const place = await indexed.place(id);
 			const found = await indexed.query(point.lat, point.lon);
-			const names = {
-				country: found.country,
-				region: found.region,
-				city: found.city,
-			}[place.level];
-			assert.deepEqual(
-				names,
-				place.names,
+			assert.equal(
+				found[place.level]?.id,
+				id,
 				`id ${id}'s point resolves elsewhere`,
 			);
 		}

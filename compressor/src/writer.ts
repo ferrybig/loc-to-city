@@ -1,4 +1,4 @@
-import { writeVarint } from "@loc-to-city/reader";
+import { writeVarint } from "@loc-to-city/reader/format";
 
 export interface WriteFileOptions {
   attribution: string;

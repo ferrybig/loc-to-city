@@ -1,5 +1,5 @@
 import { deflateSync } from "node:zlib";
-import { writeVarint } from "@loc-to-city/reader";
+import { writeVarint } from "@loc-to-city/reader/format";
 import type { ChunkRecord } from "./quadtree.ts";
 
 function paletteIndexWidth(paletteCount: number): number {

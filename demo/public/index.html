@@ -249,9 +249,9 @@
 
 		function buildTable(data, lat, lon) {
 			const rows = `
-		<tr><th scope="row">Country</th><td>${fmtPlace(data.country)}</td></tr>
-		<tr><th scope="row">Region</th><td>${fmtPlace(data.region)}</td></tr>
-		<tr><th scope="row">City</th><td>${fmtPlace(data.city)}</td></tr>
+		<tr><th scope="row">Country</th><td>${fmtPlace(data.country?.names)}</td></tr>
+		<tr><th scope="row">Region</th><td>${fmtPlace(data.region?.names)}</td></tr>
+		<tr><th scope="row">City</th><td>${fmtPlace(data.city?.names)}</td></tr>
 	`;
 			const header = `<p>Location: ${lat.toFixed(6)}, ${lon.toFixed(6)} &middot; ${data.query_time_us.toFixed(1)}&micro;s</p>`;
 			return `${header}<table class="result-table">${rows}</table>`;

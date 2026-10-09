@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { buildSearchIndex, CGeoDataReader, type Place } from "../src/index.ts";
+import { CGeoDataReader, type Place, type PlaceRef } from "../src/index.ts";
+import { buildSearchIndex } from "../src/indexes.ts";
 import { openFile } from "../src/node.ts";
 import { APPENDIX_A_BYTES } from "./fixtures/appendixA.ts";
 import { collect } from "./helpers.ts";
@@ -10,10 +11,22 @@ import { collect } from "./helpers.ts";
 // Appendix A.3's identifier table: 0-1 countries, 2-3 regions, 4-6 cities.
 const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
 
-const NL = { id: 0, names: ["Nederland", "The Netherlands"] };
-const BE = { id: 1, names: ["België", "Belgium"] };
-const NH = { id: 2, names: ["Noord-Holland"] };
-const ANT = { id: 3, names: ["Antwerpen", "Antwerp"] };
+/** A PlaceRef as the reader builds it from a name entry (Section 7.4). */
+function ref(id: number, names: string[]): PlaceRef {
+	const [localName = "", international] = names;
+	return {
+		id,
+		localName,
+		internationalName: international || localName,
+		names,
+	};
+}
+
+const NL = ref(0, ["Nederland", "The Netherlands"]);
+const BE = ref(1, ["België", "Belgium"]);
+const NH = ref(2, ["Noord-Holland"]);
+const ANT = ref(3, ["Antwerpen", "Antwerp"]);
+const ZAANDAM = ref(5, ["Zaandam"]);
 
 async function ids(places: AsyncIterable<Place>): Promise<number[]> {
 	return (await collect(places)).map((p) => p.id);
@@ -25,28 +38,25 @@ test("placeCounts reflects the place table prefix", () => {
 
 test("place(id) resolves each level with the QueryResult-shaped trio", async () => {
 	assert.deepEqual(await reader.place(0), {
-		id: 0,
+		...NL,
 		level: "country",
-		names: NL.names,
 		country: NL,
 		region: null,
 		city: null,
 	});
 	assert.deepEqual(await reader.place(3), {
-		id: 3,
+		...ANT,
 		level: "region",
-		names: ANT.names,
 		country: BE,
 		region: ANT,
 		city: null,
 	});
 	assert.deepEqual(await reader.place(5), {
-		id: 5,
+		...ZAANDAM,
 		level: "city",
-		names: ["Zaandam"],
 		country: NL,
 		region: NH,
-		city: { id: 5, names: ["Zaandam"] },
+		city: ZAANDAM,
 	});
 	await assert.rejects(async () => await reader.place(7), RangeError);
 });
@@ -64,7 +74,7 @@ test("placeIds(id) is place(id)'s level and ids without the names", async () => 
 	assert.throws(() => reader.placeIds(7), RangeError);
 });
 
-test("query() is queryPlaceId() plus the place's names", async () => {
+test("query() is lookup() plus the place's names", async () => {
 	// Appendix A's lookups: Zaandam (5), Noord-Holland (2), and three unknowns.
 	for (const [lat, lon, placeId] of [
 		[20, 100, 5],
@@ -78,9 +88,9 @@ test("query() is queryPlaceId() plus the place's names", async () => {
 		const place = placeId === null ? null : await reader.place(placeId);
 		assert.deepEqual(await reader.query(lat, lon), {
 			...byId,
-			country: place?.country.names ?? null,
-			region: place?.region?.names ?? null,
-			city: place?.city?.names ?? null,
+			country: place?.country ?? null,
+			region: place?.region ?? null,
+			city: place?.city ?? null,
 		});
 	}
 });

@@ -6,18 +6,22 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
-	buildSearchIndex,
-	CGeoDataReader,
 	fnv1a32,
 	foldSymbols,
-	type Place,
 	readVarint,
-	SearchIndex,
-	type SearchIndexOptions,
-	type SearchOptions,
 	trigramListIndex,
 	trigramListIndices,
+} from "../src/format.ts";
+import {
+	CGeoDataReader,
+	type Place,
+	type SearchOptions,
 } from "../src/index.ts";
+import {
+	buildSearchIndex,
+	SearchIndex,
+	type SearchIndexOptions,
+} from "../src/indexes.ts";
 import { FileSource, openFile, searchIndexPathFor } from "../src/node.ts";
 import { APPENDIX_A_BYTES } from "./fixtures/appendixA.ts";
 import { APPENDIX_B_BYTES, APPENDIX_B_OPTIONS } from "./fixtures/appendixB.ts";

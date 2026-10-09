@@ -64,9 +64,9 @@ function formatReadable(
 		: `${point.lat},${point.lon}`;
 	return [
 		head,
-		`  country  ${names(result.country)}`,
-		`  region   ${names(result.region)}`,
-		`  city     ${names(result.city)}`,
+		`  country  ${names(result.country?.names)}`,
+		`  region   ${names(result.region?.names)}`,
+		`  city     ${names(result.city?.names)}`,
 		`  cell     lat ${box.minLat}..${box.maxLat}  lon ${box.minLon}..${box.maxLon}`,
 		`  chunk    ${chunkIndex}  (col ${col}, row ${row} of ${reader.header.width}x${reader.header.height})`,
 	].join("\n");
@@ -77,9 +77,10 @@ function formatJson(point: Point, result: QueryResult): string {
 		lat: point.lat,
 		lon: point.lon,
 		...(point.tag ? { tag: point.tag } : {}),
-		country: result.country,
-		region: result.region,
-		city: result.city,
+		// Name lists, as this output has always printed them; scripts read it.
+		country: result.country?.names ?? null,
+		region: result.region?.names ?? null,
+		city: result.city?.names ?? null,
 		boundingBox: result.boundingBox,
 		chunkIndex: result.chunkIndex,
 	});

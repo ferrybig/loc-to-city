@@ -105,6 +105,13 @@ consumer (Immich, the demo) can do through the same methods
 (`query`, `place`, `places`, `search`, `chunkRecords`, ...). Add
 capability to the reader first, then expose it as a subcommand:
 
+The package has four entry points: `.` (`src/index.ts`: the reader,
+its result types, errors and byte sources -- keep it small, it's what a
+consumer reads first), `./node` (`src/node.ts`), `./indexes` (the
+search/locate index classes and builders) and `./format` (`src/format.ts`:
+spec-level codecs the compressor and low-level tests use, no stability
+promise). Add an export to the narrowest one that works.
+
 The reader's API is async and platform-neutral: nothing under
 `reader/src/` imports `node:*` except `node.ts` (`openFile`,
 `FileSource`, `nodeInflater`, the `*PathFor` sidecar helpers -- the

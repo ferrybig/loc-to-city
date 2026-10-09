@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
-import { toSource, readHeaderAndDirectory, parsePlaceTable, readNameEntry, streamInflater, resolveIdentifier } from "@loc-to-city/reader";
+import { streamInflater } from "@loc-to-city/reader";
+import { toSource, readHeaderAndDirectory, parsePlaceTable, readNameEntry, resolveIdentifier } from "@loc-to-city/reader/format";
 import { parseChunkSelection } from "../src/chunkSelection.ts";
 import { buildCGeoDataFile } from "../src/build.ts";
 import { buildCGeoDataFileParallel } from "../src/buildParallel.ts";

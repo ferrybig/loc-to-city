@@ -14,9 +14,15 @@ test("Appendix A fixture is exactly 157 bytes", () => {
 test("lookup 1: (lat 20, lon 100) resolves to Zaandam, Noord-Holland, Nederland", async () => {
 	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
 	const result = await reader.query(20, 100);
-	assert.deepEqual(result.country, ["Nederland", "The Netherlands"]);
-	assert.deepEqual(result.region, ["Noord-Holland"]);
-	assert.deepEqual(result.city, ["Zaandam"]);
+	assert.deepEqual(result.country?.names, ["Nederland", "The Netherlands"]);
+	assert.deepEqual(result.region?.names, ["Noord-Holland"]);
+	assert.deepEqual(result.city?.names, ["Zaandam"]);
+	// Section 7.4: field 0 is the local name, field 1 the international
+	// one, which falls back to the local name where there is none.
+	assert.equal(result.country?.localName, "Nederland");
+	assert.equal(result.country?.internationalName, "The Netherlands");
+	assert.equal(result.city?.localName, "Zaandam");
+	assert.equal(result.city?.internationalName, "Zaandam");
 	// Record (code 4, depth 2): x=2, y=0 at depth 2 -> lon [90, 135), lat [0, 22.5).
 	assert.deepEqual(result.boundingBox, {
 		minLon: 90,
@@ -31,8 +37,8 @@ test("lookup 1: (lat 20, lon 100) resolves to Zaandam, Noord-Holland, Nederland"
 test("lookup 2: (lat 40, lon 30) resolves to a region-level result (Noord-Holland), city null", async () => {
 	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
 	const result = await reader.query(40, 30);
-	assert.deepEqual(result.country, ["Nederland", "The Netherlands"]);
-	assert.deepEqual(result.region, ["Noord-Holland"]);
+	assert.deepEqual(result.country?.names, ["Nederland", "The Netherlands"]);
+	assert.deepEqual(result.region?.names, ["Noord-Holland"]);
 	assert.equal(result.city, null);
 	// Record (code 0, depth 1): x=0, y=0 at depth 1 -> lon [0, 90), lat [0, 45).
 	assert.deepEqual(result.boundingBox, {

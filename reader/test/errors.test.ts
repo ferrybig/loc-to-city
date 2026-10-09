@@ -4,14 +4,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import {
-	buildLocateIndex,
-	buildSearchIndex,
 	CGeoDataError,
 	CGeoDataFormatError,
 	CGeoDataIndexMismatchError,
 	CGeoDataReader,
 	CGeoDataVersionError,
 } from "../src/index.ts";
+import { buildLocateIndex, buildSearchIndex } from "../src/indexes.ts";
 import {
 	locateIndexPathFor,
 	nodeInflater,

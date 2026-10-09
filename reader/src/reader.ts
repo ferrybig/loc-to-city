@@ -62,10 +62,13 @@ export interface PlaceIdResult {
 	chunkIndex: number;
 }
 
+/** `query()`'s result: `lookup()`'s, with the place and its ancestors
+ * named. A level that doesn't apply is null: `city` for a point resolved
+ * only to a region, all three where nothing resolved. */
 export interface QueryResult extends PlaceIdResult {
-	country: string[] | null;
-	region: string[] | null;
-	city: string[] | null;
+	country: PlaceRef | null;
+	region: PlaceRef | null;
+	city: PlaceRef | null;
 }
 
 export type PlaceLevel = "country" | "region" | "city";
@@ -73,6 +76,27 @@ export type PlaceLevel = "country" | "region" | "city";
 /** A place's global id (Section 7.5) and its name entry (Section 7.4). */
 export interface PlaceRef {
 	id: number;
+	/**
+	 * The place's name in its own language and script, as people there
+	 * write it: "東京都", "Den Haag". Field 0 of its name entry, never
+	 * empty.
+	 */
+	localName: string;
+	/**
+	 * The place's international (English) name -- "Tokyo", "The Hague" --
+	 * or `localName` where it has none, which is also the case for a place
+	 * whose names are the same. Field 1 of its name entry. Pick this one
+	 * when a name is shown to everyone regardless of their language, or
+	 * stored once for all of them.
+	 */
+	internationalName: string;
+	/**
+	 * Every name, in name-entry order (Section 7.4): `localName`, then the
+	 * international name (`""` where it has none but alternatives follow),
+	 * then alternative names and spellings ("'s-Gravenhage"). For search
+	 * and for showing alternatives; to display one name, use `localName`
+	 * or `internationalName` rather than indexing into this.
+	 */
 	names: string[];
 }
 
@@ -311,13 +335,8 @@ export class CGeoDataReader {
 		if (result.placeId === null) {
 			return { ...result, country: null, region: null, city: null };
 		}
-		const place = await this.place(result.placeId);
-		return {
-			...result,
-			country: place.country.names,
-			region: place.region?.names ?? null,
-			city: place.city?.names ?? null,
-		};
+		const { country, region, city } = await this.place(result.placeId);
+		return { ...result, country, region, city };
 	}
 
 	/**
@@ -861,7 +880,14 @@ export class CGeoDataReader {
 	 * middle of the place's area -- its own cells plus those of every place
 	 * under it -- that is guaranteed to lie in that area, so `query()` at
 	 * the returned point resolves to the place or one of its descendants.
-	 * Null if neither the place nor anything under it has any cells.
+	 *
+	 * Null if neither the place nor anything under it has any cells -- and
+	 * that happens to real places, not only to broken files: a place
+	 * smaller than the file's finest cell (a tiny island, an enclave, a
+	 * boundary sliver) loses every cell to its neighbours. On a worldwide
+	 * build that's about 0.15% of places, every one of them still found
+	 * by `search()`; drop them from results that need a position rather
+	 * than defaulting to a coordinate.
 	 *
 	 * With a locate index (`useLocateIndex()`) this reads one entry;
 	 * without one it scans every chunk. Same result either way.
@@ -1145,17 +1171,29 @@ function assemblePlace(
 	region: string[] | undefined,
 	city: string[] | undefined,
 ): Place {
-	const countryRef = { id: ids.country, names: country };
-	const regionRef =
-		ids.region === null ? null : { id: ids.region, names: region! };
-	const cityRef = ids.city === null ? null : { id: ids.city, names: city! };
+	const countryRef = placeRef(ids.country, country);
+	const regionRef = ids.region === null ? null : placeRef(ids.region, region!);
+	const cityRef = ids.city === null ? null : placeRef(ids.city, city!);
+	const own = cityRef ?? regionRef ?? countryRef;
 	return {
 		id,
-		names: (cityRef ?? regionRef ?? countryRef).names,
+		localName: own.localName,
+		internationalName: own.internationalName,
+		names: own.names,
 		level: ids.level,
 		country: countryRef,
 		region: regionRef,
 		city: cityRef,
+	};
+}
+
+function placeRef(id: number, names: string[]): PlaceRef {
+	const localName = names[0] ?? "";
+	return {
+		id,
+		localName,
+		internationalName: names[1] || localName,
+		names,
 	};
 }
 

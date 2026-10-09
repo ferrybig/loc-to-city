@@ -3,13 +3,8 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  CGeoDataReader,
-  readHeaderAndDirectory,
-  parsePlaceTable,
-  readNameEntry,
-  type QueryResult,
-} from "@loc-to-city/reader";
+import { CGeoDataReader, type QueryResult } from "@loc-to-city/reader";
+import { readHeaderAndDirectory, parsePlaceTable, readNameEntry } from "@loc-to-city/reader/format";
 import { FileSource, nodeInflater, openFile } from "@loc-to-city/reader/node";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -77,8 +72,8 @@ test("zuid-holland.bin: a resolved city's ancestor chain classifies correctly", 
   const reader = await openFile(BIN_PATH);
   // Den Haag city hall, well inside its own boundary.
   const result = await reader.query(52.0799, 4.3113);
-  assert.deepEqual(result.country, ["Netherlands"]);
-  assert.deepEqual(result.region, ["Zuid-Holland", "South Holland"]);
+  assert.deepEqual(result.country?.names, ["Netherlands"]);
+  assert.deepEqual(result.region?.names, ["Zuid-Holland", "South Holland"]);
   assert.ok(result.city, "expected a city-level result near Den Haag's city hall");
 });
 
@@ -91,8 +86,8 @@ test("zuid-holland.bin: a point in Utrecht resolves to a real city, not just the
   // real city here too, now.
   const reader = await openFile(BIN_PATH);
   const result = await reader.query(52.146973, 5.465698);
-  assert.deepEqual(result.country, ["Netherlands"]);
-  assert.deepEqual(result.region, ["Utrecht"]);
+  assert.deepEqual(result.country?.names, ["Netherlands"]);
+  assert.deepEqual(result.region?.names, ["Utrecht"]);
   assert.ok(result.city, "expected a city-level result in Utrecht");
 });
 

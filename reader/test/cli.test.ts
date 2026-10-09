@@ -213,13 +213,28 @@ test("list: --json emits one Place per line", () => {
 		run(["list", fixturePath, "--level", "city", "--json"]).stdout,
 	);
 	assert.equal(lines.length, 3);
-	assert.deepEqual(lines[1], {
+	const zaandam = {
 		id: 5,
+		localName: "Zaandam",
+		internationalName: "Zaandam",
 		names: ["Zaandam"],
+	};
+	assert.deepEqual(lines[1], {
+		...zaandam,
 		level: "city",
-		country: { id: 0, names: ["Nederland", "The Netherlands"] },
-		region: { id: 2, names: ["Noord-Holland"] },
-		city: { id: 5, names: ["Zaandam"] },
+		country: {
+			id: 0,
+			localName: "Nederland",
+			internationalName: "The Netherlands",
+			names: ["Nederland", "The Netherlands"],
+		},
+		region: {
+			id: 2,
+			localName: "Noord-Holland",
+			internationalName: "Noord-Holland",
+			names: ["Noord-Holland"],
+		},
+		city: zaandam,
 	});
 });
 

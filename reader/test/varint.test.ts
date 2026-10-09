@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-	CGeoDataFormatError,
 	IncompleteBufferError,
 	readDeltaVarintsInto,
 	readVarint,
 	writeVarint,
-} from "../src/index.ts";
+} from "../src/format.ts";
+import { CGeoDataFormatError } from "../src/index.ts";
 
 // Section 3.2 worked examples: 0 -> 00; 127 -> 7f; 128 -> 80 01;
 // 300 -> ac 02; 8192 -> 80 40.

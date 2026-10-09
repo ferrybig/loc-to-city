@@ -6,6 +6,7 @@ import type {
 	CGeoDataReader,
 	PlaceIdResult,
 	PlaceIds,
+	PlaceRef,
 	QueryResult,
 } from "@loc-to-city/reader";
 import { openFile } from "@loc-to-city/reader/node";
@@ -141,7 +142,21 @@ function syntheticReader(): QueryingReader & { queries: number } {
 		query(lat: number, lon: number): QueryResult {
 			const result = reader.lookupCached(lat, lon);
 			reader.queries--;
-			return { ...result, ...levels[result.placeId ?? levels.length - 1]! };
+			const named = levels[result.placeId ?? levels.length - 1]!;
+			// Only the names matter to the references; ids aren't compared.
+			const ref = (names: string[] | null): PlaceRef | null =>
+				names && {
+					id: -1,
+					localName: names[0]!,
+					internationalName: names[1] || names[0]!,
+					names,
+				};
+			return {
+				...result,
+				country: ref(named.country),
+				region: ref(named.region),
+				city: ref(named.city),
+			};
 		},
 	};
 	return reader;
@@ -202,7 +217,7 @@ async function uncachedBorders(
 			gy * resolution + resolution / 2,
 		);
 		const r = await reader.query(lat, lon);
-		return [r.country, r.region, r.city].map((n) => JSON.stringify(n));
+		return [r.country, r.region, r.city].map((n) => JSON.stringify(n?.names));
 	};
 	const strength = ([c1, r1, t1]: string[], [c2, r2, t2]: string[]): number =>
 		c1 !== c2 ? 3 : r1 !== r2 ? 2 : t1 !== t2 ? 1 : 0;

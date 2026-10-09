@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
-import { toSource, readHeaderAndDirectory } from "@loc-to-city/reader";
+import { toSource, readHeaderAndDirectory } from "@loc-to-city/reader/format";
 import { buildCGeoDataFileParallel } from "../src/buildParallel.ts";
 import type { HierarchyCountry } from "../src/hierarchy.ts";
 import type { CityProperties } from "../src/placeIds.ts";

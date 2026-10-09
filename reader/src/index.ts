@@ -1,43 +1,27 @@
-export {
-	type BoundingBox,
-	boundingBoxContains,
-	cellBoundingBox,
-	chunkBoundingBox,
-} from "./cellBounds.ts";
-export { type ChunkRecords, parseChunk } from "./chunk.ts";
-export { readHeaderAndDirectory } from "./container.ts";
-export { type CGeoDataDirectory, parseDirectory } from "./directory.ts";
+/**
+ * CGEODATA reader: resolves a latitude/longitude to the country, region
+ * and city containing it, from a CGEODATA file (see binary-format.md).
+ *
+ * This entry point is platform-neutral. On Node.js, open files with
+ * `openFile()` from `./node`; anywhere else, hand `CGeoDataReader.open()`
+ * the file's bytes or a `Blob`. Search and locate indexes, and their
+ * builders, are in `./indexes`; the format's low-level codecs, for tools
+ * that write or inspect files, in `./format`.
+ *
+ * @module
+ */
+export { type BoundingBox, boundingBoxContains } from "./cellBounds.ts";
+export type { ChunkRecords } from "./chunk.ts";
+export type { CGeoDataDirectory } from "./directory.ts";
 export {
 	CGeoDataError,
 	CGeoDataFormatError,
 	CGeoDataIndexMismatchError,
 	CGeoDataVersionError,
 } from "./errors.ts";
-export { type CGeoDataHeader, parseHeader } from "./header.ts";
-export {
-	type Inflater,
-	inflateBlock,
-	inflateCeiling,
-	streamInflater,
-} from "./inflate.ts";
-export {
-	type BuildLocateIndexOptions,
-	buildLocateIndex,
-	decodeLocateEntry,
-	encodeLocateEntry,
-	type LocateCell,
-	LocateIndex,
-	locateEntryWidth,
-} from "./locateIndex.ts";
-export { lowBits, mortonDecode, mortonEncode, shiftRight } from "./morton.ts";
-export {
-	type PlaceTableInfo,
-	parsePlaceTable,
-	type ResolvedPlace,
-	readNameBlock,
-	readNameEntry,
-	resolveIdentifier,
-} from "./placeTable.ts";
+export type { CGeoDataHeader } from "./header.ts";
+export { type Inflater, streamInflater } from "./inflate.ts";
+export type { LocateIndex } from "./locateIndex.ts";
 export {
 	CGeoDataReader,
 	type ChunkRecord,
@@ -55,44 +39,10 @@ export {
 	type QueryResult,
 	type SearchOptions,
 } from "./reader.ts";
-export {
-	containsTokenRun,
-	EXACT_SPELLING_BONUS,
-	foldDiacritics,
-	LEVEL_BONUS,
-	type Needle,
-	nameMatchQuality,
-	placeMatchQuality,
-	prepareNeedle,
-	QUALITY_EXACT,
-	QUALITY_MAX,
-	QUALITY_SUBSTRING,
-	QUALITY_WHOLE_WORD,
-	tokenize,
-	tokenizeFolded,
-} from "./relevance.ts";
-export {
-	buildSearchIndex,
-	DEFAULT_SEARCH_INDEX_OPTIONS,
-	fnv1a32,
-	foldSymbols,
-	SearchIndex,
-	type SearchIndexOptions,
-	trigramListIndex,
-	trigramListIndices,
-} from "./searchIndex.ts";
+export type { SearchIndex } from "./searchIndex.ts";
 export {
 	BlobSource,
 	type ByteSource,
 	BytesSource,
 	type SourceInput,
-	toSource,
 } from "./source.ts";
-export {
-	IncompleteBufferError,
-	readDeltaVarintList,
-	readDeltaVarintsInto,
-	readVarint,
-	readVarintList,
-	writeVarint,
-} from "./varint.ts";

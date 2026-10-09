@@ -18,16 +18,16 @@ test("52.034656, 4.388124 resolves to Den Haag, not Nootdorp", { skip }, async (
   const reader = await openFile(BIN_PATH);
   const result = await reader.query(52.034656, 4.388124);
   assert.ok(result.city, "expected a city-level result");
-  assert.equal(result.city![0], "Den Haag");
-  assert.notEqual(result.city![0], "Nootdorp");
+  assert.equal(result.city!.localName, "Den Haag");
+  assert.notEqual(result.city!.localName, "Nootdorp");
 });
 
 test("51.970738, 4.123725 resolves to Europoort, not Hoek van Holland", { skip }, async () => {
   const reader = await openFile(BIN_PATH);
   const result = await reader.query(51.970738, 4.123725);
   assert.ok(result.city, "expected a city-level result");
-  assert.equal(result.city![0], "Europoort");
-  assert.notEqual(result.city![0], "Hoek van Holland");
+  assert.equal(result.city!.localName, "Europoort");
+  assert.notEqual(result.city!.localName, "Hoek van Holland");
 });
 
 // Regression: a max-depth ambiguous cell near the Den Haag/Nootdorp border
@@ -40,9 +40,9 @@ test("51.970738, 4.123725 resolves to Europoort, not Hoek van Holland", { skip }
 test("52.035122, 4.390090 (Den Haag/Nootdorp border) resolves to a city, not just the region", { skip }, async () => {
   const reader = await openFile(BIN_PATH);
   const result = await reader.query(52.035122, 4.39009);
-  assert.deepEqual(result.country, ["Netherlands"]);
-  assert.deepEqual(result.region, ["Zuid-Holland", "South Holland"]);
-  assert.ok(result.city?.[0] === "Den Haag" || result.city?.[0] === "Nootdorp", `got city=${result.city}`);
+  assert.deepEqual(result.country?.names, ["Netherlands"]);
+  assert.deepEqual(result.region?.names, ["Zuid-Holland", "South Holland"]);
+  assert.ok(result.city?.localName === "Den Haag" || result.city?.localName === "Nootdorp", `got city=${result.city?.localName}`);
 });
 
 // boundingBox exists so callers doing many nearby lookups (a tile renderer

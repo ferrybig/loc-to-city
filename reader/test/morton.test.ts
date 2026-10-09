@@ -5,7 +5,7 @@ import {
 	mortonDecode,
 	mortonEncode,
 	shiftRight,
-} from "../src/index.ts";
+} from "../src/format.ts";
 
 // Section 8.1's D=2 worked example:
 //  y=3 | 10  11  14  15
