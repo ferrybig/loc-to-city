@@ -7,7 +7,7 @@ point lookup that gets it wrong near every border.
 **The working system is [reader/, compressor/, data-ingest/ and
 demo/](#the-cgeodata-format-and-its-javascripttypescript-implementation)**
 -- a from-scratch JavaScript/TypeScript implementation of CGEODATA (the
-binary format specified in `binary-format.md`), since JavaScript is what
+binary format specified in `reader/binary-format.md`), since JavaScript is what
 Immich, the actual target, runs.
 
 This README is in two halves. Everything up to [Historical record: the
@@ -152,7 +152,7 @@ more -- see the code block below.
 ## The CGEODATA format and its JavaScript/TypeScript implementation
 
 Everything above is the Python prototype that found and fixed the real
-problems. `binary-format.md` specifies the actual result: CGEODATA, a
+problems. `reader/binary-format.md` specifies the actual result: CGEODATA, a
 from-scratch binary format (not the same bytes as the Python `.bin` files)
 designed from the start to be readable with zero runtime dependencies in
 Node.js and browsers -- the hard constraint from the
@@ -162,14 +162,14 @@ shards the world into independently-decompressible pieces so a lookup never
 has to touch more than a small, bounded part of the file, and stores the
 place hierarchy (country → region → city) as delta-coded counts plus
 keyframe-compressed name blocks so names can be recovered by id without
-decompressing the whole list. Read `binary-format.md` for the actual spec;
+decompressing the whole list. Read `reader/binary-format.md` for the actual spec;
 this section just covers the code that implements it.
 
 Four npm workspaces, all TypeScript:
 
 - **`reader/`** — the format's reference reader. Zero runtime dependencies
   (only Node's built-in `zlib`), matching the spec's own constraint. Tested
-  against `binary-format.md`'s Appendix A worked example byte-for-byte, not
+  against `reader/binary-format.md`'s Appendix A worked example byte-for-byte, not
   just self-consistency with the compressor below.
 - **`compressor/`** — turns a GeoJSON of city polygons, region polygons,
   and a country polygon, plus a small place-hierarchy JSON, into a `.bin`
@@ -687,7 +687,7 @@ Everything currently known to be wrong, unfinished, or worth revisiting in
 the current (non-historical) system, in one place, instead of scattered
 next to whichever section a bug happened to be found in. Format-level
 design gaps (not implementation bugs) live separately in
-`binary-format.md`'s own [Open Issues](binary-format.md#12-open-issues)
+`reader/binary-format.md`'s own [Open Issues](reader/binary-format.md#12-open-issues)
 section, since those are spec decisions rather than pipeline work.
 
 ### Open
@@ -896,7 +896,7 @@ section, since those are spec decisions rather than pipeline work.
 
 - **Search had no diacritic folding, and ranked city above country even
   when the query was a country's own name.** Fixed in two parts, both in
-  `reader/src/relevance.ts` and specified in `binary-format.md` Appendix
+  `reader/src/relevance.ts` and specified in `reader/binary-format.md` Appendix
   B.2/B.5/B.6/B.9 (search-index format bumped to kind 1 version 2, since
   the short-query table's stored contents depend on the exact relevance
   rule and nothing in the file format itself records which rule built
@@ -1159,7 +1159,7 @@ section, since those are spec decisions rather than pipeline work.
   Worldwide, 2,142 of 6,041 region polygons across 114 countries were
   missing, 22 of those countries ending up with zero regions (Eswatini,
   Fiji, Seychelles, Vanuatu, ...). Fixed by seeding the hierarchy from
-  every region polygon; `binary-format.md` Section 7.2 already allows a
+  every region polygon; `reader/binary-format.md` Section 7.2 already allows a
   region with zero cities. Verified on an Africa-only scoped build: all
   four capitals now resolve to their correct region.
 
@@ -1324,9 +1324,9 @@ section, since those are spec decisions rather than pipeline work.
   Immich's reverse geocoding" above).** Addressed via a trigram search
   index (`build-search-index` CLI command, attached with
   `CGeoDataReader.useSearchIndex()` / the `--index` flag for `search`),
-  conforming to `binary-format.md` Appendix B. The coordinate per result
+  conforming to `reader/binary-format.md` Appendix B. The coordinate per result
   comes from `CGeoDataReader.locate()`, backed by a place location index
-  (`build-locate-index`, `binary-format.md` Appendix C) that turns a
+  (`build-locate-index`, `reader/binary-format.md` Appendix C) that turns a
   ~1.6s scan of every chunk into a sub-millisecond read.
 
 ## Historical record: the Python prototype
@@ -1570,7 +1570,7 @@ and the accuracy discussion in the D section above.)
   cost near borders.
 - Still Python throughout, and still not what Immich would actually load
   (Immich runs Node.js). The JS/TS port covers a new, formally-specified
-  format (`binary-format.md`, "CGEODATA") rather than these exact `.bin`
+  format (`reader/binary-format.md`, "CGEODATA") rather than these exact `.bin`
   files -- see [The CGEODATA format and its JavaScript/TypeScript
   implementation](#the-cgeodata-format-and-its-javascripttypescript-implementation).
 

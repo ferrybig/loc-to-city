@@ -40,7 +40,7 @@ function parseArgs(argv: string[]): { positional: string[]; flags: Record<string
   return { positional, flags };
 }
 
-/** A header field (binary-format.md Section 5): a whole number in
+/** A header field (reader/binary-format.md Section 5): a whole number in
  * [0, max]. Anything else would otherwise reach the u8 header as NaN,
  * which Buffer silently writes as 0. */
 function headerFlag(flags: Record<string, string>, name: string, fallback: number, max: number): number {
@@ -84,7 +84,7 @@ async function main(): Promise<void> {
   const widthExp = headerFlag(flags, "width-exp", 6, 15);
   const heightExp = headerFlag(flags, "height-exp", 6, 15);
   const maxDepth = headerFlag(flags, "max-depth", 12, 26);
-  const keyframeExp = headerFlag(flags, "keyframe-exp", 7, 255); // binary-format.md Section 7.3
+  const keyframeExp = headerFlag(flags, "keyframe-exp", 7, 255); // reader/binary-format.md Section 7.3
   const chunkCount = 2 ** widthExp * 2 ** heightExp;
 
   const onlyChunksFlag = flags["only-chunks"];

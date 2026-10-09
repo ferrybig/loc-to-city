@@ -14,7 +14,7 @@ is a local, reproducible build artifact -- raw downloads, osmium
 extractions, resolved hierarchy/geometry, and all three `.bin` files are
 gitignored. The only two tracked files under `data/` are
 `data/00-raw/orphan/README.md` (documentation) and
-`data/03-final/appendix-a-example.bin` (a hand-extracted `binary-format.md`
+`data/03-final/appendix-a-example.bin` (a hand-extracted `reader/binary-format.md`
 spec fixture, not pipeline output). A fresh clone has an essentially
 empty `data/` and must run the download + build scripts to populate it.
 
@@ -163,7 +163,7 @@ CONSUMERS (read-only, not part of the build):
 └── compressor/test/zuid-holland*.test.ts           skip if the .bin is absent
 
 OUTSIDE ALL PIPELINES:
-└── data/03-final/appendix-a-example.bin   hand-extracted from binary-format.md's
+└── data/03-final/appendix-a-example.bin   hand-extracted from reader/binary-format.md's
                                             own Appendix A hex dump (commit 1f38d134),
                                             a reader/ fixture, not pipeline output.
 ```
@@ -252,7 +252,7 @@ negation-pattern mechanics):
 
 ```
 data/00-raw/orphan/README.md         COMMITTED (documentation)
-data/03-final/appendix-a-example.bin COMMITTED (binary-format.md spec fixture)
+data/03-final/appendix-a-example.bin COMMITTED (reader/binary-format.md spec fixture)
 
 (everything else under data/ is gitignored, including
  data/00-raw/orphan/nl_cities.geojson and all of data/02-resolved/ --

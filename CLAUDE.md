@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-CGEODATA: a binary reverse-geocoding format (spec in `binary-format.md`) that
+CGEODATA: a binary reverse-geocoding format (spec in `reader/binary-format.md`) that
 resolves a GPS point to city/region/country from real OpenStreetMap
 administrative boundaries, replacing nearest-labeled-point lookups (which
 get it wrong near borders — see README's "Why nearest-point is wrong"). The
@@ -25,7 +25,7 @@ Four npm workspaces (Node >=26, see `.nvmrc`), all TypeScript, ESM
 
 - **`reader/`** — the format's reference reader. Zero runtime dependencies
   besides Node's built-in `zlib`. Tested byte-for-byte against
-  `binary-format.md`'s Appendix A worked example, not just self-consistency
+  `reader/binary-format.md`'s Appendix A worked example, not just self-consistency
   with the compressor.
 - **`compressor/`** — turns a GeoJSON of city/region/country polygons plus a
   place-hierarchy JSON into a `.bin` file. Free to use real dependencies
@@ -138,7 +138,7 @@ node reader/src/cli.ts locate data/03-final/world.bin 309463      # a representa
 ```
 
 `<file.bin>` may be `-` for stdin. `search` is a linear scan over the
-name blocks unless a trigram search index (`binary-format.md` Appendix B,
+name blocks unless a trigram search index (`reader/binary-format.md` Appendix B,
 `reader/src/searchIndex.ts`) is in use: its trigram lists narrow queries
 of 3+ characters to candidate places, and its short-query table answers
 sorted 1-2 character searches with `--limit` up to its top count (5) and
@@ -172,7 +172,7 @@ which can't represent the bonus a differently-spelled live query would
 get -- see Appendix B.6).
 
 `locate` (and `search --locate`) returns the centre of a place's
-representative cell (`binary-format.md` Section C.3): the area-weighted
+representative cell (`reader/binary-format.md` Section C.3): the area-weighted
 per-axis median of the cells of the place *and everything under it*
 (a country's regions and cities count), moved to the nearest cell inside
 that area if the median falls outside it -- so `query()` at the point
@@ -290,7 +290,7 @@ a chunk, places are laid out on an adaptive Morton/Z-order quadtree, refined
 up to `max-depth`. Country → region → city hierarchy is stored as
 delta-coded counts plus keyframe-compressed name blocks (`nameBlocks.ts`)
 so names resolve by id without decompressing the whole list. Read
-`binary-format.md` for the actual spec before changing wire format code in
+`reader/binary-format.md` for the actual spec before changing wire format code in
 `reader/` or `compressor/src/writer.ts`.
 
 **Compressor pipeline** (`buildCore.ts` orchestrates):

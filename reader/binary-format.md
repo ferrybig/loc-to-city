@@ -36,7 +36,7 @@ without decompressing the whole list.
 
 ### 1.1. Motivation
 
-Reverse geocoding for photo management (see [README.md](README.md))
+Reverse geocoding for photo management (see the project's [README](https://github.com/ferrybig/loc-to-city#readme))
 is commonly implemented by storing one labelled point per place and
 returning the nearest label. Cities are not points, and near any border
 the nearest label is frequently wrong. Storing full polygons is accurate
@@ -2082,5 +2082,5 @@ entry of `20` (`32`) would be rejected, since `t - B = 3` is odd.
 - [FNV] Eastlake, D., Fowler, G., Noll, L., Vo, K-P., and T. Hansen,
   "The FNV Non-Cryptographic Hash Algorithm",
   draft-eastlake-fnv, <https://datatracker.ietf.org/doc/draft-eastlake-fnv/>.
-- [README.md](README.md): the prototype and measurements this format
+- [README](https://github.com/ferrybig/loc-to-city#readme): the prototype and measurements this format
   is derived from.

@@ -13,7 +13,7 @@ function writeFixture(lines: string[]): string {
 }
 
 // A real cities500.txt row, tab-separated, 19 GeoNames columns -- Andorra's
-// "Vila" from binary-format.md's own worked example corpus, so the exact
+// "Vila" from reader/binary-format.md's own worked example corpus, so the exact
 // field positions being parsed are the real ones, not a guessed shape.
 const REAL_ROW =
   "3038832\tVila\tVila\tCasas Vila,Vila\t42.53176\t1.56654\tP\tPPL\tAD\t\t03\t\t\t\t1418\t\t1318\tEurope/Andorra\t2024-11-04";
