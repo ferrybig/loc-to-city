@@ -1,5 +1,6 @@
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import { readFileSync } from "node:fs";
+import type { BoundingBox } from "../cellBounds.ts";
 import { CGeoDataReader, type Place, type PlaceLevel } from "../reader.ts";
 
 /** grep's convention: 0 = success/matched, 1 = ran fine but found nothing
@@ -26,9 +27,15 @@ type Options = NonNullable<ParseArgsConfig["options"]>;
  * positionals -- parseArgs would otherwise read that as short options
  * `-1 -0 ...`. Such tokens are hidden behind a NUL prefix for the parse
  * and restored afterwards; nothing else can legitimately start with NUL.
+ *
+ * The leading digit may come after a decimal point: "-.5,10" is as good a
+ * coordinate as "-0.5,10", and matching only `-\d` rejected it with
+ * "Unknown option '-.'".
  */
+const NEGATIVE_NUMBER = /^-(?:\d|\.\d)/;
+
 export function parse<O extends Options>(argv: string[], options: O) {
-  const shielded = argv.map((arg) => (/^-\d/.test(arg) ? `\0${arg}` : arg));
+  const shielded = argv.map((arg) => (NEGATIVE_NUMBER.test(arg) ? `\0${arg}` : arg));
   try {
     const { values, positionals } = parseArgs({ args: shielded, options, allowPositionals: true, strict: true });
     return { values, positionals: positionals.map((p) => (p.startsWith("\0") ? p.slice(1) : p)) };
@@ -88,6 +95,14 @@ export function formatPlaceBlock(place: Place): string[] {
     `  region   ${place.region ? `${names(place.region.names)}  [${place.region.id}]` : "-"}`,
     `  city     ${place.city ? `${names(place.city.names)}  [${place.city.id}]` : "-"}`,
   ];
+}
+
+/** Decimal places that meaningfully represent a coordinate given the cell
+ * it came out of. Shared by `locate` and `search --locate`, which have to
+ * print the same coordinate the same way. */
+export function coordPrecision(box: BoundingBox): number {
+  const cellSize = Math.min(box.maxLat - box.minLat, box.maxLon - box.minLon);
+  return Math.max(0, Math.round(-Math.log10(cellSize) + 1));
 }
 
 export function writeLine(line: string): void {

@@ -10,7 +10,11 @@ interface Point {
 }
 
 function parseCoordinate(text: string, what: "latitude" | "longitude"): number {
-  const value = Number(text.trim());
+  const trimmed = text.trim();
+  // `Number("")` is 0, not NaN, so an emptiness check has to come first:
+  // otherwise a truncated "52.3," parses as (52.3, 0) and reports a
+  // confident, wrong place off the coast of England instead of an error.
+  const value = trimmed === "" ? Number.NaN : Number(trimmed);
   if (!Number.isFinite(value)) throw new Error(`${what} ${JSON.stringify(text)} is not a number`);
   return value;
 }

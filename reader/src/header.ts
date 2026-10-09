@@ -63,6 +63,14 @@ export function parseHeader(buf: Uint8Array): CGeoDataHeader {
   if (heightExp > 15) {
     throw new Error(`height_exp ${heightExp} exceeds the maximum of 15`);
   }
+  // The only other u8 of the header, and the only one that was left
+  // unchecked: a place count is below 2^53 (Section 3.2), so a block of
+  // 2^53 names or more can never be anything but malformed -- and an
+  // unchecked value renders as nonsense ("keyframe 255 (5.8e+76 names per
+  // block)" from `cgeodata info`).
+  if (keyframeExp > 52) {
+    throw new Error(`keyframe_exp ${keyframeExp} exceeds the maximum of 52`);
+  }
 
   return {
     version: version.value,

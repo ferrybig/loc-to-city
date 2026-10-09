@@ -520,8 +520,11 @@ export class LocateIndex {
 
 		const { value: storedVersion, bytesRead: vb } = readVarint(data, off);
 		off += vb;
-		const kind = storedVersion >> 4;
-		const ver = storedVersion & 0xf;
+		// Division, not `>>`/`&`: the stored version is a varint and so can
+		// reach 2^53, which 32-bit bitwise ops would silently truncate --
+		// a crafted 2^32 + 32 would otherwise read back as kind 2, version 0.
+		const kind = Math.floor(storedVersion / 16);
+		const ver = storedVersion % 16;
 		if (kind !== KIND_LOCATE_INDEX) {
 			throw new Error(`not a locate index file (kind ${kind}, expected ${KIND_LOCATE_INDEX})`);
 		}
