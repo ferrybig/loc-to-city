@@ -42,6 +42,23 @@ Four npm workspaces (Node >=26, see `.nvmrc`), all TypeScript, ESM
   point the compressor at.
 - **`demo/`** — a click-to-query Leaflet page plus a grid tile overlay.
 
+## Code style: tabs
+
+Indent with tabs. `reader/` and `demo/` are formatted by biome
+(`npx biome format --write reader demo`, enabled per directory in
+`biome.json`'s `overrides`); `compressor/` and `data-ingest/` are still
+two-space and not yet under the formatter. Pure reformatting commits go
+in `.git-blame-ignore-revs`.
+
+**Reading tab-indented files with the Read tool**: each output line is
+`<line number><TAB><line content>`, so the *first* tab after the number
+is the tool's separator and every tab after it is the file's own
+indentation. With `⇥` for a tab, `244⇥⇥⇥const NX` is a line indented by
+**two** tabs, not three -- easy to miscount deep in a file, where a
+two-tab method body looks like the separator plus one. When copying a line into an `Edit`
+`old_string`, drop the number and exactly one tab. If in doubt, `sed -n
+'244p' file | cat -A` shows each tab as `^I`.
+
 ## Commands
 
 ```bash

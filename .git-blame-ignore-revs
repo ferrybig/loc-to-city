@@ -1,0 +1,6 @@
+# Pure reformatting commits, skipped by `git blame` when
+# `git config blame.ignoreRevsFile .git-blame-ignore-revs` is set (GitHub
+# does this automatically).
+
+# Format reader/ and demo/ with biome: tab indentation
+3ef13d6f2ee631f4b5ce03cda374ee445ea0a5c4
