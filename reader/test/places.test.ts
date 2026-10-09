@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { buildSearchIndex, CGeoDataReader, type Place } from "../src/index.ts";
 import { APPENDIX_A_BYTES } from "./fixtures/appendixA.ts";
@@ -116,7 +117,10 @@ test("search({ sort: true }) ranks the same match set as unsorted search", () =>
   assert.deepEqual(ids(reader.search(" amsterdam", { sort: true })), []);
 });
 
-test("search({ sort: true }) on the real worldwide dataset: an exact name match outranks a fuzzier one", () => {
+// Built by `make world`, not committed (see CLAUDE.md).
+const WORLD_BIN = fileURLToPath(new URL("../../data/03-final/world.bin", import.meta.url));
+
+test("search({ sort: true }) on the real worldwide dataset: an exact name match outranks a fuzzier one", { skip: !existsSync(WORLD_BIN) }, () => {
   // Unlike Appendix A, the real dataset has several places whose name
   // merely contains "amsterdam" (Nieuw Amsterdam, Amsterdam-Duivendrecht,
   // ...) alongside the ones actually named "Amsterdam" (the Dutch city,
@@ -124,8 +128,7 @@ test("search({ sort: true }) on the real worldwide dataset: an exact name match 
   // motivated --sort in the first place. Assertions are shaped around
   // that invariant rather than specific ids, since a later data rebuild
   // can renumber places.
-  const path = new URL("../../data/03-final/world.bin", import.meta.url);
-  const worldReader = CGeoDataReader.open(fileURLToPath(path));
+  const worldReader = CGeoDataReader.open(WORLD_BIN);
   // Ranking is under test here, not the index: don't depend on whether a
   // (gitignored, possibly stale) world.search-index.bin sits next to it.
   worldReader.useSearchIndex(undefined);

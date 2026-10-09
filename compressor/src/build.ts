@@ -1,9 +1,9 @@
-import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
-import type { HierarchyCountry } from "./hierarchy.ts";
-import type { CityProperties } from "./placeIds.ts";
-import { buildChunkRecords } from "./quadtree.ts";
+import { type BuildOptions, type BuildStats, finishBuild, prepareBuild } from "./buildCore.ts";
 import { encodeChunk } from "./chunkEncoder.ts";
-import { prepareBuild, chunkBoundsOf, finishBuild, type BuildOptions, type BuildStats } from "./buildCore.ts";
+import { enumerateChunkJobs } from "./chunkJobs.ts";
+import type { HierarchyCountry } from "./hierarchy.ts";
+import type { CityCollection } from "./placeIds.ts";
+import { buildChunkRecords } from "./quadtree.ts";
 
 export type { BuildOptions, BuildStats } from "./buildCore.ts";
 
@@ -13,28 +13,34 @@ export type { BuildOptions, BuildStats } from "./buildCore.ts";
  * also exactly what `--workers 0` runs). */
 export function buildCGeoDataFile(
   hierarchy: HierarchyCountry[],
-  cities: FeatureCollection<Polygon | MultiPolygon, CityProperties>,
+  cities: CityCollection,
   options: BuildOptions,
 ): { bytes: Buffer; stats: BuildStats } {
   const prepared = prepareBuild(hierarchy, cities, options);
   const { candidateIndex, width, height } = prepared;
   const chunkBytes: (Buffer | null)[] = new Array(width * height).fill(null);
+  // The same jobs the worker pool runs (so both paths agree on which
+  // chunks do work, and know up front how many), just in chunk-index order
+  // instead of worst-first.
+  const jobs = enumerateChunkJobs(candidateIndex, width, height, options.onlyChunks).sort(
+    (a, b) => a.chunkIndex - b.chunkIndex,
+  );
 
   let totalRecords = 0;
   let nonEmptyChunkCount = 0;
-  for (let chunkIndex = 0; chunkIndex < width * height; chunkIndex++) {
-    if (options.onlyChunks && !options.onlyChunks.has(chunkIndex)) continue;
-
-    const bounds = chunkBoundsOf(chunkIndex, width, height);
-    const rootCandidates = candidateIndex.candidatesForBbox(bounds.lonMin, bounds.latMin, bounds.lonMax, bounds.latMax);
-    if (rootCandidates.length === 0) continue;
-
+  for (const { chunkIndex, bounds, candidates } of jobs) {
     const startedAt = performance.now();
-    const records = buildChunkRecords(rootCandidates, bounds, options.maxDepth);
+    const records = buildChunkRecords(candidates, bounds, options.maxDepth);
     const encoded = records.length === 0 ? null : encodeChunk(records);
     const elapsedMs = performance.now() - startedAt;
 
-    options.onChunkBuilt?.({ chunkIndex, chunkCount: width * height, recordCount: records.length, elapsedMs });
+    options.onChunkBuilt?.({
+      chunkIndex,
+      chunkCount: width * height,
+      jobCount: jobs.length,
+      recordCount: records.length,
+      elapsedMs,
+    });
     if (encoded === null) continue;
 
     chunkBytes[chunkIndex] = encoded;

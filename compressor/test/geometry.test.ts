@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Feature, FeatureCollection, Polygon, MultiPolygon } from "geojson";
 import bbox from "@turf/bbox";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
-import { classifyCell, containsPoint, type CellBounds, type CellRelation } from "../src/geometry.ts";
+import { classifyCell, containsPoint, packGeometry, type CellBounds, type CellRelation } from "../src/geometry.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -47,7 +47,7 @@ function bboxOf(feature: Feature<Polygon | MultiPolygon>): [number, number, numb
 
 function classify(feature: Feature<Polygon | MultiPolygon>, bounds: CellBounds = CELL): CellRelation {
   const [minX, minY, maxX, maxY] = bboxOf(feature);
-  return classifyCell(feature, bounds, minX, minY, maxX, maxY);
+  return classifyCell(packGeometry(feature.geometry), bounds, minX, minY, maxX, maxY);
 }
 
 /** Ground truth, independent of any polygon algebra: sample a dense grid
@@ -156,13 +156,16 @@ function makeRng(seed: number): () => number {
   };
 }
 
-test("containsPoint agrees with turf on real, complex province geometry", () => {
+// Built by `make netherlands`, not committed (see CLAUDE.md).
+const PROVINCES_PATH = path.resolve(__dirname, "../../data/02-resolved/nl/regions.geojson");
+
+test("containsPoint agrees with turf on real, complex province geometry", { skip: !existsSync(PROVINCES_PATH) }, () => {
   // regions.geojson (filtered to NL, see filter-by-scope.ts) is real
   // OSM-derived data with exactly the shapes that made this worth
   // replacing turf for in the first place: holes (a province with a city
   // carved out), MultiPolygons (islands), and enough vertices per ring to
   // exercise the banded ray cast, not just the plain one.
-  const provinces = JSON.parse(readFileSync(path.resolve(__dirname, "../../data/02-resolved/nl/regions.geojson"), "utf8")) as FeatureCollection<
+  const provinces = JSON.parse(readFileSync(PROVINCES_PATH, "utf8")) as FeatureCollection<
     Polygon | MultiPolygon
   >;
   assert.ok(provinces.features.length > 0, "fixture must actually have provinces to test against");
@@ -171,12 +174,13 @@ test("containsPoint agrees with turf on real, complex province geometry", () => 
   let checked = 0;
   let onLand = 0;
   for (const feature of provinces.features) {
+    const packed = packGeometry(feature.geometry);
     const [minX, minY, maxX, maxY] = bbox(feature) as [number, number, number, number];
     for (let i = 0; i < 500; i++) {
       const x = minX + rng() * (maxX - minX);
       const y = minY + rng() * (maxY - minY);
       const expected = booleanPointInPolygon([x, y], feature);
-      const actual = containsPoint(feature.geometry, x, y);
+      const actual = containsPoint(packed, x, y);
       checked++;
       if (expected) onLand++;
       assert.equal(actual, expected, `${feature.properties?.name ?? "?"} at ${x},${y}: turf said ${expected}, containsPoint said ${actual}`);

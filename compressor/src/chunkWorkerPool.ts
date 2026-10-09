@@ -1,5 +1,5 @@
-import { Worker } from "node:worker_threads";
 import { fileURLToPath } from "node:url";
+import { Worker } from "node:worker_threads";
 import type { ChunkJob, ChunkWorkerData, WorkerRequest, WorkerResponse } from "./chunkJobs.ts";
 
 const WORKER_URL = new URL(

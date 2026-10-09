@@ -383,14 +383,19 @@ async function main(): Promise<void> {
   // admin_level tagging. Including it anyway means such a country still
   // resolves at country level via the compressor's spatial fallback,
   // instead of silently vanishing from the output entirely.
+  // Plain code-unit order, not localeCompare: hierarchy order *is* the
+  // country and region ids (Section 7.1), and localeCompare collates by the
+  // machine's default locale and ICU version, so the same input could get
+  // different ids on a different machine.
+  const byCodeUnits = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
   const hierarchy: HierarchyCountry[] = [...countries.nameByCode.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => byCodeUnits(a, b))
     .map(([code, name]) => {
       const regionNames = regionNamesByCountry.get(code);
       return {
         code,
         name,
-        regions: [...(regionsByCountry.get(code) ?? [])].sort((a, b) => a.localeCompare(b)),
+        regions: [...(regionsByCountry.get(code) ?? [])].sort(byCodeUnits),
         ...(regionNames && regionNames.size > 0 ? { regionNames: Object.fromEntries(regionNames) } : {}),
       };
     });

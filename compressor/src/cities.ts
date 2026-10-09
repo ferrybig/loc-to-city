@@ -1,10 +1,9 @@
 import { createReadStream, readFileSync } from "node:fs";
-import type { Feature, FeatureCollection, Polygon, MultiPolygon } from "geojson";
-import type { CityProperties } from "./placeIds.ts";
+import type { FeatureCollection, MultiPolygon, Polygon } from "geojson";
+import { packFeature } from "./candidateIndex.ts";
+import type { CityFeature, CityProperties, PackedCityFeature } from "./placeIds.ts";
 
 const RECORD_SEPARATOR = 0x1e;
-
-type CityFeatureCollection = FeatureCollection<Polygon | MultiPolygon, CityProperties>;
 
 /** Loads the city layer, accepting either a plain GeoJSON
  * `FeatureCollection` or a GeoJSON Text Sequence (`.geojsonseq`, one
@@ -14,20 +13,25 @@ type CityFeatureCollection = FeatureCollection<Polygon | MultiPolygon, CityPrope
  * several gigabytes, and neither of the obvious ways to read it works at
  * that size: Node cannot hold a string past ~512MB, and `readFileSync`
  * refuses a file over 2GiB even into a Buffer. So records are split out of
- * a read stream and parsed one at a time -- only the parsed features are
- * ever held, never the file. */
-export async function loadCities(path: string): Promise<CityFeatureCollection> {
+ * a read stream and parsed one at a time.
+ *
+ * Each feature is packed (`packFeature`) as soon as it is parsed, and its
+ * GeoJSON coordinates dropped: nested `[x, y]` arrays cost ~70 bytes of heap
+ * per vertex against 16 packed, which on the worldwide layer is the
+ * difference between ~7GB and ~1.7GB held for the whole build. */
+export async function loadCities(path: string): Promise<{ features: PackedCityFeature[] }> {
   if (!path.endsWith(".geojsonseq")) {
-    return JSON.parse(readFileSync(path, "utf8")) as CityFeatureCollection;
+    const collection = JSON.parse(readFileSync(path, "utf8")) as FeatureCollection<Polygon | MultiPolygon, CityProperties>;
+    return { features: collection.features.map(packCity) };
   }
 
-  const features: Feature<Polygon | MultiPolygon, CityProperties>[] = [];
+  const features: PackedCityFeature[] = [];
   const stream = createReadStream(path, { highWaterMark: 8 * 1024 * 1024 });
   let carry: Buffer = Buffer.alloc(0);
 
   const push = (raw: Buffer): void => {
     const record = raw.toString("utf8").trim();
-    if (record.length > 0) features.push(JSON.parse(record) as Feature<Polygon | MultiPolygon, CityProperties>);
+    if (record.length > 0) features.push(packCity(JSON.parse(record) as CityFeature));
   };
 
   for await (const chunk of stream) {
@@ -44,5 +48,9 @@ export async function loadCities(path: string): Promise<CityFeatureCollection> {
   }
   push(carry);
 
-  return { type: "FeatureCollection", features };
+  return { features };
+}
+
+function packCity(feature: CityFeature): PackedCityFeature {
+  return { properties: feature.properties, shape: packFeature(feature) };
 }

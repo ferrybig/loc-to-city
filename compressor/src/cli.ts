@@ -1,12 +1,23 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
-import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
-import { loadHierarchy } from "./hierarchy.ts";
+import type { FeatureCollection, MultiPolygon, Polygon } from "geojson";
 import { buildCGeoDataFileParallel } from "./buildParallel.ts";
 import { parseChunkSelection } from "./chunkSelection.ts";
 import { loadCities } from "./cities.ts";
-import type { CityProperties } from "./placeIds.ts";
+import { loadHierarchy } from "./hierarchy.ts";
+
+const KNOWN_FLAGS = new Set([
+  "regions",
+  "countries",
+  "width-exp",
+  "height-exp",
+  "max-depth",
+  "keyframe-exp",
+  "attribution",
+  "workers",
+  "only-chunks",
+]);
 
 function parseArgs(argv: string[]): { positional: string[]; flags: Record<string, string> } {
   const positional: string[] = [];
@@ -15,6 +26,9 @@ function parseArgs(argv: string[]): { positional: string[]; flags: Record<string
     const arg = argv[i]!;
     if (arg.startsWith("--")) {
       const key = arg.slice(2);
+      // A misspelt flag (--max_depth) would otherwise be dropped silently
+      // and the build run, possibly for an hour, with the default instead.
+      if (!KNOWN_FLAGS.has(key)) throw new Error(`unknown flag --${key}`);
       const value = argv[i + 1];
       if (value === undefined) throw new Error(`missing value for --${key}`);
       flags[key] = value;
@@ -24,6 +38,23 @@ function parseArgs(argv: string[]): { positional: string[]; flags: Record<string
     }
   }
   return { positional, flags };
+}
+
+/** A header field (binary-format.md Section 5): a whole number in
+ * [0, max]. Anything else would otherwise reach the u8 header as NaN,
+ * which Buffer silently writes as 0. */
+function headerFlag(flags: Record<string, string>, name: string, fallback: number, max: number): number {
+  const raw = flags[name];
+  if (raw === undefined) return fallback;
+  const value = Number(raw);
+  if (!/^\d+$/.test(raw) || value > max) {
+    throw new Error(`--${name} must be a whole number from 0 to ${max}, got ${JSON.stringify(raw)}`);
+  }
+  return value;
+}
+
+function formatBytes(bytes: number): string {
+  return bytes >= 2 ** 30 ? `${(bytes / 2 ** 30).toFixed(1)}GB` : `${Math.round(bytes / 2 ** 20)}MB`;
 }
 
 async function main(): Promise<void> {
@@ -42,24 +73,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const hierarchy = loadHierarchy(hierarchyPath);
-  const cities = await loadCities(citiesPath);
-  const regionsPath = flags["regions"];
-  const regions = regionsPath
-    ? (JSON.parse(readFileSync(regionsPath, "utf8")) as FeatureCollection<
-        Polygon | MultiPolygon,
-        { name: string; country: string }
-      >)
-    : undefined;
-  const countriesPath = flags["countries"];
-  const countries = countriesPath
-    ? (JSON.parse(readFileSync(countriesPath, "utf8")) as FeatureCollection<
-        Polygon | MultiPolygon,
-        { code: string }
-      >)
-    : undefined;
-
-  const workersFlag = flags["workers"];
+  const workersFlag = flags.workers;
   const workers = workersFlag === undefined ? availableParallelism() : Number(workersFlag);
   if (!Number.isInteger(workers) || workers < 0) {
     throw new Error(`--workers must be a non-negative integer, got ${JSON.stringify(workersFlag)}`);
@@ -67,8 +81,10 @@ async function main(): Promise<void> {
 
   const timings: Array<{ chunkIndex: number; recordCount: number; elapsedMs: number }> = [];
 
-  const widthExp = Number(flags["width-exp"] ?? 6);
-  const heightExp = Number(flags["height-exp"] ?? 6);
+  const widthExp = headerFlag(flags, "width-exp", 6, 15);
+  const heightExp = headerFlag(flags, "height-exp", 6, 15);
+  const maxDepth = headerFlag(flags, "max-depth", 12, 26);
+  const keyframeExp = headerFlag(flags, "keyframe-exp", 7, 255); // binary-format.md Section 7.3
   const chunkCount = 2 ** widthExp * 2 ** heightExp;
 
   const onlyChunksFlag = flags["only-chunks"];
@@ -83,21 +99,48 @@ async function main(): Promise<void> {
     console.error(`--only-chunks: building ${onlyChunks.size} of ${chunkCount} chunks, leaving the rest empty`);
   }
 
+  // Loaded only once every flag has checked out: the worldwide city layer
+  // takes minutes to read.
+  const hierarchy = loadHierarchy(hierarchyPath);
+  const cities = await loadCities(citiesPath);
+  const regionsPath = flags.regions;
+  const regions = regionsPath
+    ? (JSON.parse(readFileSync(regionsPath, "utf8")) as FeatureCollection<
+        Polygon | MultiPolygon,
+        { name: string; country: string }
+      >)
+    : undefined;
+  const countriesPath = flags.countries;
+  const countries = countriesPath
+    ? (JSON.parse(readFileSync(countriesPath, "utf8")) as FeatureCollection<
+        Polygon | MultiPolygon,
+        { code: string }
+      >)
+    : undefined;
+  const loaded = process.memoryUsage();
+  console.error(
+    `loaded inputs: ${formatBytes(loaded.rss)} resident (JS heap ${formatBytes(loaded.heapUsed)}, ` +
+      `array buffers ${formatBytes(loaded.arrayBuffers)} -- mostly packed city geometry)`,
+  );
+
   const options = {
-    attribution: flags["attribution"] ?? "",
+    attribution: flags.attribution ?? "",
     widthExp,
     heightExp,
-    maxDepth: Number(flags["max-depth"] ?? 12),
-    keyframeExp: Number(flags["keyframe-exp"] ?? 7), // binary-format.md Section 7.3
+    maxDepth,
+    keyframeExp,
     regions,
     countries,
     workers,
     onlyChunks,
-    onChunkBuilt: (info: { chunkIndex: number; chunkCount: number; recordCount: number; elapsedMs: number }) => {
+    onChunkBuilt: (info: { chunkIndex: number; jobCount: number; recordCount: number; elapsedMs: number }) => {
       timings.push({ chunkIndex: info.chunkIndex, recordCount: info.recordCount, elapsedMs: info.elapsedMs });
-      const percentage = ((timings.length) / info.chunkCount) * 100;
+      // Out of the chunks that do work at all, not the whole grid: most of
+      // a worldwide grid is ocean that never becomes a job.
+      const percentage = (timings.length / info.jobCount) * 100;
       console.error(
-        `  ${percentage.toFixed(0)}% chunk ${info.chunkIndex}/${info.chunkCount}: ${info.recordCount} records, ${info.elapsedMs.toFixed(0)}ms`,
+        `  [${timings.length}/${info.jobCount} ${percentage.toFixed(0)}%] chunk ${info.chunkIndex}: ` +
+          `${info.recordCount} records, ${info.elapsedMs.toFixed(0)}ms`,
       );
     },
   };
@@ -125,6 +168,10 @@ async function main(): Promise<void> {
       console.error(`  chunk ${t.chunkIndex}: ${(t.elapsedMs / 1000).toFixed(1)}s, ${t.recordCount} records`);
     }
   }
+
+  // Covers the whole process, worker threads included. maxRSS is in KiB
+  // on every platform (libuv's ru_maxrss; PeakWorkingSetSize on Windows).
+  console.error(`peak memory: ${formatBytes(process.resourceUsage().maxRSS * 1024)} resident, main thread and workers together`);
 }
 
 main().catch((err: unknown) => {

@@ -1,11 +1,11 @@
-import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
-import type { HierarchyCountry } from "./hierarchy.ts";
-import { buildPlaceIdSpace, type CityProperties, type PlaceIdSpace } from "./placeIds.ts";
-import { buildNameBlocks } from "./nameBlocks.ts";
-import { CandidateIndex, type CandidateEntry } from "./candidateIndex.ts";
-import { writeCGeoDataFile } from "./writer.ts";
-import { buildRegionCountryCandidates } from "./regionCountryCandidates.ts";
+import type { FeatureCollection, MultiPolygon, Polygon } from "geojson";
+import { type CandidateEntry, CandidateIndex, packFeature } from "./candidateIndex.ts";
 import type { CellBounds } from "./geometry.ts";
+import type { HierarchyCountry } from "./hierarchy.ts";
+import { buildNameBlocks } from "./nameBlocks.ts";
+import { buildPlaceIdSpace, type CityCollection, type PlaceIdSpace } from "./placeIds.ts";
+import { buildRegionCountryCandidates } from "./regionCountryCandidates.ts";
+import { writeCGeoDataFile } from "./writer.ts";
 
 /** Shared by both the sequential (`build.ts`) and worker-pool
  * (`buildParallel.ts`) paths, so they can't silently drift apart. */
@@ -37,10 +37,14 @@ export interface BuildOptions {
    * build; the worker-pool path fires out of order (whichever worker
    * finishes next), not in chunk-index order. `elapsedMs` covers the same
    * span in both paths: `buildChunkRecords` plus `encodeChunk`, excluding
-   * any queueing. A throwing callback fails the build. */
+   * any queueing. `jobCount` is how many times it fires over the whole
+   * build -- the denominator for progress, since `chunkCount` (the whole
+   * grid) also counts every chunk with no candidates at all. A throwing
+   * callback fails the build. */
   onChunkBuilt?: (info: {
     chunkIndex: number;
     chunkCount: number;
+    jobCount: number;
     recordCount: number;
     elapsedMs: number;
   }) => void;
@@ -72,16 +76,16 @@ export interface PreparedBuild {
  * processed (sequential loop or worker pool). */
 export function prepareBuild(
   hierarchy: HierarchyCountry[],
-  cities: FeatureCollection<Polygon | MultiPolygon, CityProperties>,
+  cities: CityCollection,
   options: BuildOptions,
 ): PreparedBuild {
   const placeIds = buildPlaceIdSpace(hierarchy, cities);
   const { blockLengths, blockBytes } = buildNameBlocks(placeIds.nameEntries, options.keyframeExp);
 
   const regionCountryCandidates = buildRegionCountryCandidates(hierarchy, options.countries, options.regions);
-  const cityCandidates: CandidateEntry[] = [...placeIds.cityFeaturesById].map(([globalId, feature]) => ({
+  const cityCandidates: CandidateEntry[] = [...placeIds.cityFeaturesById].map(([globalId, city]) => ({
     globalId,
-    feature,
+    shape: "shape" in city ? city.shape : packFeature(city),
     ancestorIds: placeIds.cityAncestors.get(globalId) ?? [],
   }));
   const candidateIndex = new CandidateIndex([...regionCountryCandidates, ...cityCandidates]);

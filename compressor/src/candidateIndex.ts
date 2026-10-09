@@ -1,7 +1,24 @@
-import RBush from "rbush";
-import bbox from "@turf/bbox";
 import area from "@turf/area";
-import type { Feature, Polygon, MultiPolygon } from "geojson";
+import bbox from "@turf/bbox";
+import type { Feature, MultiPolygon, Polygon } from "geojson";
+import RBush from "rbush";
+import { type PackedGeometry, packGeometry } from "./geometry.ts";
+
+/** Everything the build needs from a place's polygon, computed from its
+ * GeoJSON once: the classifier's flat rings, plus the bbox and area turf
+ * measures on the original feature. Packing as early as possible is what
+ * lets the city layer be loaded without ever holding it as GeoJSON (see
+ * `loadCities`). */
+export interface PackedShape {
+  geometry: PackedGeometry;
+  bbox: [number, number, number, number];
+  area: number;
+}
+
+export function packFeature(feature: Feature<Polygon | MultiPolygon>): PackedShape {
+  const [minX, minY, maxX, maxY] = bbox(feature);
+  return { geometry: packGeometry(feature.geometry), bbox: [minX, minY, maxX, maxY], area: area(feature) };
+}
 
 /** One candidate place to feed into the spatial index. `ancestorIds` is the
  * chain of enclosing place ids (e.g. a city's [regionId, countryId]), used
@@ -9,7 +26,7 @@ import type { Feature, Polygon, MultiPolygon } from "geojson";
  * a candidate for the same cell (see quadtree.ts). */
 export interface CandidateEntry {
   globalId: number;
-  feature: Feature<Polygon | MultiPolygon>;
+  shape: PackedShape;
   ancestorIds: number[];
 }
 
@@ -19,7 +36,7 @@ export interface IndexedCandidate {
   maxX: number;
   maxY: number;
   globalId: number;
-  feature: Feature<Polygon | MultiPolygon>;
+  geometry: PackedGeometry;
   area: number;
   ancestorIds: number[];
 }
@@ -31,9 +48,9 @@ export class CandidateIndex {
   private readonly tree = new RBush<IndexedCandidate>();
 
   constructor(entries: CandidateEntry[]) {
-    const items: IndexedCandidate[] = entries.map(({ globalId, feature, ancestorIds }) => {
-      const [minX, minY, maxX, maxY] = bbox(feature);
-      return { minX, minY, maxX, maxY, globalId, feature, area: area(feature), ancestorIds };
+    const items: IndexedCandidate[] = entries.map(({ globalId, shape, ancestorIds }) => {
+      const [minX, minY, maxX, maxY] = shape.bbox;
+      return { minX, minY, maxX, maxY, globalId, geometry: shape.geometry, area: shape.area, ancestorIds };
     });
     this.tree.load(items);
   }

@@ -47,6 +47,7 @@ Four npm workspaces (Node >=26, see `.nvmrc`), all TypeScript, ESM
 ```bash
 npm install                                # installs all four workspaces
 npm run build --workspaces                 # tsc for each package
+npm run typecheck                          # tsc over src/ + test/ for each package (needs a build first)
 npm test -w reader                         # Appendix A conformance + varint/Morton unit tests
 npm test -w compressor                     # synthetic-dataset unit tests + real-data tests
 npm test -w demo                           # unit tests (not e2e)
@@ -69,8 +70,8 @@ and reading their diagnostic output.
 Demo e2e (spins up its own server against `data/03-final/zuid-holland.bin` on
 :8767, per `demo/playwright.config.ts`). That file isn't committed: build it
 with `make netherlands` first, which needs the worldwide build and runs it
-if it's missing (multi-hour, see below). Without it the Playwright config
-refuses to start, saying so. `demo/test/tiles.test.ts`'s real-data case
+if it's missing (the from-scratch pipeline is slow, see below). Without it
+the Playwright config refuses to start, saying so. `demo/test/tiles.test.ts`'s real-data case
 skips without it too.
 
 ```bash
@@ -204,9 +205,17 @@ the worldwide pipeline's own output, see `data-ingest/PIPELINE-STAGES.md`)
 `compressor/src/cli.ts`) → `data/03-final/world.bin`. A worldwide build
 (`prepare-world.ts` + `data/02-resolved/world/*`) must exist before either
 scoped one can be filtered from it — `make` builds it as a prerequisite
-automatically. Rerunning the worldwide build is multi-hour and
-memory-heavy (see below) — prefer `make netherlands` or `make europe` when
-iterating on compressor logic.
+automatically. The worldwide compressor step (`world.bin` from
+already-resolved `data/02-resolved/world/*`) takes ~53s wall / ~6.5min CPU
+at `--workers 16` on a 4.7GHz CPU, peaking at ~7.6GB resident (main thread
+and workers together) — it used to take over an hour at `--workers 2` and
+16GB (the first worldwide run recorded in README.md), and the output is byte-identical
+(`cmp`-verified) to the old build. Download, osmium extraction and
+`prepare-world.ts` are separate stages that this speedup didn't touch, so a
+from-scratch `make world` is still long and memory-heavy (see below). To
+iterate on compressor logic, rebuild just `world.bin` from existing
+`02-resolved` output, or use `make netherlands`/`make europe` for a smaller
+dataset.
 
 ### Worldwide extraction/build pipeline
 
@@ -256,7 +265,8 @@ encodes the resulting records → `writer.ts` assembles the final buffer.
 `chunkWorkerPool.ts` + `chunkWorker.ts` run the same per-chunk work across
 `node:worker_threads`, dispatching worst-first (chunk cost varies up to
 ~1000x) and reporting `onChunkBuilt` incrementally as each worker's result
-lands — not batched until the end, which matters on an hours-long build.
+lands — not batched until the end, which matters for progress reporting on
+a big build.
 Candidate array order is significant: `quadtree.ts` breaks containment/
 depth ties by first-in-array-wins, so anything that reorders candidates
 (a `Set`/`Map` round-trip, a sort) can silently change output for

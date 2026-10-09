@@ -151,7 +151,7 @@ export function selectPrimaryLevels(
   return { primaryLevelByCountry, primaryIds };
 }
 
-interface PrimaryGeometryItem {
+export interface PrimaryGeometryItem {
   minX: number;
   minY: number;
   maxX: number;

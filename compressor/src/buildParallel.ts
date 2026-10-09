@@ -1,10 +1,9 @@
-import type { FeatureCollection, Polygon, MultiPolygon } from "geojson";
-import type { HierarchyCountry } from "./hierarchy.ts";
-import type { CityProperties } from "./placeIds.ts";
-import { prepareBuild, finishBuild, type BuildOptions, type BuildStats } from "./buildCore.ts";
+import { buildCGeoDataFile } from "./build.ts";
+import { type BuildOptions, type BuildStats, finishBuild, prepareBuild } from "./buildCore.ts";
 import { enumerateChunkJobs } from "./chunkJobs.ts";
 import { runChunkJobs } from "./chunkWorkerPool.ts";
-import { buildCGeoDataFile } from "./build.ts";
+import type { HierarchyCountry } from "./hierarchy.ts";
+import type { CityCollection } from "./placeIds.ts";
 
 export interface ParallelBuildOptions extends BuildOptions {
   /** Number of worker threads. `0` delegates to the plain sequential
@@ -23,7 +22,7 @@ export interface ParallelBuildOptions extends BuildOptions {
  * divide up. */
 export async function buildCGeoDataFileParallel(
   hierarchy: HierarchyCountry[],
-  cities: FeatureCollection<Polygon | MultiPolygon, CityProperties>,
+  cities: CityCollection,
   options: ParallelBuildOptions,
 ): Promise<{ bytes: Buffer; stats: BuildStats }> {
   if (options.workers === 0) {
@@ -42,6 +41,7 @@ export async function buildCGeoDataFileParallel(
     options.onChunkBuilt?.({
       chunkIndex: result.chunkIndex,
       chunkCount: width * height,
+      jobCount: jobs.length,
       recordCount: result.recordCount,
       elapsedMs: result.elapsedMs,
     });

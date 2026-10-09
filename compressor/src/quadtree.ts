@@ -1,6 +1,6 @@
 import { mortonEncode } from "@loc-to-city/reader";
 import type { IndexedCandidate } from "./candidateIndex.ts";
-import { classifyCell, countContainedSamples, type CellBounds } from "./geometry.ts";
+import { type CellBounds, classifyCell, countContainedSamples } from "./geometry.ts";
 
 export interface ChunkRecord {
   code: number;
@@ -86,8 +86,8 @@ export function buildChunkRecords(
 
     const bounds = cellBoundsOf(cellX, cellY, depth);
 
-    // Cheap numeric bbox pre-filters before falling back to turf's exact
-    // (and much more expensive) polygon algorithms -- most candidates drop
+    // Cheap numeric bbox pre-filters before falling back to the (much more
+    // expensive) polygon walk in classifyCell -- most candidates drop
     // out here well before max_depth, since a shrinking cell quickly moves
     // outside a candidate's bounding box.
     const bboxOverlapping = candidates.filter(
@@ -103,7 +103,7 @@ export function buildChunkRecords(
     const touching: IndexedCandidate[] = [];
     const containsCell = new Set<number>();
     for (const candidate of bboxOverlapping) {
-      const relation = classifyCell(candidate.feature, bounds, candidate.minX, candidate.minY, candidate.maxX, candidate.maxY);
+      const relation = classifyCell(candidate.geometry, bounds, candidate.minX, candidate.minY, candidate.maxX, candidate.maxY);
       if (relation === "disjoint") continue;
       touching.push(candidate);
       if (relation === "contains") containsCell.add(candidate.globalId);
@@ -138,7 +138,7 @@ export function buildChunkRecords(
     let bestScore = -1;
     let bestArea = Infinity;
     for (const candidate of relevant) {
-      const score = countContainedSamples(candidate.feature, bounds);
+      const score = countContainedSamples(candidate.geometry, bounds);
       if (score > bestScore || (score === bestScore && candidate.area < bestArea)) {
         bestScore = score;
         bestArea = candidate.area;
