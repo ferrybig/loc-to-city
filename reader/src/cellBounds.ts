@@ -1,9 +1,13 @@
 /** A lat/lon rectangle, half-open like the rest of the format (Section
  * 2.3): `minLat <= lat < maxLat`, `minLon <= lon < maxLon`. */
 export interface BoundingBox {
+	/** Southern edge, included. */
 	minLat: number;
+	/** Northern edge, excluded. */
 	maxLat: number;
+	/** Western edge, included. */
 	minLon: number;
+	/** Eastern edge, excluded. */
 	maxLon: number;
 }
 
@@ -47,6 +51,7 @@ export function cellBoundingBox(
 	};
 }
 
+/** Whether `box` contains the point, by the half-open rule above. */
 export function boundingBoxContains(
 	box: BoundingBox,
 	lat: number,

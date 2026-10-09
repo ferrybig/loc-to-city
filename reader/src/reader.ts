@@ -66,15 +66,22 @@ export interface PlaceIdResult {
  * named. A level that doesn't apply is null: `city` for a point resolved
  * only to a region, all three where nothing resolved. */
 export interface QueryResult extends PlaceIdResult {
+	/** The country the point lies in. */
 	country: PlaceRef | null;
+	/** The region (province, state, ...) the point lies in. */
 	region: PlaceRef | null;
+	/** The city -- or whatever finest division the country has; see the
+	 * README -- the point lies in. */
 	city: PlaceRef | null;
 }
 
+/** The three tiers of the place hierarchy (Section 7.1). */
 export type PlaceLevel = "country" | "region" | "city";
 
 /** A place's global id (Section 7.5) and its name entry (Section 7.4). */
 export interface PlaceRef {
+	/** The place's global id (Section 7.5): what `place()`, `placeIds()`
+	 * and `locate()` take. Stable within one file, not between builds. */
 	id: number;
 	/**
 	 * The place's name in its own language and script, as people there
@@ -103,9 +110,14 @@ export interface PlaceRef {
 /** A place's level and the global ids of it and its ancestors, shaped
  * like `Place` without the names. */
 export interface PlaceIds {
+	/** The place's own level. */
 	level: PlaceLevel;
+	/** Id of its country (the place itself, for a country). */
 	country: number;
+	/** Id of its region (the place itself, for a region); null for a
+	 * country. */
 	region: number | null;
+	/** The place's own id for a city; null otherwise. */
 	city: number | null;
 }
 
@@ -116,12 +128,18 @@ export interface PlaceIds {
  * null and `region` pointing at itself, a city has all three set.
  */
 export interface Place extends PlaceRef {
+	/** The place's own level. */
 	level: PlaceLevel;
+	/** Its country (itself, for a country). */
 	country: PlaceRef;
+	/** Its region (itself, for a region); null for a country. */
 	region: PlaceRef | null;
+	/** Itself, for a city; null otherwise. */
 	city: PlaceRef | null;
 }
 
+/** Narrows `places()` and `search()`. Filters combine: `{ level: "city",
+ * country }` is that country's cities. */
 export interface PlaceFilter {
 	/** Only places of this level. */
 	level?: PlaceLevel;
@@ -131,14 +149,16 @@ export interface PlaceFilter {
 	region?: number;
 }
 
+/** Options for `search()`. */
 export interface SearchOptions extends PlaceFilter {
 	/** Stop after this many matches. */
 	limit?: number;
 	/**
-	 * Rank matches by relevance instead of id order: an exact name match
-	 * outranks a match on a whole word of the name, which outranks a
-	 * plain substring match; among equal name-match quality, a city
-	 * outranks a region, which outranks a country. `limit` still applies,
+	 * Rank matches by relevance instead of id order (Appendix B.5): an
+	 * exact name match outranks a match on a whole word of the name, which
+	 * outranks a plain substring match, each tier further split by whether
+	 * the query's own spelling (not just its folded form) matched; among
+	 * equal matches, a country outranks a city, which outranks a region. `limit` still applies,
 	 * but to the top of the ranked list rather than the first N found in
 	 * id order -- so with `sort` the whole match set has to be scored
 	 * before anything is yielded, since the best match isn't necessarily
@@ -149,24 +169,34 @@ export interface SearchOptions extends PlaceFilter {
 
 /** One record of a chunk (Section 8.2) with its cell and place resolved. */
 export interface ChunkRecord {
+	/** The record's stored Morton code within its chunk (Section 8.1). */
 	code: number;
+	/** The record's depth in the chunk's quadtree (0 = the whole chunk). */
 	depth: number;
+	/** The cell the record covers. */
 	boundingBox: BoundingBox;
 	/** null for a "no place" record (palette index 0). */
 	place: Place | null;
 }
 
+/** How many places of each level a file has. */
 export interface PlaceCounts {
+	/** Number of countries; their ids are `0 .. countries - 1`. */
 	countries: number;
+	/** Number of regions; their ids follow the countries'. */
 	regions: number;
+	/** Number of cities; their ids follow the regions'. */
 	cities: number;
 }
 
 /** `locate()`'s result: a point inside a place, and the cell it's the
  * centre of. */
 export interface Location {
+	/** Latitude of the centre of `boundingBox`. */
 	lat: number;
+	/** Longitude of the centre of `boundingBox`. */
 	lon: number;
+	/** The place's representative cell (Section C.3). */
 	boundingBox: BoundingBox;
 }
 
@@ -219,6 +249,30 @@ interface IndexSlot<I> {
 	activating: Promise<I | undefined> | undefined;
 }
 
+/**
+ * A CGEODATA file opened for reading: answers which country, region and
+ * city a point lies in (`query`, `lookup`), what a place is called and
+ * where it sits in the hierarchy (`place`, `placeIds`), which places
+ * match a name (`search`), and where a place is (`locate`).
+ *
+ * Opening reads only the header, directory and place counts; each lookup
+ * reads and decodes the one chunk its point lies in, which then stays
+ * cached (`OpenOptions.cacheBytes`).
+ *
+ * @example
+ * ```ts
+ * // Node.js
+ * import { openFile } from "@ferrybig/cgeodata-reader/node";
+ * const reader = await openFile("world.bin");
+ *
+ * // Anywhere else
+ * import { CGeoDataReader } from "@ferrybig/cgeodata-reader";
+ * const reader = await CGeoDataReader.open(await (await fetch(url)).arrayBuffer());
+ *
+ * const { city, region, country } = await reader.query(52.0799, 4.3113);
+ * city?.internationalName; // "The Hague"
+ * ```
+ */
 export class CGeoDataReader {
 	/** Decoded chunks (keyed by chunk index) and name blocks (keyed by
 	 * `-1 - blockIndex`) under one byte budget. */
@@ -247,7 +301,9 @@ export class CGeoDataReader {
 
 	private readonly source: ByteSource;
 	private readonly inflater: Inflater;
+	/** The file's header (Section 5), including its `attribution`. */
 	readonly header: CGeoDataHeader;
+	/** The file's directory (Section 6): where each chunk is. */
 	readonly directory: CGeoDataDirectory;
 	private readonly placeTable: PlaceTableInfo;
 
@@ -319,6 +375,7 @@ export class CGeoDataReader {
 		await this.source.close?.();
 	}
 
+	/** How many countries, regions and cities the file has. */
 	get placeCounts(): PlaceCounts {
 		const { countryCount, totalRegions, totalCities } = this.placeTable;
 		return {
@@ -328,8 +385,20 @@ export class CGeoDataReader {
 		};
 	}
 
-	/** Section 9's lookup procedure, with the names resolved: `lookup()`
-	 * followed by `place()`. */
+	/**
+	 * The country, region and city a point lies in: Section 9's lookup
+	 * procedure (`lookup()`) with the names resolved (`place()`). Rejects
+	 * with a `RangeError` for a latitude outside [-90, 90) or a longitude
+	 * outside [-180, 180).
+	 *
+	 * @example
+	 * ```ts
+	 * const result = await reader.query(35.6762, 139.6503);
+	 * result.city?.localName;         // "杉並区"
+	 * result.city?.internationalName; // "Suginami"
+	 * result.country?.internationalName; // "Japan"
+	 * ```
+	 */
 	async query(lat: number, lon: number): Promise<QueryResult> {
 		const result = await this.lookup(lat, lon);
 		if (result.placeId === null) {
@@ -724,6 +793,15 @@ export class CGeoDataReader {
 	 * of the query. Without a search index this is a plain linear scan over
 	 * the name blocks; with one (`useSearchIndex()`), only the places the
 	 * index can't rule out are compared. Same results either way.
+	 *
+	 * @example
+	 * ```ts
+	 * for await (const place of reader.search("munchen", { sort: true, limit: 20 }))
+	 * 	console.log(place.internationalName, place.country.internationalName);
+	 * // Munich Germany
+	 * // Grafing bei München Germany
+	 * // ...
+	 * ```
 	 */
 	async *search(
 		text: string,
@@ -880,6 +958,12 @@ export class CGeoDataReader {
 	 * middle of the place's area -- its own cells plus those of every place
 	 * under it -- that is guaranteed to lie in that area, so `query()` at
 	 * the returned point resolves to the place or one of its descendants.
+	 *
+	 * @example
+	 * ```ts
+	 * const position = await reader.locate(place.id);
+	 * if (position) map.setView([position.lat, position.lon]);
+	 * ```
 	 *
 	 * Null if neither the place nor anything under it has any cells -- and
 	 * that happens to real places, not only to broken files: a place

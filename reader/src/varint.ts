@@ -19,8 +19,11 @@ const MAX_VARINT_BYTES = 8;
 // exactly through an IEEE 754 double.
 const MAX_VARINT_VALUE = 2 ** 53;
 
+/** One decoded varint. */
 export interface VarintResult {
+	/** The value, below 2^53. */
 	value: number;
+	/** How many bytes it took (1-8). */
 	bytesRead: number;
 }
 
@@ -28,11 +31,14 @@ export interface VarintResult {
  * beyond its result. */
 const single = new Float64Array(1);
 
+/** The varint (Section 3.2) at `offset`; throws a `CGeoDataFormatError`
+ * for a malformed one, an `IncompleteBufferError` for a cut-off one. */
 export function readVarint(buf: Uint8Array, offset: number): VarintResult {
 	const end = readDeltaVarintsInto(buf, offset, single);
 	return { value: single[0]!, bytesRead: end - offset };
 }
 
+/** `value`'s minimal varint encoding (Section 3.2). */
 export function writeVarint(value: number): Uint8Array {
 	if (!Number.isInteger(value) || value < 0) {
 		throw new RangeError("varint value must be a non-negative integer");
@@ -51,8 +57,11 @@ export function writeVarint(value: number): Uint8Array {
 	return Uint8Array.from(bytes);
 }
 
+/** A decoded list of varints. */
 export interface VarintListResult {
+	/** The values, in order. */
 	values: number[];
+	/** How many bytes the whole list took. */
 	bytesRead: number;
 }
 

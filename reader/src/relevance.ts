@@ -94,12 +94,17 @@ export function containsTokenRun(
  * tokens, since `nameMatchQuality` needs both to tell a match that needed
  * folding from one that didn't. */
 export interface Needle {
+	/** The query lowercased, diacritics kept. */
 	raw: string;
+	/** `raw`'s words (`tokenize`). */
 	rawTokens: string[];
+	/** The query folded (`foldDiacritics`). */
 	folded: string;
+	/** `folded`'s words. */
 	foldedTokens: string[];
 }
 
+/** `text` as a `Needle`, for scoring many names against one query. */
 export function prepareNeedle(text: string): Needle {
 	return {
 		raw: text.toLowerCase(),

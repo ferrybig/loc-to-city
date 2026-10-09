@@ -38,14 +38,21 @@ const STORED_VERSION = KIND_LOCATE_INDEX * 16 + FORMAT_VERSION;
  * (Section C.2). */
 const MAX_ENTRY_WIDTH = 6;
 
-type Grid = Pick<CGeoDataHeader, "widthExp" | "heightExp" | "maxDepth">;
+/** The header fields a locate entry's layout depends on. */
+export type LocateGrid = Pick<
+	CGeoDataHeader,
+	"widthExp" | "heightExp" | "maxDepth"
+>;
 
 /** One cell as an index entry names it (Section C.2): a cell of a chunk,
  * addressed like a chunk record (Section 8.4) -- `code` is the stored
  * `2 × max_depth`-bit Morton code, `depth` the cell's depth. */
 export interface LocateCell {
+	/** The chunk the cell is in (Section 6.1). */
 	chunkIndex: number;
+	/** The cell's stored Morton code within its chunk (Section 8.1). */
 	code: number;
+	/** The cell's depth in the chunk's quadtree. */
 	depth: number;
 }
 
@@ -53,14 +60,17 @@ export interface LocateCell {
 
 /** `ceil((width_exp + height_exp + 2 × max_depth + 1) / 8)`: enough bytes
  * for a depth-`max_depth` cell plus its marker bit. */
-export function locateEntryWidth(grid: Grid): number {
+export function locateEntryWidth(grid: LocateGrid): number {
 	return Math.ceil(
 		(grid.widthExp + grid.heightExp + 2 * grid.maxDepth + 1) / 8,
 	);
 }
 
 /** The entry for `cell`, or `0` ("no geometry") for null. */
-export function encodeLocateEntry(cell: LocateCell | null, grid: Grid): number {
+export function encodeLocateEntry(
+	cell: LocateCell | null,
+	grid: LocateGrid,
+): number {
 	if (!cell) return 0;
 	const chunkBits = grid.widthExp + grid.heightExp;
 	const { depth } = cell;
@@ -74,7 +84,7 @@ export function encodeLocateEntry(cell: LocateCell | null, grid: Grid): number {
  * whose marker bit doesn't sit at a valid depth. */
 export function decodeLocateEntry(
 	value: number,
-	grid: Grid,
+	grid: LocateGrid,
 ): LocateCell | null {
 	if (value === 0) return null;
 	const chunkBits = grid.widthExp + grid.heightExp;
@@ -314,6 +324,7 @@ export async function computeLocateCell(
 
 // ── Builder ───────────────────────────────────────────────────────────────────
 
+/** Tuning for `buildLocateIndex`; the output doesn't depend on it. */
 export interface BuildLocateIndexOptions {
 	/**
 	 * Roughly how many records to hold in memory at once. Countries are
@@ -556,8 +567,13 @@ export class LocateIndex {
 	/** The index file's name, when its source has one (`ByteSource.name`). */
 	readonly name?: string;
 	private readonly entriesStart: number;
+	/** Checksum of the header, directory and place table it was built
+	 * from (Section C.4); a reader only accepts the index when it matches
+	 * its own. */
 	readonly sourceChecksum: bigint;
+	/** Bytes per entry (Section C.2). */
 	readonly entryWidth: number;
+	/** How many places it has an entry for. */
 	readonly placeCount: number;
 
 	private constructor(
@@ -653,6 +669,7 @@ export class LocateIndex {
 		return new LocateIndex(source, off, sourceChecksum, entryWidth, placeCount);
 	}
 
+	/** Closes the index's source. */
 	async close(): Promise<void> {
 		await this.source.close?.();
 	}

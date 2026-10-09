@@ -8,7 +8,7 @@
  * builders, are in `./indexes`; the format's low-level codecs, for tools
  * that write or inspect files, in `./format`.
  *
- * @module
+ * @module @ferrybig/cgeodata-reader
  */
 export { type BoundingBox, boundingBoxContains } from "./cellBounds.ts";
 export type { ChunkRecords } from "./chunk.ts";
@@ -21,7 +21,6 @@ export {
 } from "./errors.ts";
 export type { CGeoDataHeader } from "./header.ts";
 export { type Inflater, streamInflater } from "./inflate.ts";
-export type { LocateIndex } from "./locateIndex.ts";
 export {
 	CGeoDataReader,
 	type ChunkRecord,
@@ -39,7 +38,6 @@ export {
 	type QueryResult,
 	type SearchOptions,
 } from "./reader.ts";
-export type { SearchIndex } from "./searchIndex.ts";
 export {
 	BlobSource,
 	type ByteSource,

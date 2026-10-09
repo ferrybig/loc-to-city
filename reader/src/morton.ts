@@ -41,7 +41,12 @@ export function mortonEncode(x: number, y: number, depth: number): number {
 export function mortonDecode(
 	code: number,
 	depth: number,
-): { x: number; y: number } {
+): {
+	/** Column, 0 to 2^depth - 1, west to east. */
+	x: number;
+	/** Row, 0 to 2^depth - 1, south to north. */
+	y: number;
+} {
 	let x = 0;
 	let y = 0;
 	let remaining = code;

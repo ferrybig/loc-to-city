@@ -5,6 +5,9 @@ import {
 	readVarint,
 } from "./varint.ts";
 
+/** One chunk's records (Section 8), decoded: record `j` is the cell
+ * `codes[j]` at depth `depths[j]`, attributed to
+ * `palette[paletteIndices[j] - 1]` (or to no place for index 0). */
 export interface ChunkRecords {
 	/** Global place ids referenced by this chunk, indexed 0..P-1. */
 	palette: number[];
@@ -13,6 +16,7 @@ export interface ChunkRecords {
 	 * big chunk holds over a million records, and parsing and holding them
 	 * as boxed JS arrays costs several times as much. */
 	codes: Float64Array;
+	/** Each record's depth in the chunk's quadtree, 0 to `max_depth`. */
 	depths: Uint8Array;
 	/** Local palette index per record: 0 = "no place", k = palette[k-1]. */
 	paletteIndices: Uint32Array;

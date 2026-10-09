@@ -32,6 +32,7 @@ agent-resources/
 node_modules/
 .docker-image-stamp
 dist/
+reader/docs/
 playwright-report/
 test-results/
 

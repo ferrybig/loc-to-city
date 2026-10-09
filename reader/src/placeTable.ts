@@ -5,15 +5,22 @@ import { IncompleteBufferError, readVarint, readVarintList } from "./varint.ts";
 
 const utf8 = new TextDecoder();
 
+/** The place table's uncompressed part (Section 7.2), parsed: the place
+ * counts and where each name block is. */
 export interface PlaceTableInfo {
+	/** C, the number of countries. */
 	countryCount: number;
+	/** R, the number of regions. */
 	totalRegions: number;
+	/** The number of cities. */
 	totalCities: number;
+	/** N, every place: countries, regions and cities. */
 	totalPlaces: number;
 	/** Length countryCount + 1; prefix[c] = number of regions before country c. */
 	regionCountryPrefix: number[];
 	/** Length totalRegions + 1; prefix[r] = number of cities before region r. */
 	cityRegionPrefix: number[];
+	/** The header's keyframe_exp (Section 7.3). */
 	keyframeExp: number;
 	/** Absolute file offset of each name block's compressed bytes. */
 	blockOffsets: number[];
@@ -149,10 +156,33 @@ export function largestIndexWithPrefixAtMost(
 	return answer;
 }
 
+/** A place id classified (Section 7.5): its level, and the level-local
+ * index of it and of its ancestors -- a region index, not a global id. */
 export type ResolvedPlace =
-	| { level: "country"; countryId: number }
-	| { level: "region"; countryId: number; regionId: number }
-	| { level: "city"; countryId: number; regionId: number; cityId: number };
+	| {
+			/** A country. */
+			level: "country";
+			/** The country's index, which is also its global id. */
+			countryId: number;
+	  }
+	| {
+			/** A region. */
+			level: "region";
+			/** Its country's index. */
+			countryId: number;
+			/** The region's index among all regions. */
+			regionId: number;
+	  }
+	| {
+			/** A city. */
+			level: "city";
+			/** Its country's index. */
+			countryId: number;
+			/** Its region's index among all regions. */
+			regionId: number;
+			/** The city's index among all cities. */
+			cityId: number;
+	  };
 
 /** Classifies a place id per Section 7.5. `regionId`/`cityId` are the
  * level-local indices the spec calls "region index"/"city index" (not

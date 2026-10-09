@@ -13,7 +13,9 @@ import { IncompleteBufferError } from "./varint.ts";
  * the file than these two small, fixed-at-load-time sections actually need.
  */
 export async function readHeaderAndDirectory(source: ByteSource): Promise<{
+	/** The parsed header (Section 5). */
 	header: CGeoDataHeader;
+	/** The parsed directory (Section 6). */
 	directory: CGeoDataDirectory;
 }> {
 	let size = Math.min(1024, source.size);

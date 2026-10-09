@@ -121,6 +121,8 @@ const MAX_EXP = 24;
  * with every varint at its 8-byte maximum. */
 const MAX_HEADER_LENGTH = 8 + 8 + 8 + 8 + 3 + 3 * 8;
 
+/** Parameters of a search index (Appendix B.11); every one has a
+ * recommended default (`DEFAULT_SEARCH_INDEX_OPTIONS`). */
 export interface SearchIndexOptions {
 	/** 2^hashExp shared lists for non-Latin trigrams (1-24). */
 	hashExp?: number;
@@ -401,12 +403,16 @@ export class SearchIndex {
 	private readonly source: ByteSource;
 	/** The index file's name, when its source has one (`ByteSource.name`). */
 	readonly name?: string;
+	/** Checksum of the place table it was built from (Section B.8); a
+	 * reader only accepts the index when it matches its own. */
 	readonly sourceChecksum: bigint;
 	/** N, the number of places in the source; every one is indexed. */
 	readonly placeCount: number;
+	/** 2^hashExp shared lists for non-Latin trigrams (Section B.3). */
 	readonly hashExp: number;
 	/** Places per short-query entry; 0 when the file has no table. */
 	readonly topCount: number;
+	/** 2^topBlockExp short-query entries per table block (Section B.6). */
 	readonly topBlockExp: number;
 	private readonly listDirectoryStart: number;
 	private readonly listDirectoryLength: number;
@@ -573,6 +579,7 @@ export class SearchIndex {
 		);
 	}
 
+	/** Closes the index's source. */
 	async close(): Promise<void> {
 		await this.source.close?.();
 	}

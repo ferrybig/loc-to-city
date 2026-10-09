@@ -1,13 +1,17 @@
 import { readVarint, readVarintList } from "./varint.ts";
 
+/** The directory (Section 6): where the place table and each chunk are. */
 export interface CGeoDataDirectory {
+	/** Absolute file offset of the place table (Section 7). */
 	placeTableStart: number;
+	/** Byte length of the place table. */
 	placeTableLength: number;
 	/** Entry i is the compressed byte length of chunk i (0 = empty). */
 	chunkLengths: number[];
 	/** Entry i is the absolute file offset of chunk i (meaningless when
 	 * chunkLengths[i] === 0). Precomputed per Section 6.3. */
 	chunkOffsets: number[];
+	/** Byte length of the directory itself. */
 	directoryLength: number;
 }
 

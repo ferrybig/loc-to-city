@@ -8,12 +8,21 @@ const SIGNATURE = Uint8Array.from([
 	0x43, 0x47, 0x45, 0x4f, 0x44, 0x41, 0x54, 0x41,
 ]);
 
+/** A file's header (Section 5). */
 export interface CGeoDataHeader {
+	/** Format version; this reader reads version 0. */
 	version: number;
+	/** The data's attribution notice, as given when the file was built.
+	 * Show it wherever results are shown. */
 	attribution: string;
+	/** The chunk grid is 2^widthExp chunks wide... */
 	widthExp: number;
+	/** ...and 2^heightExp chunks high (Section 6.1). */
 	heightExp: number;
+	/** How many times a chunk's quadtree can split (Section 8.1): a chunk
+	 * is at most 2^maxDepth cells across. */
 	maxDepth: number;
+	/** 2^keyframeExp names per name block (Section 7.3); 0 for one block. */
 	keyframeExp: number;
 	/** W = 2^widthExp */
 	width: number;

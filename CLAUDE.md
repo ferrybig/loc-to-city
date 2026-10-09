@@ -65,7 +65,9 @@ two-tab method body looks like the separator plus one. When copying a line into 
 npm install                                # installs all four workspaces
 npm run build --workspaces                 # tsc for each package
 npm run typecheck                          # tsc over src/ + test/ for each package (needs a build first)
-npm test -w reader                         # Appendix A conformance + varint/Morton unit tests
+npm test -w reader                         # Appendix A conformance, unit tests, and the main entry in headless Chromium
+npm run docs -w reader                     # TypeDoc API reference -> reader/docs/ (fails on any undocumented export)
+npm run bench -w reader -- <file.bin>      # performance baseline; compare before/after reader I/O or API changes
 npm test -w compressor                     # synthetic-dataset unit tests + real-data tests
 npm test -w demo                           # unit tests (not e2e)
 ```

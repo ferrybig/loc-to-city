@@ -1,0 +1,26 @@
+{
+	"$schema": "https://typedoc.org/schema.json",
+	"entryPoints": [
+		"src/index.ts",
+		"src/node.ts",
+		"src/indexes.ts",
+		"src/format.ts"
+	],
+	"tsconfig": "tsconfig.json",
+	"readme": "README.md",
+	"projectDocuments": [
+		"binary-format.md"
+	],
+	"out": "docs",
+	"excludePrivate": true,
+	"excludeInternal": true,
+	"sort": [
+		"source-order"
+	],
+	"validation": {
+		"notExported": true,
+		"notDocumented": true,
+		"invalidLink": true
+	},
+	"treatWarningsAsErrors": true
+}

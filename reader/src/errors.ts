@@ -17,6 +17,7 @@
  * ```
  */
 export class CGeoDataError extends Error {
+	/** "CGeoDataError", and each subclass its own name. */
 	override name = "CGeoDataError";
 }
 
@@ -24,12 +25,14 @@ export class CGeoDataError extends Error {
  * it breaks a rule of binary-format.md, so nothing read from it can be
  * trusted. */
 export class CGeoDataFormatError extends CGeoDataError {
+	/** "CGeoDataFormatError" */
 	override name = "CGeoDataFormatError";
 }
 
 /** The file is a CGEODATA file (or index) of a format version this reader
  * doesn't know -- most likely written by a newer compressor. */
 export class CGeoDataVersionError extends CGeoDataFormatError {
+	/** "CGeoDataVersionError" */
 	override name = "CGeoDataVersionError";
 	/** The version number the file declares. */
 	readonly version: number;
@@ -44,5 +47,6 @@ export class CGeoDataVersionError extends CGeoDataFormatError {
  * `.bin` file than the one it's being used with (or an older build of the
  * same one). Rebuild the index, or delete it to work without one. */
 export class CGeoDataIndexMismatchError extends CGeoDataError {
+	/** "CGeoDataIndexMismatchError" */
 	override name = "CGeoDataIndexMismatchError";
 }

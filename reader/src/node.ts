@@ -2,6 +2,8 @@
  * The Node.js side of the reader: files on disk, and zlib. Everything
  * else (`CGeoDataReader` and friends) is platform-neutral and lives in the
  * package's main entry.
+ *
+ * @module @ferrybig/cgeodata-reader/node
  */
 import { close, fstat, open, read } from "node:fs";
 import { promisify } from "node:util";
@@ -41,6 +43,7 @@ export class FileSource implements ByteSource {
 		unclosed.register(this, fd, this);
 	}
 
+	/** Opens the file at `path` for reading. */
 	static async open(path: string): Promise<FileSource> {
 		const fd = await openAsync(path, "r");
 		try {
@@ -122,6 +125,14 @@ export function locateIndexPathFor(binPath: string): string {
  * naming it, rather than silently falling back to a slow scan; rebuild or
  * delete it. `options.searchIndex` / `options.locateIndex` override the
  * lookup next to the file.
+ *
+ * @example
+ * ```ts
+ * const reader = await openFile("data/world.bin");
+ * const { city } = await reader.query(52.37, 4.9);
+ * city?.internationalName; // "Amsterdam"
+ * await reader.close();
+ * ```
  */
 export async function openFile(
 	path: string,

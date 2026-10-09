@@ -5,7 +5,7 @@
  * already finds the ones next to its file; elsewhere,
  * `OpenOptions.searchIndex` / `locateIndex` take an index's bytes.
  *
- * @module
+ * @module @ferrybig/cgeodata-reader/indexes
  */
 export {
 	type BuildLocateIndexOptions,

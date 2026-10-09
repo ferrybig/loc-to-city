@@ -4,7 +4,7 @@
  * compressor uses them). They follow the format, not a stable API, and
  * may change when it does; `CGeoDataReader` is the interface for reading.
  *
- * @module
+ * @module @ferrybig/cgeodata-reader/format
  */
 export {
 	type BoundingBox,
@@ -25,6 +25,7 @@ export {
 	decodeLocateEntry,
 	encodeLocateEntry,
 	type LocateCell,
+	type LocateGrid,
 	locateEntryWidth,
 } from "./locateIndex.ts";
 export { lowBits, mortonDecode, mortonEncode, shiftRight } from "./morton.ts";
@@ -65,5 +66,7 @@ export {
 	readDeltaVarintsInto,
 	readVarint,
 	readVarintList,
+	type VarintListResult,
+	type VarintResult,
 	writeVarint,
 } from "./varint.ts";
