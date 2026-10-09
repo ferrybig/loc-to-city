@@ -1,12 +1,11 @@
 import area from "@turf/area";
-import bbox from "@turf/bbox";
-import pointOnFeature from "@turf/point-on-feature";
 import simplify from "@turf/simplify";
 import type { BBox, Feature, MultiPolygon, Polygon } from "geojson";
 import { COUNTRY_ADMIN_LEVELS } from "./countryAdminLevels.ts";
 import type { CountryIndex } from "./countryIndex.ts";
 import type { LonLat } from "./geo.ts";
 import { streamMergedAdminBoundaries } from "./mergeAdminBoundaries.ts";
+import { bboxAndPointOnFeature } from "./pointOnFeature.ts";
 import { resolvePolygonCountry } from "./polygonCountry.ts";
 
 // Matches prepare-europe.ts's REGION_SIMPLIFY_TOLERANCE: regions are a
@@ -37,6 +36,16 @@ const REGION_SAMPLE_LEVELS = new Set([4, 5, 6]);
 function overrideLevels(levels: { overrides?: Record<string, number[]> } | undefined): number[] {
   if (!levels?.overrides) return [];
   return Object.values(levels.overrides).flat();
+}
+
+const overrideLevelsByCountry = new Map<string, number[]>();
+function cachedOverrideLevels(country: string): number[] {
+  let levels = overrideLevelsByCountry.get(country);
+  if (!levels) {
+    levels = overrideLevels(COUNTRY_ADMIN_LEVELS[country]);
+    overrideLevelsByCountry.set(country, levels);
+  }
+  return levels;
 }
 
 export interface CityCandidateMeta {
@@ -148,9 +157,7 @@ export async function buildAdminBoundaryIndex(files: string[], countries: Countr
     // Still needed as a point known to lie on the feature (gap-fill and
     // region assignment test it for containment), but no longer trusted
     // to say which country the feature is in -- see polygonCountry.ts.
-    const [repX, repY] = pointOnFeature(geometry).geometry.coordinates;
-    const repPoint: LonLat = [repX ?? 0, repY ?? 0];
-    const featureBbox = bbox(geometry);
+    const { bbox: featureBbox, repPoint } = bboxAndPointOnFeature(geometry.geometry);
     const country = resolvePolygonCountry(geometry, featureBbox, repPoint, countries, {
       alwaysSample: REGION_SAMPLE_LEVELS.has(level),
     });
@@ -166,12 +173,17 @@ export async function buildAdminBoundaryIndex(files: string[], countries: Countr
     // isn't known until regions are resolved, later in prepare-world.ts.
     // Routing a surviving candidate to its actual region/level (override
     // vs. country-wide) happens there, not here.
-    const isCity = (levels?.city.includes(level) ?? false) || overrideLevels(levels).includes(level);
+    const isCity = (levels?.city.includes(level) ?? false) || cachedOverrideLevels(country).includes(level);
     const isRegionLevel = levels?.region.includes(level) ?? false;
     if (!isCity && !isRegionLevel) continue;
 
+    // Computed at most once, though a level a country lists for both roles
+    // needs it twice.
+    let areaKm2: number | undefined;
+    const getFeatureArea = (): number => (areaKm2 ??= area(geometry) / 1_000_000); // m^2 -> km^2
+
     if (isCity) {
-      const featureArea = area(geometry) / 1_000_000; // m^2 -> km^2
+      const featureArea = getFeatureArea();
       cityCandidates.push({
         id,
         name: props?.name,
@@ -202,13 +214,13 @@ export async function buildAdminBoundaryIndex(files: string[], countries: Countr
     if (!isRegionLevel) continue;
     const name = props?.name;
     if (!name) continue;
-    const featureArea = area(geometry) / 1_000_000; // m^2 -> km^2
+    const regionArea = getFeatureArea();
     let regionByLevel = regionAreaByCountryLevel.get(country);
     if (!regionByLevel) {
       regionByLevel = new Map();
       regionAreaByCountryLevel.set(country, regionByLevel);
     }
-    regionByLevel.set(level, (regionByLevel.get(level) ?? 0) + featureArea);
+    regionByLevel.set(level, (regionByLevel.get(level) ?? 0) + regionArea);
 
     const key = `${country} ${level} ${name}`;
     const existing = regionsByCountryName.get(key);

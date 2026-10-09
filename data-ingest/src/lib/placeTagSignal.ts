@@ -1,9 +1,8 @@
-import bbox from "@turf/bbox";
-import pointOnFeature from "@turf/point-on-feature";
 import type { BBox, Feature, MultiPolygon, Polygon } from "geojson";
 import { COUNTRY_ADMIN_LEVELS } from "./countryAdminLevels.ts";
 import type { CountryIndex } from "./countryIndex.ts";
 import { streamMergedAdminBoundaries } from "./mergeAdminBoundaries.ts";
+import { bboxAndPointOnFeature } from "./pointOnFeature.ts";
 import { resolvePolygonCountry } from "./polygonCountry.ts";
 
 const PLACE_SETTLEMENT_VALUES = new Set(["city", "town", "village"]);
@@ -58,9 +57,8 @@ export async function collectPlaceTagCandidates(
     if (!PLAUSIBLE_ADMIN_LEVELS.has(level)) continue;
 
     const geometry = feature as Feature<Polygon | MultiPolygon>;
-    const [repX, repY] = pointOnFeature(geometry).geometry.coordinates;
-    const featureBbox = bbox(geometry);
-    const country = resolvePolygonCountry(geometry, featureBbox, [repX ?? 0, repY ?? 0], countries);
+    const { bbox: featureBbox, repPoint } = bboxAndPointOnFeature(geometry.geometry);
+    const country = resolvePolygonCountry(geometry, featureBbox, repPoint, countries);
     if (!country) continue;
 
     candidates.push({ name, place: props?.place, country, level, bbox: featureBbox });

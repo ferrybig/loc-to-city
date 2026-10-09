@@ -24,6 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { discoverAdminGeoJsonFiles } from "./lib/osmFiles.ts";
 import { loadCountryIndex } from "./lib/countryIndex.ts";
+import { loadOsmCountryBorders, withOsmCountryBorders } from "./lib/osmCountryBorders.ts";
 import { collectPlaceTagCandidates, findPlaceTagMismatches } from "./lib/placeTagSignal.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -41,7 +42,11 @@ async function main(): Promise<void> {
   }
   console.error(`found ${files.length} admin files: ${files.map((f) => path.basename(f)).join(", ")}`);
 
-  const countries = loadCountryIndex(COUNTRIES_SOURCE);
+  const naturalEarth = loadCountryIndex(COUNTRIES_SOURCE);
+  const countries = withOsmCountryBorders(
+    naturalEarth,
+    await loadOsmCountryBorders(files, new Set(naturalEarth.nameByCode.keys())),
+  );
   console.error("scanning merged corpus for place-tagged admin relations...");
   const candidates = await collectPlaceTagCandidates(files, countries);
   console.error(`collected ${candidates.length.toLocaleString()} candidates`);
