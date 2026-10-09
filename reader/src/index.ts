@@ -36,6 +36,8 @@ export {
 export {
 	CGeoDataReader,
 	type ChunkRecord,
+	DEFAULT_CACHE_BYTES,
+	type OpenOptions,
 	type Place,
 	type PlaceCounts,
 	type PlaceFilter,

@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { ByteBudgetCache } from "./cache.ts";
 import {
 	type BoundingBox,
 	cellBoundingBox,
@@ -138,12 +139,31 @@ export interface PlaceCounts {
 	cities: number;
 }
 
+/** Options for `CGeoDataReader.open()`. */
+export interface OpenOptions {
+	/**
+	 * Memory budget, in bytes, for decoded chunks and name blocks; least
+	 * recently used ones are dropped past it. Default 64 MiB. A worldwide
+	 * file decodes to about 2 GB in all, its largest chunk to about 5 MB,
+	 * so a budget much below that makes lookups scattered across the
+	 * world re-decode often. 0 disables caching, except for the one most
+	 * recently used chunk.
+	 */
+	cacheBytes?: number;
+}
+
+/** `OpenOptions.cacheBytes` when not given. */
+export const DEFAULT_CACHE_BYTES = 64 * 2 ** 20;
+
 export class CGeoDataReader {
-	private readonly chunkCache = new Map<number, WeakRef<ChunkRecords>>();
-	/** Inflated name blocks (Section 7.3), split into entries. One inflate
-	 * per block ever touched, whether a lookup wants one name or a walk
-	 * wants all of them. */
-	private readonly nameBlockCache = new Map<number, WeakRef<string[][]>>();
+	/** Decoded chunks (keyed by chunk index) and name blocks (keyed by
+	 * `-1 - blockIndex`) under one byte budget. */
+	private readonly cache: ByteBudgetCache<ChunkRecords | string[][]>;
+	/** The chunk the last lookup used, held outside `cache`: lookups close
+	 * together (a tile's samples) mostly land in the same chunk, and this
+	 * answers those without touching the LRU's bookkeeping. */
+	private lastChunkIndex = -1;
+	private lastChunk: ChunkRecords | undefined;
 	/** Narrows `search()`'s city scan; see `useSearchIndex()`. */
 	private searchIndex: SearchIndex | undefined;
 	/** Whether `searchIndex` was opened here, and so is closed here. */
@@ -170,14 +190,26 @@ export class CGeoDataReader {
 		header: CGeoDataHeader,
 		directory: CGeoDataDirectory,
 		placeTable: PlaceTableInfo,
+		cacheBytes: number,
 	) {
+		this.cache = new ByteBudgetCache(cacheBytes);
 		this.source = source;
 		this.header = header;
 		this.directory = directory;
 		this.placeTable = placeTable;
 	}
 
-	static open(input: string | Uint8Array): CGeoDataReader {
+	static open(
+		input: string | Uint8Array,
+		options: OpenOptions = {},
+	): CGeoDataReader {
+		const { cacheBytes = DEFAULT_CACHE_BYTES } = options;
+		// Checked before opening, so a bad option doesn't leak a file handle.
+		if (!(cacheBytes >= 0)) {
+			throw new RangeError(
+				`cacheBytes must be a non-negative number, not ${cacheBytes}`,
+			);
+		}
 		const source = openSource(input);
 		const { header, directory } = readHeaderAndDirectory(source);
 		const placeTable = parsePlaceTable(
@@ -186,7 +218,13 @@ export class CGeoDataReader {
 			directory.placeTableLength,
 			header.keyframeExp,
 		);
-		const reader = new CGeoDataReader(source, header, directory, placeTable);
+		const reader = new CGeoDataReader(
+			source,
+			header,
+			directory,
+			placeTable,
+			cacheBytes,
+		);
 		if (typeof input === "string") {
 			reader.pendingSearchIndexPath = searchIndexPathFor(input);
 			reader.pendingLocateIndexPath = locateIndexPathFor(input);
@@ -197,6 +235,9 @@ export class CGeoDataReader {
 	close(): void {
 		this.useSearchIndex(undefined);
 		this.useLocateIndex(undefined);
+		this.cache.clear();
+		this.lastChunk = undefined;
+		this.lastChunkIndex = -1;
 		this.source.close?.();
 	}
 
@@ -656,10 +697,9 @@ export class CGeoDataReader {
 	}
 
 	/** The parsed records of one chunk (Section 8), or undefined when the
-	 * chunk is empty. Cached, like lookups, unless `cache` is false -- a
-	 * cached chunk stays alive at least until the current synchronous job
-	 * ends (WeakRef semantics), so a one-pass walk over every chunk should
-	 * skip the cache to keep memory flat. */
+	 * chunk is empty. Cached like lookups, unless `cache` is false: a
+	 * one-pass walk over every chunk should skip the cache, so it doesn't
+	 * evict everything lookups had cached for chunks it only visits once. */
 	chunk(
 		index: number,
 		{ cache = true }: { cache?: boolean } = {},
@@ -828,8 +868,13 @@ export class CGeoDataReader {
 	private getChunk(index: number, cache = true): ChunkRecords | undefined {
 		const length = this.directory.chunkLengths[index]!;
 		if (length === 0) return undefined;
-		const cached = this.chunkCache.get(index)?.deref();
-		if (cached) return cached;
+		if (index === this.lastChunkIndex) return this.lastChunk;
+		const cached = this.cache.get(index) as ChunkRecords | undefined;
+		if (cached) {
+			this.lastChunkIndex = index;
+			this.lastChunk = cached;
+			return cached;
+		}
 		const compressed = this.source.readSync(
 			this.directory.chunkOffsets[index]!,
 			length,
@@ -851,7 +896,18 @@ export class CGeoDataReader {
 				);
 			}
 		}
-		if (cache) this.chunkCache.set(index, new WeakRef(chunk));
+		if (cache) {
+			this.cache.set(
+				index,
+				chunk,
+				chunk.codes.byteLength +
+					chunk.depths.byteLength +
+					chunk.paletteIndices.byteLength +
+					chunk.palette.length * 8,
+			);
+			this.lastChunkIndex = index;
+			this.lastChunk = chunk;
+		}
 		return chunk;
 	}
 
@@ -859,10 +915,10 @@ export class CGeoDataReader {
 		const { keyframeExp, totalPlaces } = this.placeTable;
 		const blockSize = keyframeExp === 0 ? totalPlaces : 2 ** keyframeExp;
 		const blockIndex = Math.floor(globalId / blockSize);
-		let block = this.nameBlockCache.get(blockIndex)?.deref();
+		let block = this.cache.get(-1 - blockIndex) as string[][] | undefined;
 		if (!block) {
 			block = readNameBlock(this.source, this.placeTable, blockIndex);
-			this.nameBlockCache.set(blockIndex, new WeakRef(block));
+			this.cache.set(-1 - blockIndex, block, nameBlockBytes(block));
 		}
 		const entry = block[globalId - blockIndex * blockSize];
 		if (!entry)
@@ -874,6 +930,18 @@ export class CGeoDataReader {
 }
 
 const LEVELS: readonly PlaceLevel[] = ["country", "region", "city"];
+
+/** A rough size of a decoded name block, for the cache budget: two bytes
+ * per character (V8's worst case), plus per-string and per-array
+ * overhead. */
+function nameBlockBytes(block: string[][]): number {
+	let bytes = 0;
+	for (const entry of block) {
+		bytes += 32;
+		for (const name of entry) bytes += 24 + 2 * name.length;
+	}
+	return bytes;
+}
 
 function checkId(id: number, lo: number, hi: number, what: string): void {
 	if (!Number.isInteger(id) || id < lo || id >= hi) {

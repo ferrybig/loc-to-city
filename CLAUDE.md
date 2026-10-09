@@ -165,9 +165,10 @@ is picked up next to the `.bin` and overridden (`useLocateIndex()`,
 must agree -- `reader/test/locateIndex.test.ts` asserts that on every
 place of `data/03-final/zuid-holland.bin`, and its builder output byte-for-byte
 against Appendix C.8. The builder reads chunks with `chunk(i, { cache:
-false })`: cached chunks are `WeakRef`s, whose targets stay alive until
-the current synchronous job ends, so a cached one-pass walk pins every
-chunk in memory.
+false })`, so a one-pass walk doesn't evict everything lookups had
+cached. The reader's cache is an LRU under a byte budget
+(`open(input, { cacheBytes })`, default 64 MiB, `reader/src/cache.ts`)
+shared by decoded chunks and name blocks.
 
 Also runnable as `npm run reader -- <subcommand> ...` (the `--` is
 required so npm forwards args instead of eating them).
