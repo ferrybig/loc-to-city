@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readVarint, writeVarint } from "../src/index.ts";
+import { IncompleteBufferError, readDeltaVarintsInto, readVarint, writeVarint } from "../src/index.ts";
 
 // Section 3.2 worked examples: 0 -> 00; 127 -> 7f; 128 -> 80 01;
 // 300 -> ac 02; 8192 -> 80 40.
@@ -38,3 +38,26 @@ test("readVarint rejects a non-minimal encoding", () => {
 test("writeVarint rejects values >= 2^53", () => {
   assert.throws(() => writeVarint(2 ** 53), RangeError);
 });
+
+test("readDeltaVarintsInto sums deltas and returns the offset past them", () => {
+  // Deltas 300, 0, 8192 after one byte of padding.
+  const buf = Uint8Array.from([0xff, 0xac, 0x02, 0x00, 0x80, 0x40]);
+  const out = new Float64Array(3);
+  assert.equal(readDeltaVarintsInto(buf, 1, out), 6);
+  assert.deepEqual(Array.from(out), [300, 300, 8492]);
+});
+
+// readVarint is readDeltaVarintsInto on a list of one, so the readVarint
+// cases above cover the decoder chunk codes go through too; these check
+// that every malformed varint is still rejected inside a longer list.
+for (const [what, bytes, error] of [
+  ["longer than 8 bytes", [0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01], RangeError],
+  ["non-minimal", [0x80, 0x00], RangeError],
+  ["2^53 or more", [0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x10], RangeError],
+  ["cut off", [0x80], IncompleteBufferError],
+] as const) {
+  test(`readDeltaVarintsInto rejects a ${what} varint after a good one`, () => {
+    const buf = Uint8Array.from([0x05, ...bytes]);
+    assert.throws(() => readDeltaVarintsInto(buf, 0, new Float64Array(2)), error);
+  });
+}

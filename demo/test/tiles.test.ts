@@ -2,19 +2,38 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { CGeoDataReader, type QueryResult } from "@loc-to-city/reader";
+import {
+	CGeoDataReader,
+	type PlaceIdResult,
+	type PlaceIds,
+	type QueryResult,
+} from "@loc-to-city/reader";
+import { placeColor } from "../src/colors.ts";
 import {
 	defaultTileResolution,
 	renderTileGrid,
-	resultColor,
 	type TileReader,
 	tilePixelToLonLat,
 } from "../src/tiles.ts";
 
+/** The color a render should give a query result: its finest resolved
+ * level's, or transparent where nothing resolved. Derives the level from
+ * the names rather than `placeIds()`, so it checks the render's use of
+ * that independently. */
+function resultColor(result: QueryResult): [number, number, number, number] {
+	if (result.placeId === null) return [0, 0, 0, 0];
+	const level = result.city ? "city" : result.region ? "region" : "country";
+	return [...placeColor(level, result.placeId), 255];
+}
+
+/** A reader that also answers plain `query()`, which the uncached
+ * reference renders below use. */
+type QueryingReader = TileReader & Pick<CGeoDataReader, "query">;
+
 /** What renderTileGrid should produce: every sample queried on its own,
  * no cache. */
 function uncachedGrid(
-	reader: TileReader,
+	reader: QueryingReader,
 	z: number,
 	x: number,
 	y: number,
@@ -55,7 +74,7 @@ function hash(a: number, b: number, c: number): number {
  * real reader, `boundingBox` is the leaf cell, [minLat, maxLat) x
  * [minLon, maxLon). Counts its queries.
  */
-function syntheticReader(): TileReader & { queries: number } {
+function syntheticReader(): QueryingReader & { queries: number } {
 	const levels = [
 		{ country: ["A"], region: null, city: null },
 		{ country: ["A"], region: ["A1"], city: null },
@@ -66,7 +85,7 @@ function syntheticReader(): TileReader & { queries: number } {
 	];
 	const reader = {
 		queries: 0,
-		query(lat: number, lon: number): QueryResult {
+		queryPlaceId(lat: number, lon: number): PlaceIdResult {
 			reader.queries++;
 			let [minLat, maxLat, minLon, maxLon] = [-90, 90, -180, 180];
 			let row = 0;
@@ -83,12 +102,31 @@ function syntheticReader(): TileReader & { queries: number } {
 				else maxLon = midLon;
 				depth++;
 			}
-			const place = levels[hash(depth + 100, row, col) % levels.length]!;
+			const placeId = hash(depth + 100, row, col) % levels.length;
 			return {
-				...place,
+				placeId: levels[placeId]!.country ? placeId : null,
 				boundingBox: { minLat, maxLat, minLon, maxLon },
 				chunkIndex: 0,
 			};
+		},
+		placeIds(id: number): PlaceIds {
+			const { country, region, city } = levels[id]!;
+			// Each country and region has one id, which every place under it
+			// refers to, as in a real place table: A and A1 are places 0 and
+			// 1 themselves; B and B1 have no entry of their own.
+			const ancestorIds: Record<string, number> = { A: 0, A1: 1, B: 100, B1: 101 };
+			return {
+				level: city ? "city" : region ? "region" : "country",
+				country: ancestorIds[country![0]!]!,
+				region: region && ancestorIds[region[0]!]!,
+				city: city && id,
+			};
+		},
+		/** Not counted: only the uncached references call it. */
+		query(lat: number, lon: number): QueryResult {
+			const result = reader.queryPlaceId(lat, lon);
+			reader.queries--;
+			return { ...result, ...levels[result.placeId ?? levels.length - 1]! };
 		},
 	};
 	return reader;
@@ -133,7 +171,7 @@ test("the cache saves queries on a zoomed-in tile", () => {
  * the samples left of and above it, which for the first row and column
  * lie in the neighboring tile. */
 function uncachedBorders(
-	reader: TileReader,
+	reader: QueryingReader,
 	z: number,
 	x: number,
 	y: number,

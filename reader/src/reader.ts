@@ -33,10 +33,14 @@ import { SearchIndex, searchIndexPathFor } from "./searchIndex.ts";
 import { openSource, type RandomAccessSource } from "./source.ts";
 import { safeInflate } from "./zlibUtil.ts";
 
-export interface QueryResult {
-	country: string[] | null;
-	region: string[] | null;
-	city: string[] | null;
+/** `queryPlaceId()`'s result: where a point resolves, without names. */
+export interface PlaceIdResult {
+	/** The global id (Section 7.5) of the finest place resolved -- the city,
+	 * else the region, else the country -- or null where nothing resolved.
+	 * Two results with the same id have the same names, so a caller doing
+	 * many lookups can key per-place work (a color, a label) on it instead
+	 * of on the names. */
+	placeId: number | null;
 	/**
 	 * The lat/lon rectangle this result is valid for -- every coordinate in
 	 * this box resolves to the exact same result as the one just queried.
@@ -57,12 +61,27 @@ export interface QueryResult {
 	chunkIndex: number;
 }
 
+export interface QueryResult extends PlaceIdResult {
+	country: string[] | null;
+	region: string[] | null;
+	city: string[] | null;
+}
+
 export type PlaceLevel = "country" | "region" | "city";
 
 /** A place's global id (Section 7.5) and its name entry (Section 7.4). */
 export interface PlaceRef {
 	id: number;
 	names: string[];
+}
+
+/** A place's level and the global ids of it and its ancestors, shaped
+ * like `Place` without the names. */
+export interface PlaceIds {
+	level: PlaceLevel;
+	country: number;
+	region: number | null;
+	city: number | null;
 }
 
 /**
@@ -191,6 +210,26 @@ export class CGeoDataReader {
 
 	/** Section 9's lookup procedure. */
 	query(lat: number, lon: number): QueryResult {
+		const result = this.queryPlaceId(lat, lon);
+		if (result.placeId === null) {
+			return { ...result, country: null, region: null, city: null };
+		}
+		const place = this.place(result.placeId);
+		return {
+			...result,
+			country: place.country.names,
+			region: place.region?.names ?? null,
+			city: place.city?.names ?? null,
+		};
+	}
+
+	/**
+	 * `query()` without resolving the place's names: just its id, for a
+	 * caller doing many lookups that resolves each distinct place once
+	 * (with `place()`, `placeIds()` or `placeNames()`) rather than once per
+	 * lookup, as a tile renderer sampling a grid of points does.
+	 */
+	queryPlaceId(lat: number, lon: number): PlaceIdResult {
 		if (!(lat >= -90 && lat < 90)) {
 			throw new RangeError(
 				`latitude ${lat} is outside the valid range [-90, 90)`,
@@ -244,11 +283,8 @@ export class CGeoDataReader {
 		const k = chunk.paletteIndices[j]!;
 		if (k === 0) return unknownResult(matchedCellBox, chunkIndex);
 
-		const place = this.place(chunk.palette[k - 1]!);
 		return {
-			country: place.country.names,
-			region: place.region?.names ?? null,
-			city: place.city?.names ?? null,
+			placeId: chunk.palette[k - 1]!,
 			boundingBox: matchedCellBox,
 			chunkIndex,
 		};
@@ -446,26 +482,36 @@ export class CGeoDataReader {
 
 	/** Resolves one place id (Section 7.5) to its names and ancestors. */
 	place(id: number): Place {
-		const resolved = resolveIdentifier(this.placeTable, id);
-		const C = this.placeTable.countryCount;
-		const R = this.placeTable.totalRegions;
+		const ids = this.placeIds(id);
 		const ref = (globalId: number): PlaceRef => ({
 			id: globalId,
 			names: this.names(globalId),
 		});
-
-		const country = ref(resolved.countryId);
-		const region = "regionId" in resolved ? ref(C + resolved.regionId) : null;
-		const city =
-			resolved.level === "city" ? ref(C + R + resolved.cityId) : null;
-		const self = city ?? region ?? country;
+		const country = ref(ids.country);
+		const region = ids.region === null ? null : ref(ids.region);
+		const city = ids.city === null ? null : ref(ids.city);
 		return {
 			id,
-			names: self.names,
-			level: resolved.level,
+			names: (city ?? region ?? country).names,
+			level: ids.level,
 			country,
 			region,
 			city,
+		};
+	}
+
+	/** `place()` without the names: the place's level and the global ids
+	 * of it and its ancestors, from the place table's counts alone, so no
+	 * name block is read. */
+	placeIds(id: number): PlaceIds {
+		const resolved = resolveIdentifier(this.placeTable, id);
+		const C = this.placeTable.countryCount;
+		const R = this.placeTable.totalRegions;
+		return {
+			level: resolved.level,
+			country: resolved.countryId,
+			region: "regionId" in resolved ? C + resolved.regionId : null,
+			city: resolved.level === "city" ? C + R + resolved.cityId : null,
 		};
 	}
 
@@ -824,8 +870,8 @@ function checkId(id: number, lo: number, hi: number, what: string): void {
 function unknownResult(
 	boundingBox: BoundingBox,
 	chunkIndex: number,
-): QueryResult {
-	return { country: null, region: null, city: null, boundingBox, chunkIndex };
+): PlaceIdResult {
+	return { placeId: null, boundingBox, chunkIndex };
 }
 
 /** The first index of the ascending `sorted` whose value is >= `value`. */
@@ -841,7 +887,7 @@ function lowerBound(sorted: readonly number[], value: number): number {
 }
 
 /** bisect_right(sorted, value) - 1, per Section 9 step 6. */
-function bisectRightMinusOne(sorted: number[], value: number): number {
+function bisectRightMinusOne(sorted: ArrayLike<number>, value: number): number {
 	let lo = 0;
 	let hi = sorted.length;
 	while (lo < hi) {

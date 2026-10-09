@@ -1,13 +1,12 @@
 /**
  * Deterministic place -> color mapping for the tile overlay, ported from
  * the deleted Python prototype's tile overlay (see README's historical
- * record). A place's level and names are hashed to an integer, which
- * becomes a hue (0-360); lightness is fixed and chroma depends only on the
- * level, so a city stands out more than a region-only or country-only
- * area. The same place always renders the same color across tiles, zoom
- * levels, and requests (MD5, not a per-process random seed).
+ * record). A place's global id is hashed to a hue (0-360); lightness is
+ * fixed and chroma depends only on the level, so a city stands out more
+ * than a region-only or country-only area. The same place always renders
+ * the same color across tiles, zoom levels, and requests of one dataset;
+ * a rebuilt dataset numbers places differently and so reshuffles colors.
  */
-import { createHash } from "node:crypto";
 import type { PlaceLevel } from "@loc-to-city/reader";
 
 /** Chroma per level: cities saturated, regions and countries muted. */
@@ -17,14 +16,15 @@ const CHROMA: Record<PlaceLevel, number> = {
 	country: 0.04,
 };
 
-/** The hue (0-359) for the place at `level` named `names`. The names are
- * joined with NUL, which can't occur in a name, so no two different name
- * lists hash the same input. */
-export function placeHue(level: PlaceLevel, names: readonly string[]): number {
-	const digest = createHash("md5")
-		.update(`${level}\0${names.join("\0")}`, "utf8")
-		.digest();
-	return digest.readUInt32BE(0) % 360;
+/** The hue (0-359) for the place with global id `id`: murmur3's 32-bit
+ * finalizer, so consecutive ids (neighboring cities of one region) still
+ * get unrelated hues. Only a handful of hues are told apart by eye anyway,
+ * and borders mark where places meet, so a cheap hash is plenty. */
+export function placeHue(id: number): number {
+	let h = id >>> 0;
+	h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+	h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+	return ((h ^ (h >>> 16)) >>> 0) % 360;
 }
 
 function clamp01(x: number): number {
@@ -79,10 +79,10 @@ export function oklchToRgb(
 	];
 }
 
-/** The overlay color for the place at `level` named `names`. */
+/** The overlay color for the place at `level` with global id `id`. */
 export function placeColor(
 	level: PlaceLevel,
-	names: readonly string[],
+	id: number,
 ): [number, number, number] {
-	return oklchToRgb(placeHue(level, names), CHROMA[level]);
+	return oklchToRgb(placeHue(id), CHROMA[level]);
 }

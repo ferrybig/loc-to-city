@@ -7,14 +7,14 @@
  * visible instead of being smoothed away).
  */
 
-import type { CGeoDataReader, QueryResult } from "@loc-to-city/reader";
+import type { CGeoDataReader, PlaceIdResult } from "@loc-to-city/reader";
 import { PNG } from "pngjs";
 import { placeColor } from "./colors.ts";
 
 const TILE_SIZE = 256;
 
 /** The part of the reader a tile render uses. */
-export type TileReader = Pick<CGeoDataReader, "query">;
+export type TileReader = Pick<CGeoDataReader, "queryPlaceId" | "placeIds">;
 
 type Rgba = [r: number, g: number, b: number, a: number];
 
@@ -51,20 +51,6 @@ export function tilePixelToLonLat(
 	return { lat, lon };
 }
 
-/** The color for a query result: its finest resolved level's, or
- * transparent where nothing resolved. */
-export function resultColor(result: QueryResult): Rgba {
-	const [level, names] = result.city
-		? (["city", result.city] as const)
-		: result.region
-			? (["region", result.region] as const)
-			: result.country
-				? (["country", result.country] as const)
-				: [null, null];
-	if (level === null) return TRANSPARENT;
-	return [...placeColor(level, names), 255];
-}
-
 /** Zoom level from which a tile draws borders between places: further
  * out, they'd cover most of the tile. */
 export const BORDER_MIN_ZOOM = 8;
@@ -76,9 +62,9 @@ export const BORDER_MIN_ZOOM = 8;
  */
 const BORDER_ALPHA = [0, 0.3, 0.5, 0.75] as const;
 
-/** What one sample resolved to: its color, plus ids for its country, its
- * region-within-country and its city-within-region, unique within one
- * render, for telling where borders go. */
+/** What one sample resolved to: its color, plus the global place ids of
+ * its country, region and city (-1 for none), for telling where borders
+ * go. */
 interface Sample {
 	color: Rgba;
 	country: number;
@@ -106,105 +92,86 @@ export function sampleTile(
 	const size = gridSize + 2 * margin;
 	const samples: (Sample | null)[] = new Array(size * size).fill(null);
 
-	const ids = new Map<string, number>();
-	const idOf = (key: string): number => {
-		let id = ids.get(key);
-		if (id === undefined) ids.set(key, (id = ids.size));
-		return id;
+	// Built once per place rather than once per query: zoomed out, cells
+	// get smaller than a pixel and nearly every sample is a query of its
+	// own, while a tile only ever shows a few thousand places.
+	const unknown: Sample = {
+		color: TRANSPARENT,
+		country: -1,
+		region: -1,
+		city: -1,
 	};
-	const toSample = (result: QueryResult): Sample => {
-		// Each level's key includes its parents', so two same-named cities
-		// in different regions still get different ids.
-		const country = result.country?.join("\0") ?? "";
-		const region = `${country}\x01${result.region?.join("\0") ?? ""}`;
-		const city = `${region}\x01${result.city?.join("\0") ?? ""}`;
-		return {
-			color: resultColor(result),
-			country: result.country ? idOf(country) : -1,
-			region: idOf(region),
-			city: idOf(city),
-		};
-	};
-
-	// Many of this tile's sample points land in the same underlying grid
-	// cell, especially once zoomed in -- reuse the reader's own boundingBox
-	// for that cell instead of re-querying for each repeat hit. Scoped to
-	// one render call: simple, and a stale entry across tiles/chunks isn't a
-	// concern this way.
-	//
-	// Rows run north to south (py=0 is the top edge), so a sample's
-	// latitude never exceeds that of any earlier sample, and so never
-	// exceeds the maxLat of any cell an earlier sample landed in: an entry
-	// only has to check minLat. Once a row's latitude drops below an
-	// entry's minLat, that entry can never hit again and its slot is free.
-	const cache: {
-		minLat: number;
-		minLon: number;
-		maxLon: number;
-		sample: Sample;
-	}[] = [];
-	const hits = (i: number, lat: number, lon: number): boolean => {
-		const e = cache[i]!;
-		return lat >= e.minLat && lon >= e.minLon && lon < e.maxLon;
+	const byPlace = new Map<number, Sample>();
+	const sampleOf = ({ placeId }: PlaceIdResult): Sample => {
+		if (placeId === null) return unknown;
+		let sample = byPlace.get(placeId);
+		if (sample === undefined) {
+			const ids = reader.placeIds(placeId);
+			sample = {
+				color: [...placeColor(ids.level, placeId), 255],
+				country: ids.country,
+				region: ids.region ?? -1,
+				city: ids.city ?? -1,
+			};
+			byPlace.set(placeId, sample);
+		}
+		return sample;
 	};
 
-	// Adjacent pixels along a row usually fall in the same cached cell, so
-	// checking the previous hit's slot first turns most lookups into an O(1)
-	// check instead of a scan of the whole cache.
-	let lastHit = -1;
+	// A sample's latitude depends only on its row and its longitude only on
+	// its column. Rows run north to south (py=0 is the top edge), so `lats`
+	// is decreasing; `lons` is increasing except where a margin sample
+	// wraps past the antimeridian onto the place it shows on the map.
+	const lats = new Float64Array(size);
+	const lons = new Float64Array(size);
+	for (let s = 0; s < size; s++) {
+		const c = (s - margin) * clampedResolution + clampedResolution / 2;
+		lats[s] = tilePixelToLonLat(z, x, y, 0, c).lat;
+		const lon = tilePixelToLonLat(z, x, y, c, 0).lon;
+		lons[s] = lon < -180 ? lon + 360 : lon >= 180 ? lon - 360 : lon;
+	}
 
+	// Every point of a result's boundingBox resolves the same way, so one
+	// query answers every sample inside it: the run of columns from the
+	// queried one rightward whose longitude it covers, in this row and each
+	// row below whose latitude it still covers. Samples above and to the
+	// left were already visited, so a sample left unfilled when its turn
+	// comes lies in no earlier result's box -- and, since boxes don't
+	// overlap, the box queried there can't reach any column left of it.
+	const filled = new Uint8Array(size * size);
 	for (let sy = 0; sy < size; sy++) {
-		const cy = (sy - margin) * clampedResolution + clampedResolution / 2;
+		const lat = lats[sy]!;
+		// Tiles can extend past the poles at low zoom; the reader rejects
+		// out-of-range coordinates, so skip those samples.
+		if (lat < -90 || lat >= 90) continue;
 		for (let sx = 0; sx < size; sx++) {
-			const cx = (sx - margin) * clampedResolution + clampedResolution / 2;
-			const point = tilePixelToLonLat(z, x, y, cx, cy);
-			const lat = point.lat;
-			// A margin sample can fall past the antimeridian; wrap it onto
-			// the place it shows on the map.
-			const lon =
-				point.lon < -180
-					? point.lon + 360
-					: point.lon >= 180
-						? point.lon - 360
-						: point.lon;
+			const lon = lons[sx]!;
+			if (filled[size * sy + sx] || lon < -180 || lon >= 180) continue;
 
-			// Tiles can extend past the poles at low zoom; the reader rejects
-			// out-of-range coordinates, so skip those pixels.
-			if (lat < -90 || lat >= 90 || lon < -180 || lon >= 180) {
-				continue;
-			}
+			const result = reader.queryPlaceId(lat, lon);
+			const sample = sampleOf(result);
+			const { minLat, maxLat, minLon, maxLon } = result.boundingBox;
+			let last = sx;
+			while (
+				last + 1 < size &&
+				lons[last + 1]! >= minLon &&
+				lons[last + 1]! < maxLon
+			)
+				last++;
 
-			let sample: Sample | null = null;
-			if (lastHit !== -1 && hits(lastHit, lat, lon)) {
-				sample = cache[lastHit]!.sample;
-			} else {
-				let freeSlot = -1;
-				for (let i = 0; i < cache.length; i++) {
-					if (hits(i, lat, lon)) {
-						sample = cache[i]!.sample;
-						lastHit = i;
-						break;
-					}
-					if (freeSlot === -1 && lat < cache[i]!.minLat) freeSlot = i;
-				}
-				if (sample === null) {
-					const result = reader.query(lat, lon);
-					sample = toSample(result);
-					const entry = {
-						minLat: result.boundingBox.minLat,
-						minLon: result.boundingBox.minLon,
-						maxLon: result.boundingBox.maxLon,
-						sample,
-					};
-					if (freeSlot === -1) {
-						lastHit = cache.push(entry) - 1;
-					} else {
-						cache[freeSlot] = entry;
-						lastHit = freeSlot;
-					}
-				}
-			}
 			samples[size * sy + sx] = sample;
+			filled[size * sy + sx] = 1;
+			for (
+				let row = sy;
+				row < size &&
+				(row === sy || (lats[row]! >= minLat && lats[row]! < maxLat));
+				row++
+			) {
+				for (let col = sx; col <= last; col++) {
+					samples[size * row + col] = sample;
+					filled[size * row + col] = 1;
+				}
+			}
 		}
 	}
 	return { size, samples };
@@ -253,15 +220,11 @@ export function renderTileGrid(
 				: 0;
 			const dark = BORDER_ALPHA[strength as 0 | 1 | 2 | 3];
 			// Black at `dark` alpha composited over the place's color.
-			small.data.set(
-				[
-					Math.round(r * (1 - dark)),
-					Math.round(g * (1 - dark)),
-					Math.round(b * (1 - dark)),
-					Math.round(a + (255 - a) * dark),
-				],
-				(gridSize * gy + gx) << 2,
-			);
+			const out = (gridSize * gy + gx) << 2;
+			small.data[out] = Math.round(r * (1 - dark));
+			small.data[out + 1] = Math.round(g * (1 - dark));
+			small.data[out + 2] = Math.round(b * (1 - dark));
+			small.data[out + 3] = Math.round(a + (255 - a) * dark);
 		}
 	}
 	return small;
@@ -282,7 +245,13 @@ export function renderTilePng(
 		resolution,
 		z >= BORDER_MIN_ZOOM,
 	);
-	return PNG.sync.write(nearestNeighborUpscale(small, TILE_SIZE, TILE_SIZE));
+	const tile =
+		small.width === TILE_SIZE && small.height === TILE_SIZE
+			? small
+			: nearestNeighborUpscale(small, TILE_SIZE, TILE_SIZE);
+	// Paeth alone compresses these flat-colored tiles as well as pngjs's
+	// default of trying every filter on every row, in half the time.
+	return PNG.sync.write(tile, { filterType: 4 });
 }
 
 function nearestNeighborUpscale(src: PNG, width: number, height: number): PNG {

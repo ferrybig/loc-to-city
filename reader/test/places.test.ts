@@ -35,6 +35,40 @@ test("place(id) resolves each level with the QueryResult-shaped trio", () => {
   assert.throws(() => reader.place(7), RangeError);
 });
 
+test("placeIds(id) is place(id)'s level and ids without the names", () => {
+  for (let id = 0; id < 7; id++) {
+    const place = reader.place(id);
+    assert.deepEqual(reader.placeIds(id), {
+      level: place.level,
+      country: place.country.id,
+      region: place.region?.id ?? null,
+      city: place.city?.id ?? null,
+    });
+  }
+  assert.throws(() => reader.placeIds(7), RangeError);
+});
+
+test("query() is queryPlaceId() plus the place's names", () => {
+  // Appendix A's lookups: Zaandam (5), Noord-Holland (2), and three unknowns.
+  for (const [lat, lon, placeId] of [
+    [20, 100, 5],
+    [40, 30, 2],
+    [30, 100, null],
+    [20, 170, null],
+    [-10, 10, null],
+  ] as const) {
+    const byId = reader.queryPlaceId(lat, lon);
+    assert.deepEqual(byId.placeId, placeId);
+    const place = placeId === null ? null : reader.place(placeId);
+    assert.deepEqual(reader.query(lat, lon), {
+      ...byId,
+      country: place?.country.names ?? null,
+      region: place?.region?.names ?? null,
+      city: place?.city?.names ?? null,
+    });
+  }
+});
+
 test("places() walks in id order and honours level/country/region filters", () => {
   assert.deepEqual(ids(reader.places()), [0, 1, 2, 3, 4, 5, 6]);
   assert.deepEqual(ids(reader.places({ level: "country" })), [0, 1]);

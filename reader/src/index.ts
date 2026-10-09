@@ -32,6 +32,8 @@ export {
 	type ChunkRecord,
 	type Place,
 	type PlaceCounts,
+	type PlaceIdResult,
+	type PlaceIds,
 	type PlaceFilter,
 	type PlaceLevel,
 	type PlaceRef,
@@ -69,6 +71,7 @@ export { openSource, type RandomAccessSource } from "./source.ts";
 export {
 	IncompleteBufferError,
 	readDeltaVarintList,
+	readDeltaVarintsInto,
 	readVarint,
 	readVarintList,
 	writeVarint,

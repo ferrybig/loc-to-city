@@ -215,7 +215,7 @@ make netherlands
 #   node compressor/src/cli.ts data/02-resolved/nl/hierarchy.json data/02-resolved/nl/cities-filtered.geojsonseq \
 #     data/03-final/zuid-holland.bin --regions data/02-resolved/nl/regions.geojson --countries data/02-resolved/nl/country-polygons.geojson \
 #     --width-exp 6 --height-exp 6 --max-depth 10 --keyframe-exp 13 \
-#     --attribution "[OpenStreetMap](https://openstreetmap.org/copyright)"
+#     --attribution "City boundaries from [OpenStreetMap](https://openstreetmap.org/copyright), [Geonames](https://www.geonames.org/), CC BY 4.0 & [Natural Earth](https://www.naturalearthdata.com/) "
 
 npm test -w compressor                     # now also runs the Zuid-Holland structural + query tests
 
@@ -326,7 +326,7 @@ make europe
 #   node compressor/src/cli.ts data/02-resolved/eu/hierarchy.json data/02-resolved/eu/cities-filtered.geojsonseq \
 #     data/03-final/europe.bin --regions data/02-resolved/eu/regions.geojson --countries data/02-resolved/eu/country-polygons.geojson \
 #     --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 13 \
-#     --attribution "[OpenStreetMap](https://openstreetmap.org/copyright)" --workers 6
+#     --attribution "City boundaries from [OpenStreetMap](https://openstreetmap.org/copyright), [Geonames](https://www.geonames.org/), CC BY 4.0 & [Natural Earth](https://www.naturalearthdata.com/) " --workers 6
 ```
 
 The historical command and result below are kept as a record of the

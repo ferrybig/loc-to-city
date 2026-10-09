@@ -3,9 +3,11 @@
 node_modules/
 */dist/
 
-# Large data files - only world.bin is needed at runtime
+# Large data files - only the one .bin the Dockerfile's DATASET build arg
+# picks is needed at runtime. Every final .bin is let through so any can be
+# picked; BuildKit only sends the context files a COPY actually uses.
 data/
-!data/03-final/world.bin
+!data/03-final/*.bin
 
 # OSM extracts and intermediate working files
 data-ingest/osm/

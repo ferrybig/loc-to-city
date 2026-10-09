@@ -19,10 +19,14 @@ COPY demo/tsconfig.json demo/
 
 RUN npm run build -w reader && npm run build -w demo
 
+# Which data/03-final/<DATASET>.bin to serve, copied in as world.bin:
+#   docker build --build-arg DATASET=world .
+ARG DATASET=world-high-res
+
 # Sidecar indexes next to world.bin, which the demo picks up by name:
 # /api/search checks only the cities the search index leaves over, and
 # /api/locate reads one entry instead of scanning every chunk.
-COPY data/03-final/world.bin data/world.bin
+COPY data/03-final/${DATASET}.bin data/world.bin
 RUN node reader/dist/cli.js build-search-index data/world.bin --output data/world.search-index.bin \
  && node reader/dist/cli.js build-locate-index data/world.bin --output data/world.locate-index.bin
 
