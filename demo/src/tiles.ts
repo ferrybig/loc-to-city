@@ -7,7 +7,7 @@
  * visible instead of being smoothed away).
  */
 
-import type { CGeoDataReader, PlaceIdResult } from "@loc-to-city/reader";
+import type { CGeoDataReader, PlaceIdResult } from "@ferrybig/cgeodata-reader";
 import { PNG } from "pngjs";
 import { placeColor } from "./colors.ts";
 

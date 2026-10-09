@@ -10,12 +10,12 @@
  * RangeError, which survives the trip back to the server as one.
  */
 import { workerData } from "node:worker_threads";
-import type { QueryResult } from "@loc-to-city/reader";
+import type { QueryResult } from "@ferrybig/cgeodata-reader";
 import {
 	locateIndexPathFor,
 	openFile,
 	searchIndexPathFor,
-} from "@loc-to-city/reader/node";
+} from "@ferrybig/cgeodata-reader/node";
 import { renderTilePng } from "./tiles.ts";
 
 export interface WorkerData {

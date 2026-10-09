@@ -1,26 +1,65 @@
 {
-	"name": "@loc-to-city/reader",
+	"name": "@ferrybig/cgeodata-reader",
 	"version": "0.1.0",
-	"private": true,
+	"description": "Reverse geocoding without a database: resolves a latitude/longitude to its country, region and city from OpenStreetMap boundaries, reading a compact CGEODATA file. No dependencies; Node.js and browsers.",
+	"keywords": [
+		"reverse-geocoding",
+		"geocoding",
+		"geodata",
+		"openstreetmap",
+		"administrative-boundaries",
+		"offline"
+	],
+	"license": "MIT",
+	"author": "Fernando van Loenhout",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/ferrybig/loc-to-city.git",
+		"directory": "reader"
+	},
+	"homepage": "https://github.com/ferrybig/loc-to-city/tree/master/reader#readme",
+	"bugs": "https://github.com/ferrybig/loc-to-city/issues",
 	"type": "module",
+	"engines": {
+		"node": ">=24"
+	},
+	"sideEffects": false,
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
 	"exports": {
-		".": "./dist/index.js",
-		"./node": "./dist/node.js",
-		"./indexes": "./dist/indexes.js",
-		"./format": "./dist/format.js"
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		},
+		"./node": {
+			"types": "./dist/node.d.ts",
+			"default": "./dist/node.js"
+		},
+		"./indexes": {
+			"types": "./dist/indexes.d.ts",
+			"default": "./dist/indexes.js"
+		},
+		"./format": {
+			"types": "./dist/format.d.ts",
+			"default": "./dist/format.js"
+		},
+		"./package.json": "./package.json"
 	},
 	"bin": {
 		"cgeodata": "./dist/cli.js"
 	},
+	"files": [
+		"dist",
+		"!dist/**/*.map",
+		"binary-format.md"
+	],
 	"scripts": {
-		"build": "tsc -p tsconfig.json",
+		"build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
 		"test": "node --test test/*.test.ts",
 		"typecheck": "tsc -p tsconfig.test.json",
-		"dev": "node src/index.ts",
 		"bench": "node --expose-gc bench/bench.ts",
-		"docs": "typedoc"
+		"docs": "typedoc",
+		"prepack": "npm run build"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.13",

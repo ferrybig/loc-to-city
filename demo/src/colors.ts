@@ -7,7 +7,7 @@
  * the same color across tiles, zoom levels, and requests of one dataset;
  * a rebuilt dataset numbers places differently and so reshuffles colors.
  */
-import type { PlaceLevel } from "@loc-to-city/reader";
+import type { PlaceLevel } from "@ferrybig/cgeodata-reader";
 
 /** Chroma per level: cities saturated, regions and countries muted. */
 const CHROMA: Record<PlaceLevel, number> = {

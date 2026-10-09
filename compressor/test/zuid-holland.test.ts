@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CGeoDataReader, type QueryResult } from "@loc-to-city/reader";
-import { readHeaderAndDirectory, parsePlaceTable, readNameEntry } from "@loc-to-city/reader/format";
-import { FileSource, nodeInflater, openFile } from "@loc-to-city/reader/node";
+import { CGeoDataReader, type QueryResult } from "@ferrybig/cgeodata-reader";
+import { readHeaderAndDirectory, parsePlaceTable, readNameEntry } from "@ferrybig/cgeodata-reader/format";
+import { FileSource, nodeInflater, openFile } from "@ferrybig/cgeodata-reader/node";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BIN_PATH = path.resolve(__dirname, "../../data/03-final/zuid-holland.bin");

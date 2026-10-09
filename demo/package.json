@@ -11,7 +11,7 @@
 		"dev": "node src/server.ts"
 	},
 	"dependencies": {
-		"@loc-to-city/reader": "*",
+		"@ferrybig/cgeodata-reader": "*",
 		"leaflet": "1.9.4",
 		"piscina": "^5.3.2",
 		"pngjs": "^7.0.0"

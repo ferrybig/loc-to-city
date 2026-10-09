@@ -1,4 +1,4 @@
-import { writeVarint } from "@loc-to-city/reader/format";
+import { writeVarint } from "@ferrybig/cgeodata-reader/format";
 
 export interface WriteFileOptions {
   attribution: string;

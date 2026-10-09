@@ -8,8 +8,8 @@ import type {
 	PlaceIds,
 	PlaceRef,
 	QueryResult,
-} from "@loc-to-city/reader";
-import { openFile } from "@loc-to-city/reader/node";
+} from "@ferrybig/cgeodata-reader";
+import { openFile } from "@ferrybig/cgeodata-reader/node";
 import { placeColor } from "../src/colors.ts";
 import {
 	defaultTileResolution,

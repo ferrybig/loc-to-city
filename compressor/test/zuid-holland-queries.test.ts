@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CGeoDataReader, boundingBoxContains } from "@loc-to-city/reader";
-import { openFile } from "@loc-to-city/reader/node";
+import { CGeoDataReader, boundingBoxContains } from "@ferrybig/cgeodata-reader";
+import { openFile } from "@ferrybig/cgeodata-reader/node";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BIN_PATH = path.resolve(__dirname, "../../data/03-final/zuid-holland.bin");

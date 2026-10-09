@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { FeatureCollection, Polygon } from "geojson";
-import { CGeoDataReader, streamInflater } from "@loc-to-city/reader";
-import { toSource, readHeaderAndDirectory, parsePlaceTable, resolveIdentifier, readNameEntry } from "@loc-to-city/reader/format";
+import { CGeoDataReader, streamInflater } from "@ferrybig/cgeodata-reader";
+import { toSource, readHeaderAndDirectory, parsePlaceTable, resolveIdentifier, readNameEntry } from "@ferrybig/cgeodata-reader/format";
 import { buildCGeoDataFile } from "../src/build.ts";
 import type { HierarchyCountry } from "../src/hierarchy.ts";
 import { assembleNameEntry, type CityProperties } from "../src/placeIds.ts";
