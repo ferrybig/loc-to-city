@@ -141,6 +141,7 @@ async function main(): Promise<void> {
 	app.get("/api/about", async (_req, res) => {
 		res.json({
 			attribution: info.attribution,
+			cellDegrees: info.cellDegrees,
 			docs: docs ? "/docs/" : null,
 			downloads: await Promise.all(
 				downloads.map(async (d) => ({

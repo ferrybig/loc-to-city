@@ -81,11 +81,25 @@ const indexStatus = [
 	),
 ];
 
-/** The dataset's attribution notice, and whether each sidecar index is in
- * use. Every worker opens the same files, so any one worker's answer
- * holds for all. */
-export function info(): { attribution: string; indexes: IndexStatus[] } {
-	return { attribution: reader.header.attribution, indexes: indexStatus };
+/** The dataset's attribution notice, the size of its finest cell in
+ * degrees, and whether each sidecar index is in use. Every worker opens the
+ * same files, so any one worker's answer holds for all. */
+export function info(): {
+	attribution: string;
+	cellDegrees: { lon: number; lat: number };
+	indexes: IndexStatus[];
+} {
+	const { attribution, widthExp, heightExp, maxDepth } = reader.header;
+	return {
+		attribution,
+		// Section 6.1: the grid spans 360 x 180 degrees, and each of the
+		// maxDepth quadtree splits halves a cell both ways.
+		cellDegrees: {
+			lon: 360 / 2 ** (widthExp + maxDepth),
+			lat: 180 / 2 ** (heightExp + maxDepth),
+		},
+		indexes: indexStatus,
+	};
 }
 
 /** Set on every request's task by the server, and flipped to true once

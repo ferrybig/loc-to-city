@@ -269,6 +269,7 @@
 					<code>.bin</code>
 					too.
 				</p>
+				<p class="hint" id="data-precision"></p>
 				<p class="hint" id="data-attribution"></p>
 			</details>
 		</section>
@@ -544,6 +545,19 @@
 			return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 		}
 
+		/** A length in metres as "305 m" or "2.4 km". */
+		function fmtLength(metres) {
+			if (metres < 1000) return `${Math.round(metres)} m`;
+			return `${(metres / 1000).toPrecision(2)} km`;
+		}
+
+		/** The finest cell's size at the equator, where a degree of
+		 * longitude is widest. */
+		function fmtPrecision({ lon, lat }) {
+			const METRES_PER_DEGREE = 111_195;
+			return `Precision of the data: cells of ${fmtLength(lon * METRES_PER_DEGREE)} \u00d7 ${fmtLength(lat * METRES_PER_DEGREE)} (east\u2013west \u00d7 north\u2013south) at the equator; the east\u2013west size shrinks towards the poles.`;
+		}
+
 		/** The file's attribution notice, whose `[text](url)` links become
 		 * real ones. */
 		function fmtAttribution(text) {
@@ -571,6 +585,9 @@
 		</li>`,
 				)
 				.join("");
+			document.getElementById("data-precision").textContent = fmtPrecision(
+				about.cellDegrees,
+			);
 			document.getElementById("data-attribution").innerHTML =
 				`Data: ${fmtAttribution(about.attribution)}`;
 			document.getElementById("about-panel").hidden = false;
