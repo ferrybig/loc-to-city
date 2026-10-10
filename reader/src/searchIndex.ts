@@ -3,13 +3,15 @@
  * that lets `CGeoDataReader.search()` confirm only the places whose names
  * could contain the query, instead of scanning every name block.
  *
- * The file is CGEODATA kind 1, version 2 (stored `version` varint 18). It
+ * The file is CGEODATA kind 1, version 3 (stored `version` varint 19). It
  * holds, for every place of its source:
  *   - one list of place ids per trigram of folded symbols (Section B.3):
  *     exact lists for Latin trigrams, hashed ones for the rest, each an
  *     id list or a bitmap, whichever is smaller (Section B.4);
  *   - a short-query table (Section B.6): the top places, in relevance
- *     order, for every 1-2 character query that has any match.
+ *     order, for every 1-2 character query that has any match -- in the
+ *     plain order of Section B.5 or the area order of Section B.5.1, as
+ *     its header's `relevance_rule` says.
  * Nothing is compressed, and the header records every section's length,
  * so a reader reads the header once and afterwards only the lists or the
  * table block a query needs, each cached behind a WeakRef.
@@ -17,13 +19,15 @@
 
 import { CGeoDataFormatError, CGeoDataVersionError } from "./errors.ts";
 import type { CGeoDataReader, PlaceLevel } from "./reader.ts";
-import type { Needle } from "./relevance.ts";
+import type { Needle, RankedMatch } from "./relevance.ts";
 import {
+	compareAreaRelevance,
+	compareRelevance,
 	foldDiacritics,
-	LEVEL_BONUS,
 	nameMatchQuality,
 	prepareNeedle,
 	QUALITY_MAX,
+	regionRankArea,
 } from "./relevance.ts";
 import { type ByteSource, type SourceInput, toSource } from "./source.ts";
 import { readVarint, writeVarint } from "./varint.ts";
@@ -112,14 +116,20 @@ const KIND_SEARCH_INDEX = 1;
 // silently rank or match differently under new code, with nothing in its
 // bytes to tell a reader it's stale (Section B.8's checksum only covers
 // the source place table, not the ranking rule an index was built with).
-const FORMAT_VERSION = 2;
-const STORED_VERSION = KIND_SEARCH_INDEX * 16 + FORMAT_VERSION; // 18
+// Version 3 records that rule in `relevance_rule`, since a table can now
+// be built in either of two orders.
+const FORMAT_VERSION = 3;
+const STORED_VERSION = KIND_SEARCH_INDEX * 16 + FORMAT_VERSION; // 19
+/** `relevance_rule` of a short-query table in Section B.5's plain order. */
+export const RELEVANCE_PLAIN = 0;
+/** `relevance_rule` of a short-query table in Section B.5.1's area order. */
+export const RELEVANCE_AREA = 1;
 const ENCODING_ID_LIST = 0;
 const ENCODING_BITMAP = 1;
 const MAX_EXP = 24;
-/** signature + version + checksum + place_count + 3 u8s + 3 lengths,
+/** signature + version + checksum + place_count + 4 u8s + 3 lengths,
  * with every varint at its 8-byte maximum. */
-const MAX_HEADER_LENGTH = 8 + 8 + 8 + 8 + 3 + 3 * 8;
+const MAX_HEADER_LENGTH = 8 + 8 + 8 + 8 + 4 + 3 * 8;
 
 /** Parameters of a search index (Appendix B.11); every one has a
  * recommended default (`DEFAULT_SEARCH_INDEX_OPTIONS`). */
@@ -130,6 +140,15 @@ export interface SearchIndexOptions {
 	topCount?: number;
 	/** 2^topBlockExp entries per short-query table block (0-24). */
 	topBlockExp?: number;
+	/**
+	 * Which order to build the short-query table in, as
+	 * `SearchOptions.areaTieBreak` would rank a search: `"auto"` by area
+	 * when the reader has a locate index (`CGeoDataReader.placeAreas()`),
+	 * `true` by area (rejecting without one), `false` plainly. A reader
+	 * only answers from the table when it ranks the same way, so build it
+	 * the way the index will be used: with `"auto"`, after the locate index.
+	 */
+	areaTieBreak?: "auto" | boolean;
 }
 
 /** Appendix B.11's recommended parameters. */
@@ -139,6 +158,7 @@ export const DEFAULT_SEARCH_INDEX_OPTIONS: Readonly<
 	hashExp: 15,
 	topCount: 5,
 	topBlockExp: 6,
+	areaTieBreak: "auto",
 };
 
 const utf8Encoder = new TextEncoder();
@@ -187,18 +207,17 @@ class ByteSink {
 
 // ── Builder ───────────────────────────────────────────────────────────────────
 
-interface Ranked {
-	score: number;
-	id: number;
-}
-
-/** Inserts into a top-`k` list kept in relevance order. Ids arrive in
- * ascending order, so a tie keeps the earlier, lower id ahead. */
-function pushTop(top: Ranked[], score: number, id: number, k: number): void {
-	if (top.length === k && score <= top[k - 1]!.score) return;
+/** Inserts into a top-`k` list kept in `compare`'s order. */
+function pushTop(
+	top: RankedMatch[],
+	match: RankedMatch,
+	k: number,
+	compare: (a: RankedMatch, b: RankedMatch) => number,
+): void {
+	if (top.length === k && compare(match, top[k - 1]!) >= 0) return;
 	let i = top.length;
-	while (i > 0 && top[i - 1]!.score < score) i--;
-	top.splice(i, 0, { score, id });
+	while (i > 0 && compare(match, top[i - 1]!) < 0) i--;
+	top.splice(i, 0, match);
 	if (top.length > k) top.pop();
 }
 
@@ -209,7 +228,7 @@ export async function buildSearchIndex(
 	reader: CGeoDataReader,
 	options: SearchIndexOptions = {},
 ): Promise<Uint8Array> {
-	const { hashExp, topCount, topBlockExp } = {
+	const { hashExp, topCount, topBlockExp, areaTieBreak } = {
 		...DEFAULT_SEARCH_INDEX_OPTIONS,
 		...options,
 	};
@@ -239,8 +258,21 @@ export async function buildSearchIndex(
 	const levelOf = (id: number): PlaceLevel =>
 		id < countries ? "country" : id < countries + regions ? "region" : "city";
 
+	const found = areaTieBreak === false ? undefined : await reader.placeAreas();
+	if (areaTieBreak === true && !found) {
+		throw new RangeError(
+			"areaTieBreak true ranks by the areas in a locate index, and the reader has none",
+		);
+	}
+	// Only the short-query table is ranked; without one, there's nothing to
+	// rank by area, and no reason to bind the index to the chunks.
+	const areas = topCount > 0 ? found : undefined;
+	const rule = areas ? RELEVANCE_AREA : RELEVANCE_PLAIN;
+	const compare = areas ? compareAreaRelevance : compareRelevance;
+	const rankAreas = areas ? await placeRankAreas(reader, areas) : undefined;
+
 	const postings = new Map<number, number[]>();
-	const table = new Map<string, Ranked[]>();
+	const table = new Map<string, RankedMatch[]>();
 	const keyNeedles = new Map<string, Needle>();
 	for (let id = 0; id < N; id++) {
 		const names = await reader.placeNames(id);
@@ -276,14 +308,20 @@ export async function buildSearchIndex(
 			if (list) list.push(id);
 			else postings.set(l, [id]);
 		}
-		const bonus = LEVEL_BONUS[levelOf(id)];
+		const level = levelOf(id);
+		const rankArea = rankAreas?.[id] ?? 0;
 		for (const [key, quality] of keyQuality) {
 			let top = table.get(key);
 			if (!top) {
 				top = [];
 				table.set(key, top);
 			}
-			pushTop(top, quality + bonus, id, topCount);
+			pushTop(
+				top,
+				{ id, level, quality, contextQuality: 0, rankArea },
+				topCount,
+				compare,
+			);
 		}
 	}
 
@@ -341,7 +379,11 @@ export async function buildSearchIndex(
 	const out = new ByteSink();
 	out.bytes(SIGNATURE);
 	out.varint(STORED_VERSION);
-	const checksum = await reader.placeTableChecksum();
+	// A table ranked by area depends on the chunks too (Section B.8).
+	const checksum =
+		rule === RELEVANCE_AREA
+			? await reader.prefixChecksum()
+			: await reader.placeTableChecksum();
 	const checksumBytes = new Uint8Array(8);
 	const dv = new DataView(checksumBytes.buffer);
 	dv.setUint32(0, Number(checksum & 0xffffffffn), true);
@@ -351,6 +393,7 @@ export async function buildSearchIndex(
 	out.byte(hashExp);
 	out.byte(topCount);
 	out.byte(topBlockExp);
+	out.byte(rule);
 	out.varint(presence.length + entries.length);
 	out.varint(lists.length);
 	out.varint(tableDirectory.length);
@@ -360,6 +403,27 @@ export async function buildSearchIndex(
 	out.bytes(tableDirectory.toBytes());
 	out.bytes(tableBlocks.toBytes());
 	return out.toBytes();
+}
+
+/** Every place's rank area (Section B.5.1), by id: its area byte, or for
+ * a region with a same-named city, that city's. */
+async function placeRankAreas(
+	reader: CGeoDataReader,
+	areas: Uint8Array,
+): Promise<Uint8Array> {
+	const rankAreas = areas.slice();
+	const { countries, regions } = reader.placeCounts;
+	for (let region = countries; region < countries + regions; region++) {
+		const [lo, hi] = reader.subtreeIdRanges(region)[1] ?? [0, 0];
+		const cities: Array<{ localName: string; area: number }> = [];
+		for (let city = lo; city < hi; city++) {
+			const names = await reader.placeNames(city);
+			cities.push({ localName: names[0] ?? "", area: areas[city]! });
+		}
+		const own = await reader.placeNames(region);
+		rankAreas[region] = regionRankArea(own[0] ?? "", areas[region]!, cities);
+	}
+	return rankAreas;
 }
 
 // ── Reader ────────────────────────────────────────────────────────────────────
@@ -403,8 +467,9 @@ export class SearchIndex {
 	private readonly source: ByteSource;
 	/** The index file's name, when its source has one (`ByteSource.name`). */
 	readonly name?: string;
-	/** Checksum of the place table it was built from (Section B.8); a
-	 * reader only accepts the index when it matches its own. */
+	/** Checksum of the source it was built from (Section B.8): of its
+	 * place table, or for `RELEVANCE_AREA`, of everything before its first
+	 * chunk. A reader only accepts the index when it matches its own. */
 	readonly sourceChecksum: bigint;
 	/** N, the number of places in the source; every one is indexed. */
 	readonly placeCount: number;
@@ -414,6 +479,9 @@ export class SearchIndex {
 	readonly topCount: number;
 	/** 2^topBlockExp short-query entries per table block (Section B.6). */
 	readonly topBlockExp: number;
+	/** The order its short-query table is in: `RELEVANCE_PLAIN` (Section
+	 * B.5) or `RELEVANCE_AREA` (Section B.5.1). */
+	readonly relevanceRule: number;
 	private readonly listDirectoryStart: number;
 	private readonly listDirectoryLength: number;
 	private readonly listsStart: number;
@@ -430,6 +498,7 @@ export class SearchIndex {
 		hashExp: number,
 		topCount: number,
 		topBlockExp: number,
+		relevanceRule: number,
 		listDirectoryStart: number,
 		listDirectoryLength: number,
 		listsStart: number,
@@ -446,6 +515,7 @@ export class SearchIndex {
 		this.hashExp = hashExp;
 		this.topCount = topCount;
 		this.topBlockExp = topBlockExp;
+		this.relevanceRule = relevanceRule;
 		this.listDirectoryStart = listDirectoryStart;
 		this.listDirectoryLength = listDirectoryLength;
 		this.listsStart = listsStart;
@@ -511,7 +581,9 @@ export class SearchIndex {
 					? "search index is the old bigram layout (kind 1, version 0); rebuild it with build-search-index"
 					: version === 1
 						? "search index predates diacritic folding (kind 1, version 1); rebuild it with build-search-index"
-						: `unsupported search index version ${version} (expected ${FORMAT_VERSION})`,
+						: version === 2
+							? "search index predates ranking by area (kind 1, version 2); rebuild it with build-search-index"
+							: `unsupported search index version ${version} (expected ${FORMAT_VERSION})`,
 				version,
 			);
 		}
@@ -528,6 +600,11 @@ export class SearchIndex {
 		const hashExp = u8("hash_exp");
 		const topCount = u8("top_count");
 		const topBlockExp = u8("top_block_exp");
+		const relevanceRule = u8("relevance_rule");
+		if (relevanceRule !== RELEVANCE_PLAIN && relevanceRule !== RELEVANCE_AREA)
+			throw new CGeoDataFormatError(
+				`unknown search index relevance_rule ${relevanceRule}`,
+			);
 		if (hashExp < 1 || hashExp > MAX_EXP)
 			throw new CGeoDataFormatError(
 				`hash_exp must be from 1 to ${MAX_EXP}, not ${hashExp}`,
@@ -568,6 +645,7 @@ export class SearchIndex {
 			hashExp,
 			topCount,
 			topBlockExp,
+			relevanceRule,
 			listDirectoryStart,
 			listDirectoryLength,
 			listsStart,

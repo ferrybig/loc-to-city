@@ -1,6 +1,7 @@
 /**
  * The search index of binary-format.md Appendix B.12: the Appendix A file
- * indexed with hash_exp 4, top_count 2, top_block_exp 4 (3201 bytes).
+ * indexed with hash_exp 4, top_count 2, top_block_exp 4, in the plain
+ * relevance order (3202 bytes).
  * Transcribed from the spec, section by section; the 2746-byte presence
  * bitmap is given as its non-zero bytes (B.12.2's "Bit" column).
  */
@@ -18,7 +19,7 @@ export const APPENDIX_B_OPTIONS = {
 } as const;
 
 const HEADER = hex(
-	"43 47 45 4f 44 41 54 41 12 9f e6 00 b9 37 18 dc 77 07 04 02 04 e9 15 2f 10",
+	"43 47 45 4f 44 41 54 41 13 9f e6 00 b9 37 18 dc 77 07 04 02 04 00 e9 15 2f 10",
 );
 
 const PRESENCE_LENGTH = 2746;

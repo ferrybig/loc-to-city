@@ -189,3 +189,164 @@ export function placeMatchQuality(
 	}
 	return best;
 }
+
+/** `quality` without `EXACT_SPELLING_BONUS`: the folded tier alone
+ * (`QUALITY_SUBSTRING`, `QUALITY_WHOLE_WORD` or `QUALITY_EXACT`), or 0. */
+export function qualityTier(quality: number): number {
+	return quality - (quality % QUALITY_SUBSTRING);
+}
+
+// ── Area order (Appendix B.5.1) ───────────────────────────────────────────────
+
+/**
+ * Appendix C.3's area byte for an area of `cells` full-precision cells:
+ * `0` for an empty area, otherwise the bit length of `cells^4`, at most
+ * 255 -- `1 + floor(4 × log2(cells))`, a quarter of a doubling per step,
+ * computed exactly. `cells` must be a non-negative integer.
+ */
+export function areaByte(cells: number): number {
+	if (cells <= 0) return 0;
+	const bits = (BigInt(cells) ** 4n).toString(2).length;
+	return Math.min(bits, 255);
+}
+
+/**
+ * The rank area of a region (Appendix B.5.1): its own area byte, unless
+ * one or more of its cities has the same local name (field 0) once folded
+ * (`foldDiacritics`) -- then the largest area byte among those cities, so
+ * the province of Utrecht ranks right after the city of Utrecht instead of
+ * ahead of it for being larger. A city-state with no same-named city of
+ * its own (Berlin, Vienna) keeps its own area. Countries and cities rank by
+ * their own area byte.
+ */
+export function regionRankArea(
+	regionLocalName: string,
+	regionArea: number,
+	cities: Iterable<{ localName: string; area: number }>,
+): number {
+	const folded = foldDiacritics(regionLocalName);
+	let best = -1;
+	for (const city of cities) {
+		if (city.area > best && foldDiacritics(city.localName) === folded)
+			best = city.area;
+	}
+	return best < 0 ? regionArea : best;
+}
+
+/** One search match, with everything the relevance orders compare. */
+export interface RankedMatch {
+	/** The place's id. */
+	id: number;
+	/** The place's level. */
+	level: PlaceLevel;
+	/** Its match quality (`placeMatchQuality`) -- for a qualified query
+	 * (Appendix B.13), the head's. */
+	quality: number;
+	/** The summed quality of a qualified query's contexts against the
+	 * ancestors they matched; 0 for a plain query. */
+	contextQuality: number;
+	/** Its rank area (Appendix B.5.1); only the area order reads it. */
+	rankArea: number;
+}
+
+/** Appendix B.5's relevance order, as a sort comparator: score
+ * (`quality + LEVEL_BONUS`) descending, then context quality descending,
+ * then id ascending. */
+export function compareRelevance(a: RankedMatch, b: RankedMatch): number {
+	return (
+		b.quality + LEVEL_BONUS[b.level] - (a.quality + LEVEL_BONUS[a.level]) ||
+		b.contextQuality - a.contextQuality ||
+		a.id - b.id
+	);
+}
+
+/**
+ * Appendix B.5.1's area order, as a sort comparator: folded tier, then
+ * context quality, then countries ahead of regions and cities, then rank
+ * area, then the exact spelling bonus, then city ahead of region, then id
+ * -- each only breaking ties left by the ones before it. Area comes before
+ * the spelling bonus so that typing "zurich" can't put a hamlet literally
+ * named Zurich ahead of the much larger Zürich.
+ */
+export function compareAreaRelevance(a: RankedMatch, b: RankedMatch): number {
+	return (
+		qualityTier(b.quality) - qualityTier(a.quality) ||
+		b.contextQuality - a.contextQuality ||
+		Number(b.level === "country") - Number(a.level === "country") ||
+		b.rankArea - a.rankArea ||
+		(b.quality % QUALITY_SUBSTRING) - (a.quality % QUALITY_SUBSTRING) ||
+		LEVEL_BONUS[b.level] - LEVEL_BONUS[a.level] ||
+		a.id - b.id
+	);
+}
+
+// ── Qualified queries (Appendix B.13) ─────────────────────────────────────────
+
+/** One reading of a search text: a head that a place's own names must
+ * match, and contexts its ancestors' names must match, nearest first. */
+export interface QueryInterpretation {
+	/** Matched against the place's own names, as a plain query would be. */
+	head: string;
+	/** Each matched against a different ancestor, each further up than
+	 * the one before (Appendix B.13). Empty for the whole text. */
+	contexts: string[];
+}
+
+/**
+ * The readings of a search text (Appendix B.13): the whole text as typed,
+ * with no contexts, and for every comma in it, the text before that comma
+ * as the head (trimmed) and each comma-separated part after it as a
+ * context (trimmed, empty ones dropped). "Paris, Texas" is both a place
+ * named "Paris, Texas" and a "Paris" under a "Texas"; a trailing comma
+ * ("Paris,") reads as "Paris" alone. Duplicate readings are dropped.
+ */
+export function parseQualifiedQuery(text: string): QueryInterpretation[] {
+	const readings: QueryInterpretation[] = [{ head: text, contexts: [] }];
+	const parts = text.split(",");
+	const seen = new Set<string>([JSON.stringify(readings[0])]);
+	for (let k = 1; k < parts.length; k++) {
+		const head = parts.slice(0, k).join(",").trim();
+		if (head.length === 0) continue;
+		const contexts = parts
+			.slice(k)
+			.map((part) => part.trim())
+			.filter((part) => part.length > 0);
+		const reading = { head, contexts };
+		const key = JSON.stringify(reading);
+		if (seen.has(key)) continue;
+		seen.add(key);
+		readings.push(reading);
+	}
+	return readings;
+}
+
+/**
+ * How well `contexts` match `ancestors` (nearest first, each a name list):
+ * the best total quality over every way of matching context `i` to an
+ * ancestor further up than context `i - 1`'s, or 0 when there is no such
+ * way -- including when there are more contexts than ancestors. Every
+ * context must match (Appendix B.13). `contexts` must be non-empty.
+ */
+export function contextQuality(
+	contexts: readonly Needle[],
+	ancestors: readonly (readonly string[])[],
+): number {
+	// best[j]: the best total for the contexts so far, the last one matched
+	// to ancestor j (-1: impossible). Few contexts and at most two
+	// ancestors, so this is tiny.
+	let best = ancestors.map((names) => placeMatchQuality(names, contexts[0]!));
+	best = best.map((q) => (q > 0 ? q : -1));
+	for (let i = 1; i < contexts.length; i++) {
+		const next = ancestors.map(() => -1);
+		let prefix = -1;
+		for (let j = 0; j < ancestors.length; j++) {
+			if (prefix >= 0) {
+				const q = placeMatchQuality(ancestors[j]!, contexts[i]!);
+				if (q > 0) next[j] = prefix + q;
+			}
+			prefix = Math.max(prefix, best[j]!);
+		}
+		best = next;
+	}
+	return Math.max(0, ...best);
+}

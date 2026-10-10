@@ -46,8 +46,9 @@ const { datasetPath } = workerData as WorkerData;
 const reader = await openFile(datasetPath);
 // Optional sidecars next to the dataset: data/03-final/world.bin pairs
 // with data/03-final/world.search-index.bin (`cgeodata build-search-index`)
-// and data/03-final/world.locate-index.bin (`cgeodata build-locate-index`). They only
-// speed up search() and locate(); results are the same without them.
+// and data/03-final/world.locate-index.bin (`cgeodata build-locate-index`). They
+// speed up search() and locate(); results are the same without them, except
+// that the locate index also ranks equal search matches by area.
 // Opened up front so a stale one is dropped instead of failing every
 // request.
 const indexStatus = [

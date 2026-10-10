@@ -6,6 +6,7 @@ import {
 	formatPlaceLine,
 	openReader,
 	parse,
+	parseAreaTieBreak,
 	parseLevel,
 	resolveCountry,
 	UsageError,
@@ -16,10 +17,13 @@ import {
 export const search: Command = {
 	name: "search",
 	summary: "find places whose name contains a text",
-	usage: `usage: cgeodata search <file.bin> <text> [--level country|region|city] [--country <id|name>] [--limit N] [--sort] [--locate] [--index <index.bin> | --no-index] [--json]
+	usage: `usage: cgeodata search <file.bin> <text> [--level country|region|city] [--country <id|name>] [--limit N] [--sort [--area-tie-break auto|on|off]] [--locate] [--index <index.bin> | --no-index] [--json]
 
 Prints every place (country, region or city) with a name containing
-<text>, case-insensitively, in the same tab-separated form as \`list\`.
+<text>, case- and diacritic-insensitively, in the same tab-separated
+form as \`list\`. A <text> with commas also reads as a place followed by
+places it lies in: "Paris, Texas" finds places named that and every
+Paris whose region or country matches "Texas".
 
 Exits 0 when something matched, 1 when nothing did, 2 on an error --
 grep's convention.
@@ -29,22 +33,27 @@ grep's convention.
   --limit N      stop after N matches
   --sort         rank matches by relevance instead of id order: an exact
                  name match beats a match on a whole word of the name,
-                 which beats a plain substring match; ties go to a city
-                 over a region over a country. Without --sort, --limit
+                 which beats a plain substring match; among equal
+                 matches, a country comes first. Without --sort, --limit
                  stops the scan as soon as it has enough matches; with
                  --sort, the whole file has to be scored first, since the
                  best match isn't necessarily the first one found.
+  --area-tie-break M
+                 with --sort, how to order equal matches after countries:
+                 on = larger places first (needs a locate index), off =
+                 city before region, then id order; auto (the default) =
+                 on when a locate index is next to <file>
   --locate       append a lat,lon coordinate to each result, as
                  \`locate\` prints it (one read per match with a locate
                  index next to <file>, a scan of every chunk per match
                  without one -- then use --limit to keep it fast)
-  --index F      use this bitmap search index (built with
-                 build-search-index) to skip most of the city table,
+  --index F      use this trigram search index (built with
+                 build-search-index) to skip most of the place table,
                  instead of <file>'s default <file>.search-index.bin
                  (used automatically when it exists). Queries too short
-                 to contain a bigram still scan every city.
-  --no-index     scan every city even if a search index exists -- the
-                 baseline an index is measured against
+                 to contain a trigram still compare every place.
+  --no-index     compare every place even if a search index exists --
+                 the baseline an index is measured against
   --json         one JSON object per match instead of the text form`,
 	async run(argv) {
 		const { values, positionals } = parse(argv, {
@@ -52,6 +61,7 @@ grep's convention.
 			country: { type: "string" },
 			limit: { type: "string" },
 			sort: { type: "boolean", default: false },
+			"area-tie-break": { type: "string" },
 			locate: { type: "boolean", default: false },
 			index: { type: "string" },
 			"no-index": { type: "boolean", default: false },
@@ -65,6 +75,7 @@ grep's convention.
 		if (values.index !== undefined && values["no-index"])
 			throw new UsageError("--index and --no-index can't be combined");
 		const level = parseLevel(values.level);
+		const areaTieBreak = parseAreaTieBreak(values["area-tie-break"]);
 		const limit = values.limit === undefined ? undefined : Number(values.limit);
 		if (limit !== undefined && !(Number.isInteger(limit) && limit >= 0)) {
 			throw new UsageError(
@@ -83,6 +94,7 @@ grep's convention.
 				...(country !== undefined ? { country } : {}),
 				...(limit !== undefined ? { limit } : {}),
 				sort: values.sort,
+				areaTieBreak,
 			};
 
 			if (values["no-index"]) await reader.useSearchIndex(undefined);
@@ -100,7 +112,9 @@ grep's convention.
 						const pos = await reader.locate(place.id);
 						writeLine(
 							JSON.stringify(
-								pos ? { ...place, lat: pos.lat, lon: pos.lon } : place,
+								pos
+									? { ...place, lat: pos.lat, lon: pos.lon, area: pos.area }
+									: place,
 							),
 						);
 					} else {

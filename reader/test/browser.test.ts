@@ -44,12 +44,18 @@ test("the main entry point works in a browser, and answers as on Node", {
 		{ stdio: "inherit" },
 	);
 
+	// The page searches with both indexes, and a locate index changes the
+	// order of a sorted search (areaTieBreak "auto"), so this reader has
+	// one too -- attached before building the search index, whose table is
+	// then ranked by area as well.
 	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
+	const locateIndex = await buildLocateIndex(reader);
+	await reader.useLocateIndex(locateIndex);
 	const files: Record<string, Uint8Array> = {
 		"/": new TextEncoder().encode("<!doctype html><title>reader</title>"),
 		"/fixture.bin": APPENDIX_A_BYTES,
+		"/fixture.locate-index.bin": locateIndex,
 		"/fixture.search-index.bin": await buildSearchIndex(reader),
-		"/fixture.locate-index.bin": await buildLocateIndex(reader),
 	};
 	const server = createServer((request, response) => {
 		const url = request.url ?? "/";

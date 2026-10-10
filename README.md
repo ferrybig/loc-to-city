@@ -891,8 +891,65 @@ section, since those are spec decisions rather than pipeline work.
   whose own finer subdivisions already tile its area under different
   names -- just one level down, and no config in the current primary/
   gap-fill model can reach it.
+- **Search ranks equal matches by area, which is size, not fame.** With
+  a locate index, `search({ sort: true })` breaks ties by area
+  (`reader/binary-format.md` Appendix B.5.1, see "Resolved" below), which
+  ranks the intended place first for paris, dublin, berlin, moscow,
+  hamburg, vienna, utrecht, groningen and luxembourg on
+  `data/03-final/world-e7-d10.bin`. Area can't fix:
+  - **portland**: Portland parish, Jamaica (area byte 15), beats
+    Portland, Oregon (14).
+  - **amst**: "Amsterdam - Vriesland", Guyana, beats Amsterdam, a
+    large polygon winning a substring tie.
+  - **Paris, France vs Paris, Maine**: 11.7 vs 11.6 in log2 cells, too
+    close to call.
+  - Cells count for more at high latitude (Appendix C.3).
+
+  Population (an OSM `population` tag, else a GeoNames cities500 point
+  whose name matches the polygon's) fixed portland and amst in a scratch
+  experiment. The name match is needed because "Central Coast"'s point
+  lands in a suburb called Springfield. It was rejected for now: it means
+  plumbing through data-ingest and the compressor and a `.bin` format
+  change, and it demotes places GeoNames misspells or lacks. Some misses
+  are name data, not ranking:
+  - **athens**: Athens, Greece is "Municipality of Athens" (local
+    "Δήμος Αθηναίων"), so it only reaches the whole-word tier.
+  - **london**: the UK has no "London" place, only its boroughs.
+  - **nederland**: the country is named "Netherlands" only, with no
+    local name (see the international/local name pairs entry above).
 
 ### Resolved
+
+- **Search ranked equal matches by id, and had no `<place>, <region>`
+  queries.** Immich's integration found "berlin" put Berlin, Germany at
+  rank 14 behind thirteen US Berlins. The locate index (now kind 2
+  version 1) stores an area byte per place: `1 + floor(4 × log2(cells))`
+  of its subtree's cells, computed exactly. With one attached, a sorted
+  search ranks by Appendix B.5.1's area order:
+  1. folded tier;
+  2. country first;
+  3. rank area;
+  4. spelling bonus;
+  5. city before region;
+  6. id.
+
+  A region's rank area is that of its largest city with the same local
+  name, so the province of Utrecht follows the city of Utrecht while
+  city-state regions (Berlin, Vienna) rank by their own size.
+  `areaTieBreak` (`"auto"`, `true`, `false`; CLI `--area-tie-break`)
+  chooses. `"auto"` deliberately makes a sidecar's presence change the
+  order (never the set) of results. The alternative, computing areas
+  from the chunks when no index is there, costs 5-10 s, and sidecars
+  are meant to be built wherever the `.bin` is used. The search index
+  (now kind 1 version 3) records in `relevance_rule` which order its
+  short-query table was built in. A reader only uses that table when it
+  ranks the same way, since a live scan of a 1-2 character query costs
+  ~0.6 s against ~0.12 s from the table. A table in area order is bound
+  to the chunks by Appendix C.4's prefix checksum. Queries with commas
+  (Appendix B.13) read both as a whole name ("Stormont, Dundas and
+  Glengarry Counties") and as a head plus ancestors, nearest first:
+  "Paris, Texas" and "Springfield, Illinois, United States" each give
+  exactly one result.
 
 - **Search had no diacritic folding, and ranked city above country even
   when the query was a country's own name.** Fixed in two parts, both in

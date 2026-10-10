@@ -173,6 +173,30 @@ the table is keyed and scored by each key's own already-folded spelling,
 which can't represent the bonus a differently-spelled live query would
 get -- see Appendix B.6).
 
+**With a locate index attached, `--sort` ranks by area instead**
+(Appendix B.5.1, `compareAreaRelevance`):
+1. folded tier;
+2. country first;
+3. "rank area", a region taking that of its largest same-named city;
+4. spelling bonus;
+5. city before region;
+6. id.
+
+This is `areaTieBreak: "auto"` (CLI `--area-tie-break auto|on|off`). It
+is the one deliberate exception to "index and scan agree": a locate
+index changes the *order* (never the set) of sorted results. Don't "fix"
+that with a chunk-scan fallback for the areas, which costs 5-10 s and was
+rejected (sidecars are built wherever the `.bin` is used). A search
+index records the order its short-query table was built in
+(`relevance_rule`). The reader only uses the table when it ranks the
+same way, so build the locate index *before* the search index, whose
+`"auto"` follows whether one is attached. A rule-1 index is checksummed
+over the whole prefix (header + directory + place table), not just the
+place table. A text with commas (`Paris, Texas`, Appendix B.13,
+`parseQualifiedQuery`) is matched as the whole text and as head plus
+ancestor contexts, nearest first. Each head uses the trigram index on
+its own, and comma queries never use the short-query table.
+
 `locate` (and `search --locate`) returns the centre of a place's
 representative cell (`reader/binary-format.md` Section C.3): the area-weighted
 per-axis median of the cells of the place *and everything under it*
@@ -181,7 +205,9 @@ that area if the median falls outside it -- so `query()` at the point
 always resolves to the place or a descendant. Computing it decodes every
 chunk (~1.6s on `data/03-final/world.bin`); a locate index (Appendix C,
 `build-locate-index <file.bin> --output data/<name>.locate-index.bin`,
-~11s, one fixed-width entry per place id) makes it one small read, and
+~11s, one fixed-width entry per place id plus one area byte each, Section
+C.3's `1 + floor(4 log2 cells)` of the subtree, which `locate()` returns as
+`area` in square degrees) makes it one small read, and
 is picked up next to the `.bin` and overridden (`useLocateIndex()`,
 `--index`/`--no-index`) exactly like the search index. Index and scan
 must agree -- `reader/test/locateIndex.test.ts` asserts that on every

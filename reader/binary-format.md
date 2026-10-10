@@ -913,13 +913,15 @@ The index has the following properties:
   reader confirms every candidate by comparing its names, exactly as it
   would without the index, and MUST produce the same results with and
   without it.
-- **It is a pure function of the place table.** Two writers given the
-  same place table and the same parameters MUST produce byte-identical
-  files. The file carries no timestamp and nothing else that depends on
+- **It is a pure function of its source.** Two writers given the
+  same source, the same parameters, and the same relevance rule
+  ([Section B.7](#b7-file-layout)) MUST produce byte-identical files.
+  The file carries no timestamp and nothing else that depends on
   the writer, and nothing in it is compressed, since deflate output is
   not guaranteed to be identical between zlib implementations. It is
-  bound to its source by a checksum over the source's place table
-  ([Section B.8](#b8-source-checksum)).
+  bound to its source by a checksum ([Section B.8](#b8-source-checksum)):
+  over the source's place table, or for a short-query table in area
+  order, over everything up to the first chunk.
 - **It is read in parts.** The header records the length of every
   section, so a reader reads only the header up front, and afterwards
   only what a query needs: the list directory and a few lists for a long
@@ -1060,8 +1062,10 @@ would be empty is not stored at all ([Section B.7](#b7-file-layout)).
 ### B.5. Relevance Order
 
 A reader that returns search results ordered by relevance, rather than
-by ID, SHOULD use this order, and the short-query table
-([Section B.6](#b6-short-query-table)) MUST be built with it.
+by ID, SHOULD use this order or the area order of
+[Section B.5.1](#b51-area-order), and the short-query table
+([Section B.6](#b6-short-query-table)) MUST be built with the one its
+`relevance_rule` names ([Section B.7](#b7-file-layout)).
 
 A place **matches** a query when the folded form
 ([Section B.2](#b2-symbol-folding)) of at least one field of its name
@@ -1099,8 +1103,10 @@ its folded tier plus this bonus, so quality is one of `0`, `10`, `11`,
 
 The quality of a place is the highest quality of its fields, and its
 **score** is its quality plus a level bonus: `3` for a country, `2` for
-a city, `1` for a region. Results are ordered by descending score, and
-places with equal scores by ascending ID.
+a city, `1` for a region. Results are ordered by descending score,
+places with equal scores by descending context quality
+([Section B.13](#b13-qualified-queries)), which is `0` for a query
+without contexts, and then by ascending ID.
 
 The level bonus only ever breaks a tie between two places of equal
 quality: its spread (`3 - 1 = 2`) is kept well under the gap between any
@@ -1134,6 +1140,58 @@ Only the ranking depends on Unicode character properties, never whether
 a place matches, so a reader and writer that disagree about a character's
 category can disagree about order but not about the set of results.
 
+#### B.5.1. Area Order
+
+Among places of equal score, the order above falls back to IDs, which
+carry no meaning: the query `berlin` would list a dozen towns in the
+United States before the city-state of Berlin. A reader that knows the
+area of every place -- the area bytes of
+[Section C.3](#c3-representative-cell), which a place location index
+stores -- MAY instead order results by area, so that among equally good
+matches a large place comes first. Whether to is the application's
+choice, and a reader SHOULD let it make it. A reader MUST NOT use this
+order without the areas, since a reader that has them and one that does
+not would then disagree.
+
+The **rank area** of a country or a city is its area byte. The rank
+area of a region is also its area byte, unless one or more of its cities
+has a local name (field `0`, [Section 7.4](#74-name-entries)) whose
+folded form ([Section B.2](#b2-symbol-folding)) equals that of the
+region's own local name: then it is the largest area byte among those
+cities. A province would otherwise come before its own capital of the
+same name (the province of Utrecht before the city of Utrecht) for no
+reason but its size, which Section B.5's level bonus exists to prevent;
+with this rule it comes right after it, while a city-state with no city
+of its own name (Berlin, Vienna) still ranks by its own area.
+
+In area order, places are compared on the following keys in turn, each
+one only deciding between places equal on all keys before it:
+
+1. the folded tier of their quality ([Section B.5](#b5-relevance-order),
+   quality without the exact spelling bonus), higher first;
+2. their context quality ([Section B.13](#b13-qualified-queries)),
+   higher first;
+3. countries before regions and cities;
+4. their rank area, higher first;
+5. the exact spelling bonus, present first;
+6. cities before regions;
+7. their ID, lower first.
+
+The exact spelling bonus comes after the area, unlike in Section B.5's
+score, or the query `zurich` would rank a village spelled `Zurich` ahead
+of `Zürich` whatever their sizes. Countries keep their precedence for
+the reason Section B.5 gives.
+
+For example, the query `dam` against the file of
+[Appendix A](#appendix-a-worked-example) matches `Amsterdam` and
+`Zaandam`, both with quality `11` and score `13`. Section B.5 orders them
+by ID, `Amsterdam` first. In area order `Zaandam`, with area byte `5`
+([Section C.8](#c8-worked-example)), comes first, and `Amsterdam`, which
+has no cells and so area byte `0`, second.
+
+Area order matches the same places as Section B.5 and only orders them
+differently.
+
 ### B.6. Short-Query Table
 
 A query of one or two characters has no trigram, and matches so many
@@ -1146,8 +1204,10 @@ The table's **keys** are every string of one or two consecutive code
 points that occurs in the folded form ([Section B.2](#b2-symbol-folding))
 of some field of some name entry. The table MUST contain every key and
 no other. The **entry** of a key is the list of the places that match
-it, in relevance order ([Section B.5](#b5-relevance-order), scoring the
-key itself as the query), truncated to its first `top_count` places. A
+it, in the relevance order the file's `relevance_rule` names
+([Section B.5](#b5-relevance-order) or
+[Section B.5.1](#b51-area-order), scoring the key itself as the query),
+truncated to its first `top_count` places. A
 key always has at least one match, so an entry is never empty; it has
 fewer than `top_count` places only when fewer places match. A query
 whose folded form is one or two code points long and is not a key
@@ -1198,12 +1258,13 @@ trailer.
 | Field                   | Type    | Description |
 |-------------------------|---------|-------------|
 | `signature`             | 8 bytes | The ASCII bytes `CGEODATA`, as in [Section 5](#5-header). |
-| `version`               | varint  | Kind and version as defined in Section 5. This appendix specifies kind `1`, version `2`, so the value is `18` (`12`). Version `1` built the short-query table from the unfolded lowercase form and a different level bonus ordering (city highest, not country); a version-1 file is not just an older layout but a different, incompatible relevance order, and nothing in its bytes records which rule built it, since `source_checksum` covers only the place table, not the relevance rule -- a reader MUST reject it rather than answer queries with it. |
+| `version`               | varint  | Kind and version as defined in Section 5. This appendix specifies kind `1`, version `3`, so the value is `19` (`13`). Version `2` had no `relevance_rule` field, its short-query table always in Section B.5's order; a reader MUST reject it. Version `1` built the short-query table from the unfolded lowercase form and a different level bonus ordering (city highest, not country); a version-1 file is not just an older layout but a different, incompatible relevance order, and nothing in its bytes records which rule built it, since `source_checksum` covers only the place table, not the relevance rule -- a reader MUST reject it rather than answer queries with it. |
 | `source_checksum`       | u64     | Checksum of the source file's place table ([Section B.8](#b8-source-checksum)). |
 | `place_count`           | varint  | `N`, the number of places in the source. |
 | `hash_exp`              | u8      | The number of hashed lists is `2^hash_exp` ([Section B.3](#b3-trigrams-and-lists)). MUST be from `1` to `24`. |
 | `top_count`             | u8      | The number of places per short-query entry ([Section B.6](#b6-short-query-table)). `0` means the file has no short-query table. |
 | `top_block_exp`         | u8      | Each table block holds `2^top_block_exp` entries. MUST be at most `24`. |
+| `relevance_rule`        | u8      | The order of the short-query table ([Section B.6](#b6-short-query-table)): `0` for [Section B.5](#b5-relevance-order)'s, `1` for the area order of [Section B.5.1](#b51-area-order). Other values are reserved. Also decides what `source_checksum` covers ([Section B.8](#b8-source-checksum)). |
 | `list_directory_length` | varint  | Byte length of `list_directory`. |
 | `lists_length`          | varint  | Byte length of `lists`. |
 | `table_directory_length`| varint  | Byte length of `table_directory`. |
@@ -1256,9 +1317,15 @@ table, which stays small (about 2 MiB for the worldwide file at the
 recommended `keyframe_exp` of [Section 7.3](#73-name-blocks)), rather
 than every chunk.
 
-Readers SHOULD compute the checksum of the source's place table when
-they load an index, and a reader that does so MUST reject an index
-whose `source_checksum` differs. A reader MAY skip the check where the
+A short-query table in area order (`relevance_rule = 1`) depends on the
+areas of [Section C.3](#c3-representative-cell) as well, which depend on
+the chunks. For such an index, `source_checksum` is instead the checksum
+of [Section C.4](#c4-file-layout): of the source file from its first
+byte up to the first chunk, which covers the chunk lengths.
+
+Readers SHOULD compute the checksum of the source's place table (or
+prefix) when they load an index, and a reader that does so MUST reject
+an index whose `source_checksum` differs. A reader MAY skip the check where the
 build pipeline guarantees the pairing, but it then has no protection
 against a stale index, which silently misses places whose names were
 added or changed after the index was built. The checksum detects
@@ -1278,10 +1345,12 @@ To search for a query text:
 
 1. **Short queries.** Let `q` be the folded form of the query
    ([Section B.2](#b2-symbol-folding)). If `q` is one or two code points
-   long, the search asks for results in relevance order with a limit of
-   at most `top_count` and no restriction by level or parent, `top_count`
-   is not `0`, and `q` already equals the plain lowercase form of the
-   query (i.e. the query has no diacritic of its own to fold --
+   long, the search asks for results in the relevance order that
+   `relevance_rule` names, with a limit of at most `top_count` and no
+   restriction by level or parent, `top_count` is not `0`, the query
+   has no comma ([Section B.13](#b13-qualified-queries)), and `q`
+   already equals the plain lowercase form of the query (i.e. the query
+   has no diacritic of its own to fold --
    [Section B.6](#b6-short-query-table) explains why this matters), then
    look `q` up in the short-query table: find the last block whose
    `first_key` is at most `q`, read that block, and scan it for `q`. The
@@ -1303,6 +1372,11 @@ To search for a query text:
    the reader would without the index, and report the confirmed ones.
    Candidates come out in increasing ID order, which is the order of a
    search without relevance ranking.
+
+A qualified query ([Section B.13](#b13-qualified-queries)) takes steps 2
+to 4 once for the head of each of its readings: the candidates of the
+query are the union of the candidates of its heads, and if any head has
+no trigram, every name is compared.
 
 The lists never lose a match, under the following condition. Say a
 reader matches a name against a query when the name's symbol sequence
@@ -1341,7 +1415,8 @@ source.
 
 - Readers MUST verify the signature, kind, and version before
   interpreting any other field, and MUST reject `hash_exp` outside `1`
-  to `24` and `top_block_exp` above `24`.
+  to `24`, `top_block_exp` above `24`, and a `relevance_rule` other than
+  `0` or `1`.
 - Readers MUST check that the header's section lengths add up to at
   most the file length, and that `list_directory_length` equals
   `ceil(L / 8)` plus the length of `entries`, where the number of
@@ -1432,8 +1507,9 @@ three.
 This example indexes the source file of
 [Appendix A](#appendix-a-worked-example) with `hash_exp = 4`,
 `top_count = 2`, and `top_block_exp = 4`: small parameters, so that
-the example is short but still has several table blocks. The seven
-places and their name fields are:
+the example is short but still has several table blocks. Its
+short-query table is in Section B.5's order (`relevance_rule = 0`). The
+seven places and their name fields are:
 
 | ID | Level   | Fields                        |
 |----|---------|-------------------------------|
@@ -1448,19 +1524,20 @@ places and their name fields are:
 `L = 21952 + 2^4 = 21968`, so `presence` is `2746` bytes. `N = 7`, so a
 bitmap is `1` byte, and any list of two or more places is stored as a
 bitmap, since its ID list would take two bytes or more. The file is
-`3201` bytes: a 25-byte header, a `2793`-byte list directory, `47` bytes
+`3202` bytes: a 26-byte header, a `2793`-byte list directory, `47` bytes
 of lists, a `16`-byte table directory, and `320` bytes of table blocks.
 
-#### B.12.1. Header (25 bytes)
+#### B.12.1. Header (26 bytes)
 
 ```
 43 47 45 4f 44 41 54 41   signature "CGEODATA"
-12                        version 18 -> kind 1 (text search index), version 2
+13                        version 19 -> kind 1 (text search index), version 3
 9f e6 00 b9 37 18 dc 77   source_checksum 0x77dc1837b900e69f
 07                        place_count 7
 04                        hash_exp 4 -> 16 hashed lists, L = 21968
 02                        top_count 2
 04                        top_block_exp 4 -> 16 entries per table block
+00                        relevance_rule 0 -> Section B.5's order
 e9 15                     list_directory_length 2793
 2f                        lists_length 47
 10                        table_directory_length 16
@@ -1661,6 +1738,14 @@ entry was `4 5`, `Amsterdam` and `Zaandam`, since a country was worth
 less than either city. A search for `a` in ID order, or with a limit
 above 2, instead compares every name.
 
+Built in area order instead (`relevance_rule = 1`, from the area bytes
+of [Section C.8](#c8-worked-example)), the entry of `a` is `0 2`: the
+country still comes first, then `Noord-Holland`, whose area byte `14`
+is larger than `Zaandam`'s `5`, while `Amsterdam` has none. That
+index's `source_checksum` is the one of Section C.8.1,
+`0x334bf7a76cac66ea`. A reader that ranks by Section B.5's order cannot
+use that table, and compares every name instead.
+
 **`ë`, sorted, limit 1.** Its folded form, `e`, differs from its plain
 lowercase form, `ë` itself, so step 1 does NOT apply here even though
 `e` is a key (Section B.6) -- comparing against the key `e`'s own
@@ -1682,13 +1767,62 @@ instead falls through to step 2: it folds to one symbol (one short of a
 trigram), so the lists cannot help either, and every name is compared
 directly, correctly placing `België` first.
 
+### B.13. Qualified Queries
+
+A search box is often typed into as `Paris, Texas`: a place, then a
+place it lies in. A reader MAY treat a query that contains a comma
+(`,`, U+002C) as a **qualified query**, which has several
+**readings**:
+
+- the whole query as given, with no contexts, so that a place whose own
+  name contains a comma, such as `Stormont, Dundas and Glengarry
+  Counties`, is still found by typing its name;
+- for each comma in the query, a reading whose **head** is the text
+  before that comma and whose **contexts** are the parts after it,
+  divided at the remaining commas. White space (Unicode `White_Space`)
+  is removed from both ends of the head and of every context, and
+  contexts that are then empty are dropped, so that `Paris,`, typed on
+  the way to `Paris, Texas`, reads as `Paris`. A reading whose head is
+  empty is dropped, as is one identical to an earlier reading.
+
+A place matches a reading when its name entry matches the head
+([Section B.5](#b5-relevance-order)) and every context matches the name
+entry of one of the place's ancestors
+([Section 7.1](#71-identifiers-and-hierarchy)), each context a further
+ancestor than the one before it, nearest first: for a city, the first
+context may match its region or its country, and a second only its
+country. A reading with more contexts than the place has ancestors does
+not match it. A place matches a qualified query when it matches any of
+its readings.
+
+For ranking, a place's quality is that of the head against its own name
+entry, and its **context quality** is the sum of the qualities of the
+contexts against the ancestors they match, under the assignment of
+contexts to ancestors that gives the highest sum. Among the readings a
+place matches, the one that ranks first in the order being used counts.
+
+Every head is matched as a query of its own, so the trigram lists never
+lose a match of a reading, and a reader uses them head by head
+([Section B.9](#b9-query-procedure)). The short-query table is not used
+for a query with a comma.
+
+For example, against the file of
+[Appendix A](#appendix-a-worked-example), `zaandam, noord` has the
+readings `zaandam, noord` (no contexts), which matches nothing, and
+`zaandam` with the context `noord`, which matches `Zaandam`, whose
+region `Noord-Holland` contains `noord`. `antwerp, antwerpen` matches
+the city `Antwerpen`, whose region is `Antwerpen`, but not the region
+`Antwerpen`, whose only ancestor is `België`. `zaandam, nederland,
+noord` matches nothing, since the contexts are nearest first.
+
 ## Appendix C. Place Location Index
 
 This appendix defines a **representative cell** for every place, a
 cell near the middle of the place's area whose centre serves as the
-place's coordinate, and specifies an OPTIONAL sidecar file that stores
-it. The file is derived entirely from one CGEODATA file and carries file
-kind `2` ([Section 5](#5-header)).
+place's coordinate, and an **area byte**, the size of that area on a
+logarithmic scale, and specifies an OPTIONAL sidecar file that stores
+both. The file is derived entirely from one CGEODATA file and carries
+file kind `2` ([Section 5](#5-header)).
 
 ### C.1. Purpose and Properties
 
@@ -1699,14 +1833,22 @@ derived from the chunks: [Section C.3](#c3-representative-cell) defines
 it. Deriving it for one place means decoding every chunk that might
 hold one of the place's cells, which at worldwide scale is every chunk,
 about 1.5 seconds. The index described here stores the result for every
-place, so that finding it costs one read of a few bytes.
+place, so that finding it costs one read of a few bytes. The area tells
+an application how far to zoom a map in on the place, and lets a search
+rank large places before small ones of the same name
+([Section B.5.1](#b51-area-order)); computing it is as costly as the
+cell.
 
 The index has the following properties:
 
 - **It is a cache, not a data source.** Every entry is the
-  representative cell of [Section C.3](#c3-representative-cell), which a
-  reader can compute from the source file alone. A reader MUST produce
-  the same result with and without the index.
+  representative cell, and every area byte the area byte, of
+  [Section C.3](#c3-representative-cell), which a reader can compute
+  from the source file alone. A reader MUST produce the same result with
+  and without the index. The one exception is search ranking: a reader
+  that ranks by area ([Section B.5.1](#b51-area-order)) only while an
+  index supplies the areas orders its search results differently
+  without one, though it finds the same places.
 - **It is a pure function of its source.** Two writers given the same
   source file MUST produce byte-identical files. The file carries no
   timestamp and no parameter chosen by the writer. It is bound to its
@@ -1832,6 +1974,23 @@ particular its centre, resolves to the place or to a place under it.
 The result depends only on the set of records in the area, not on the
 order in which they are visited.
 
+The **area byte** of a place is `0` when its area is empty. Otherwise it
+is the number of binary digits of `T^4`, where `T` is the total weight
+of step 2, but at most `255`:
+
+```
+area_byte = min(255, floor(log2(T^4)) + 1)
+```
+
+Each step is a quarter of a doubling: an area of `T` cells has area byte
+`v` when `2^((v - 1) / 4) <= T < 2^(v / 4)`, so a reader can recover the
+area to within about 9%. Implementations MUST compute it exactly, for
+example by counting the bits of `T^4` in integer arithmetic, since a
+floating-point logarithm can round the wrong way for an area just below
+a power of two. A `128 × 128` chunk grid with `max_depth = 10` has
+`2^34` full-precision cells, area byte `137`; the cap of `255` is only
+reached by an area of `2^63.5` cells or more.
+
 Every quantity above is an integer, and implementations MUST compute
 them exactly. The largest is a squared distance, which is less than
 `(a × W × 2^D)^2 + (b × H × 2^D)^2`; an implementation whose integers
@@ -1847,27 +2006,32 @@ median point falls outside the place, as it can for a crescent-shaped
 area or one made of several islands, step 3 moves it to the nearest
 cell that is inside. Two known imperfections follow from working on
 the grid: weights are areas in degrees, not on the ground, so cells at
-high latitude count for more than their true size; and the horizontal
+high latitude count for more than their true size, in the area byte as
+much as in the median; and the horizontal
 axis does not wrap, so the median of a place that straddles the 180th
 meridian lands on one side of it rather than in the middle.
 
 ### C.4. File Layout
 
-The file is one header followed by the entries, with no padding and no
-trailer.
+The file is one header followed by the entries and the area bytes,
+with no padding and no trailer.
 
 | Field             | Type                         | Description |
 |-------------------|------------------------------|-------------|
 | `signature`       | 8 bytes                      | The ASCII bytes `CGEODATA`, as in [Section 5](#5-header). |
-| `version`         | varint                       | Kind and version as defined in Section 5. This appendix specifies kind `2`, version `0`, so the value is `32` (`20`). |
+| `version`         | varint                       | Kind and version as defined in Section 5. This appendix specifies kind `2`, version `1`, so the value is `33` (`21`). Version `0` had no `areas`; readers MUST reject it. |
 | `source_checksum` | u64                          | Checksum of the start of the source file, defined below. |
 | `entry_width`     | u8                           | The width in bytes of every entry. MUST equal the value given in [Section C.2](#c2-entries) for the source's header. |
 | `place_count`     | varint                       | `N`, the number of places in the source ([Section 7.1](#71-identifiers-and-hierarchy)). |
 | `entries`         | `N × entry_width` bytes      | The entry of place `0`, then of place `1`, and so on, each an unsigned little-endian integer of `entry_width` bytes. |
+| `areas`           | `N` bytes                    | The area byte ([Section C.3](#c3-representative-cell)) of place `0`, then of place `1`, and so on. |
 
 The file length MUST be exactly the header length plus
-`N × entry_width`. The entry of place `id` starts at byte
-`header_length + id × entry_width`.
+`N × (entry_width + 1)`. The entry of place `id` starts at byte
+`header_length + id × entry_width`, and its area byte is at
+`header_length + N × entry_width + id`. The area bytes follow the
+entries rather than being part of them so that a reader ranking a
+search by area reads all of them in one read.
 
 `source_checksum` is the 64-bit FNV-1a hash
 ([Section B.8](#b8-source-checksum)) of the first bytes of the source
@@ -1905,9 +2069,18 @@ To find the representative coordinate of place `id` with an index:
    ([Section 6.1](#61-chunk-grid)) and its path within the chunk
    ([Section 8.1](#81-cell-grid-and-morton-codes)), as for any record.
    The place's coordinate is the centre of that extent.
+5. **Read the area**, if wanted: the byte at
+   `header_length + N × entry_width + id`.
 
-Without an index, a reader computes the same cell from the chunks by
-[Section C.3](#c3-representative-cell) and continues at step 4.
+Without an index, a reader computes the same cell and area byte from the
+chunks by [Section C.3](#c3-representative-cell) and continues at
+step 4.
+
+A place of area byte `v` covers about `2^((v - 0.5) / 4)` full-precision
+cells, each `360 / (W × 2^D)` degrees wide and `180 / (H × 2^D)` high.
+A square of the same area in degrees is a rough guide to how far to zoom
+a map in on the place: at zoom `z`, a Web Mercator map shows
+`360 / 2^z` degrees of longitude across one 256-pixel tile.
 
 The extent of the cell tells a reader how precisely to present the
 coordinate: a full-precision cell of a worldwide file with
@@ -1925,7 +2098,10 @@ source.
 - Readers MUST check that `entry_width` equals the value
   [Section C.2](#c2-entries) gives for the source, that `place_count`
   equals `N`, and that the file length is exactly the header length
-  plus `N × entry_width`, before reading any entry.
+  plus `N × (entry_width + 1)`, before reading any entry.
+- Every byte is a valid area byte, so there is nothing to check. A
+  wrong one only misorders search results ranked by area or misjudges a
+  zoom level.
 - Readers MUST reject an entry whose marker is not at a valid position
   ([Section C.2](#c2-entries), step 2). The decoding cannot produce a
   chunk index outside the grid, so no further bounds check is needed
@@ -1942,7 +2118,8 @@ This section is informative.
 
 **Measurements.** On a worldwide file of 319,440 places with a
 `64 × 64` chunk grid and `max_depth = 8` (9.5 MiB), entries are 4 bytes
-and the index is 1.2 MiB. Building it decodes the chunks two or three
+and the index (of version `0`, without area bytes) is 1.2 MiB; the area
+bytes add one byte per place, 0.3 MiB. Building it decodes the chunks two or three
 times, since places are processed a batch of countries at a time to
 bound memory, and takes about 11 seconds. Without the index, one representative cell
 costs about 1.6 seconds, nearly all of it spent decoding chunks. With
@@ -1950,7 +2127,10 @@ it, a lookup takes well under a millisecond, even with the file evicted
 from the operating system's cache, and a reader that is idle between
 lookups holds nothing but an open file. An older worldwide build at
 `max_depth = 11` (67 MiB, 255,555 places) needs 5-byte entries, for an
-index of 1.2 MiB built in 2.5 minutes.
+index of 1.2 MiB built in 2.5 minutes. A `128 × 128` grid with
+`max_depth = 10` (71 MiB, 259,598 places) also needs 5-byte entries;
+with its area bytes the index is 1.5 MiB, built in about 90 seconds,
+of which totalling the areas takes a few.
 
 **Alternatives measured.** Storing only the chunk of each place's cell
 (2 bytes per place for a `64 × 64` grid) and decoding that chunk at
@@ -1982,15 +2162,16 @@ This example indexes the source file of
 `D = 2`, so entries have at most `2 + 4 + 1 = 7` bits and
 `entry_width = 1`. The file is `19 + 7 = 26` bytes.
 
-#### C.8.1. File (26 bytes)
+#### C.8.1. File (33 bytes)
 
 ```
 43 47 45 4f 44 41 54 41   signature "CGEODATA"
-20                        version 32 -> kind 2 (place location index), version 0
+21                        version 33 -> kind 2 (place location index), version 1
 ea 66 ac 6c a7 f7 4b 33   source_checksum 0x334bf7a76cac66ea
 01                        entry_width 1
 07                        place_count 7
 73 00 73 00 00 74 00      entries of places 0 to 6
+0e 00 0e 00 00 05 00      areas of places 0 to 6
 ```
 
 The checksum is the FNV-1a 64 hash of the first 131 bytes of the
@@ -2058,6 +2239,20 @@ stored code is `52 mod 16 = 4`. An entry of `75` (`117`) would decode
 the same way to code `5`, a cell with no place: a well-formed entry is
 not necessarily a correct one, which is what the checksum is for. An
 entry of `20` (`32`) would be rejected, since `t - B = 3` is odd.
+
+#### C.8.6. Area Bytes
+
+Zaandam's area has `T = 2` (C.8.3). `T^4 = 16`, `10000` in binary, has
+five digits, so its area byte is `05`: `2^(4/4) <= 2 < 2^(5/4)`.
+Noord-Holland's and Nederland's have `T = 10` (C.8.4). `T^4 = 10000` lies
+between `2^13 = 8192` and `2^14 = 16384`, so it has fourteen binary
+digits and their area byte is `0e`. The four places without records
+have area byte `00`.
+
+A full-precision cell of this file is `45°` wide and `22.5°` high,
+`1012.5` square degrees. Area byte `05` stands for about
+`2^(4.5 / 4) × 1012.5 ≈ 2209` square degrees, against Zaandam's true
+`2025`.
 
 ## Appendix D. References
 

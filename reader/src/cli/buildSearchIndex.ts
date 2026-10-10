@@ -9,7 +9,9 @@ import {
 	EXIT_OK,
 	openReader,
 	parse,
+	parseAreaTieBreak,
 	UsageError,
+	useIndexFile,
 } from "./shared.ts";
 
 const { hashExp, topCount, topBlockExp } = DEFAULT_SEARCH_INDEX_OPTIONS;
@@ -17,7 +19,7 @@ const { hashExp, topCount, topBlockExp } = DEFAULT_SEARCH_INDEX_OPTIONS;
 export const buildSearchIndexCmd: Command = {
 	name: "build-search-index",
 	summary: "build a trigram search index for a .bin file",
-	usage: `usage: cgeodata build-search-index <file.bin> [--output <index.bin>] [--hash-exp N] [--top-count N] [--top-block-exp N]
+	usage: `usage: cgeodata build-search-index <file.bin> [--output <index.bin>] [--hash-exp N] [--top-count N] [--top-block-exp N] [--area-tie-break auto|on|off] [--locate-index <index.bin>]
 
 Builds a trigram search index (binary-format.md Appendix B) over every
 place in <file.bin> and writes it to <index.bin> (or stdout when
@@ -29,17 +31,29 @@ places whose names contain all of their trigrams, and sorted searches of
 1-2 characters with --limit up to the top count are answered from a
 precomputed table.
 
+That table is ranked like \`search --sort --area-tie-break\`, and only
+answers searches ranked the same way: by area when a locate index is
+next to <file.bin> (build it first, with build-locate-index), otherwise
+plainly.
+
   --output F          write to F instead of stdout
   --hash-exp N        2^N shared lists for non-Latin trigrams (default ${hashExp})
   --top-count N       places per 1-2 character query; 0 leaves the
                       table out (default ${topCount})
-  --top-block-exp N   2^N table entries per block (default ${topBlockExp})`,
+  --top-block-exp N   2^N table entries per block (default ${topBlockExp})
+  --area-tie-break M  rank the table by area (on; needs a locate index),
+                      plainly (off), or by area if there is a locate
+                      index (auto, the default)
+  --locate-index F    take areas from this locate index instead of
+                      <file>'s default <file>.locate-index.bin`,
 	async run(argv) {
 		const { values, positionals } = parse(argv, {
 			output: { type: "string" },
 			"hash-exp": { type: "string" },
 			"top-count": { type: "string" },
 			"top-block-exp": { type: "string" },
+			"area-tie-break": { type: "string" },
+			"locate-index": { type: "string" },
 		});
 		const [file, ...extra] = positionals;
 		if (extra.length > 0)
@@ -60,15 +74,23 @@ precomputed table.
 			}
 			options[key] = value;
 		}
+		options.areaTieBreak = parseAreaTieBreak(values["area-tie-break"]);
 
 		const reader = await openReader(file);
 		const { countries, regions, cities } = reader.placeCounts;
-		process.stderr.write(
-			`building search index over ${countries + regions + cities} places...\n`,
-		);
 		const t0 = performance.now();
 		let bytes: Uint8Array;
 		try {
+			if (values["locate-index"] !== undefined)
+				await useIndexFile(
+					(index) => reader.useLocateIndex(index),
+					values["locate-index"],
+				);
+			const byArea =
+				options.areaTieBreak !== false && (await reader.hasLocateIndex());
+			process.stderr.write(
+				`building search index over ${countries + regions + cities} places, ranked ${byArea ? "by area" : "plainly"}...\n`,
+			);
 			bytes = await buildSearchIndex(reader, options);
 		} catch (error) {
 			throw error instanceof RangeError ? new UsageError(error.message) : error;

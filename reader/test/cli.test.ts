@@ -361,17 +361,52 @@ test("build-locate-index: writes the Appendix C.8 file, which locate picks up ne
 	assert.equal(
 		readFileSync(indexPath).toString("hex"),
 		"4347454f44415441" +
-			"20" +
+			"21" +
 			"ea66ac6ca7f74b33" +
 			"01" +
 			"07" +
-			"73007300007400",
+			"73007300007400" +
+			"0e000e00000500",
 	);
 	assert.equal(run(["locate", binPath, "5", "0"]).stdout, "11, 113\n34, 68\n");
 	assert.match(
 		run(["search", binPath, "zaandam", "--locate"]).stdout,
 		/\tZaandam\t.*\t11,113\n$/,
 	);
+	const [zaandam] = jsonLines(run(["locate", binPath, "5", "--json"]).stdout);
+	assert.equal(zaandam!.id, 5);
+	assert.equal(zaandam!.lat, 11.25);
+	assert.equal(zaandam!.area, 2 ** (4.5 / 4) * 45 * 22.5); // area byte 5
+	const none = run(["locate", binPath, "1", "--json"]);
+	assert.equal(none.stdout, "null\n");
+	assert.equal(none.status, 1);
+
+	// With the locate index next to the file, --sort ranks equal matches
+	// by area: Zaandam (area byte 5) before Amsterdam (none).
+	const sortedIds = (...extra: string[]) =>
+		run(["search", binPath, "dam", "--sort", ...extra])
+			.stdout.trimEnd()
+			.split("\n")
+			.map((line) => line.split("\t")[0]);
+	assert.deepEqual(sortedIds(), ["5", "4"]);
+	assert.deepEqual(sortedIds("--area-tie-break", "on"), ["5", "4"]);
+	assert.deepEqual(sortedIds("--area-tie-break", "off"), ["4", "5"]);
+
+	// build-search-index ranks its table by area when that index is there.
+	const searchIndexPath = path.join(dir, "fixture.search-index.bin");
+	const built = run([
+		"build-search-index",
+		binPath,
+		"--output",
+		searchIndexPath,
+	]);
+	assert.equal(built.status, 0);
+	assert.match(built.stderr, /ranked by area/);
+	assert.match(
+		run(["build-search-index", binPath, "--area-tie-break", "off"]).stderr,
+		/ranked plainly/,
+	);
+	assert.deepEqual(sortedIds("--limit", "1"), ["5"]);
 
 	// A stale index is an error rather than a silent fallback; --no-index or
 	// an explicit --index gets past it.
@@ -394,6 +429,38 @@ test("build-locate-index: writes the Appendix C.8 file, which locate picks up ne
 		run(["locate", binPath, "5", "--index", good]).stdout,
 		"11, 113\n",
 	);
+});
+
+test("search and build-search-index: --area-tie-break on needs a locate index", () => {
+	const dir = mkdtempSync(path.join(tmpdir(), "cgeodata-cli-area-"));
+	const binPath = path.join(dir, "fixture.bin");
+	writeFileSync(binPath, APPENDIX_A_BYTES);
+	const search = run([
+		"search",
+		binPath,
+		"dam",
+		"--sort",
+		"--area-tie-break",
+		"on",
+	]);
+	assert.equal(search.status, 2);
+	assert.match(search.stderr, /locate index/);
+	const build = run(["build-search-index", binPath, "--area-tie-break", "on"]);
+	assert.equal(build.status, 2);
+	assert.match(build.stderr, /locate index/);
+	const bad = run(["search", binPath, "dam", "--area-tie-break", "maybe"]);
+	assert.equal(bad.status, 2);
+	assert.match(bad.stderr, /auto, on or off/);
+});
+
+test("search: a comma reads as a place and the places it lies in", () => {
+	const lines = (text: string) =>
+		run(["search", fixturePath, text]).stdout.trimEnd().split("\n");
+	assert.deepEqual(
+		lines("zaandam, nederland").map((line) => line.split("\t")[0]),
+		["5"],
+	);
+	assert.equal(run(["search", fixturePath, "zaandam, belgium"]).status, 1);
 });
 
 // --- show / chunk / info ----------------------------------------------------

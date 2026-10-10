@@ -94,6 +94,16 @@ export function parseLevel(text: string | undefined): PlaceLevel | undefined {
 	);
 }
 
+/** `--area-tie-break auto|on|off`, as `SearchOptions.areaTieBreak`. */
+export function parseAreaTieBreak(text: string | undefined): "auto" | boolean {
+	if (text === undefined || text === "auto") return "auto";
+	if (text === "on") return true;
+	if (text === "off") return false;
+	throw new UsageError(
+		`--area-tie-break must be auto, on or off, not ${JSON.stringify(text)}`,
+	);
+}
+
 export function parseId(text: string, what: string): number {
 	const id = Number(text);
 	if (!/^\d+$/.test(text) || !Number.isSafeInteger(id))

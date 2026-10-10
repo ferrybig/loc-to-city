@@ -7,7 +7,11 @@ import {
 import { type ChunkRecords, parseChunk } from "./chunk.ts";
 import { readHeaderAndDirectory } from "./container.ts";
 import type { CGeoDataDirectory } from "./directory.ts";
-import { CGeoDataFormatError, CGeoDataIndexMismatchError } from "./errors.ts";
+import {
+	CGeoDataError,
+	CGeoDataFormatError,
+	CGeoDataIndexMismatchError,
+} from "./errors.ts";
 import type { CGeoDataHeader } from "./header.ts";
 import { type Inflater, inflateBlock, streamInflater } from "./inflate.ts";
 import {
@@ -15,6 +19,7 @@ import {
 	decodeLocateEntry,
 	LocateIndex,
 	locateEntryWidth,
+	type PlaceLocation,
 } from "./locateIndex.ts";
 import { mortonDecode, mortonEncode, shiftRight } from "./morton.ts";
 import {
@@ -25,12 +30,18 @@ import {
 	resolveIdentifier,
 } from "./placeTable.ts";
 import {
+	compareAreaRelevance,
+	compareRelevance,
+	contextQuality,
 	foldDiacritics,
-	LEVEL_BONUS,
+	type Needle,
+	parseQualifiedQuery,
 	placeMatchQuality,
 	prepareNeedle,
+	type RankedMatch,
+	regionRankArea,
 } from "./relevance.ts";
-import { SearchIndex } from "./searchIndex.ts";
+import { RELEVANCE_AREA, RELEVANCE_PLAIN, SearchIndex } from "./searchIndex.ts";
 import { type ByteSource, type SourceInput, toSource } from "./source.ts";
 import { TurnQueue } from "./turns.ts";
 
@@ -165,6 +176,21 @@ export interface SearchOptions extends PlaceFilter {
 	 * the first one found.
 	 */
 	sort?: boolean;
+	/**
+	 * With `sort`, whether to break ties by area (Appendix B.5.1): among
+	 * equally good matches, larger places first, so "berlin" puts Berlin,
+	 * Germany ahead of the many small Berlins in the United States, while a
+	 * province still follows its own same-named city. Areas come from a
+	 * locate index (`useLocateIndex()`):
+	 *
+	 * - `"auto"` (the default): by area when a locate index is attached,
+	 *   otherwise by Appendix B.5's plain order. Unlike everything else an
+	 *   index does, attaching one therefore changes the order of results
+	 *   (never which places match).
+	 * - `true`: by area; rejects without a locate index.
+	 * - `false`: Appendix B.5's plain order, index or not.
+	 */
+	areaTieBreak?: "auto" | boolean;
 }
 
 /** One record of a chunk (Section 8.2) with its cell and place resolved. */
@@ -198,6 +224,14 @@ export interface Location {
 	lon: number;
 	/** The place's representative cell (Section C.3). */
 	boundingBox: BoundingBox;
+	/**
+	 * Roughly how large the place is, everything under it included, in
+	 * square degrees -- from its area byte (Section C.3), so within about
+	 * 9% either way. Useful for zooming a map to it: a square of this area
+	 * is `sqrt(area)` degrees on a side, which a Web Mercator map shows
+	 * across one 256-pixel tile at zoom `log2(360 / sqrt(area))`.
+	 */
+	area: number;
 }
 
 /**
@@ -296,6 +330,9 @@ export class CGeoDataReader {
 	private gy = 0;
 	private readonly search_: IndexSlot<SearchIndex>;
 	private readonly locate_: IndexSlot<LocateIndex>;
+	/** Rank areas of the regions searches have matched so far (Appendix
+	 * B.5.1), -1 where not yet known, for the area bytes they came from. */
+	private rankAreas: { areas: Uint8Array; regions: Int16Array } | undefined;
 	private placeTableChecksumPromise: Promise<bigint> | undefined;
 	private prefixChecksumPromise: Promise<bigint> | undefined;
 
@@ -580,7 +617,12 @@ export class CGeoDataReader {
 	}
 
 	private async checkSearchIndex(index: SearchIndex): Promise<void> {
-		if (index.sourceChecksum !== (await this.placeTableChecksum())) {
+		// An index ranked by area depends on the chunks too (Section B.8).
+		const checksum =
+			index.relevanceRule === RELEVANCE_AREA
+				? await this.prefixChecksum()
+				: await this.placeTableChecksum();
+		if (index.sourceChecksum !== checksum) {
 			throw new CGeoDataIndexMismatchError(
 				"search index was built from a different .bin file (checksum mismatch); rebuild it with build-search-index",
 			);
@@ -596,7 +638,8 @@ export class CGeoDataReader {
 	 * Attaches a locate index (Appendix C, built by `buildLocateIndex` /
 	 * `cgeodata build-locate-index`) so `locate()` reads one entry instead
 	 * of scanning every chunk. Results are identical with or without it --
-	 * only the speed differs.
+	 * only the speed differs -- except that its areas also let a sorted
+	 * `search()` rank equal matches by size (`SearchOptions.areaTieBreak`).
 	 *
 	 * Takes the index's file (as for `open()`; read on demand) or an open
 	 * `LocateIndex` (which the caller keeps ownership of), or undefined to
@@ -794,6 +837,12 @@ export class CGeoDataReader {
 	 * the name blocks; with one (`useSearchIndex()`), only the places the
 	 * index can't rule out are compared. Same results either way.
 	 *
+	 * A text with commas also reads as a place and the places it lies in
+	 * (Appendix B.13): "Paris, Texas" finds a place named "Paris, Texas"
+	 * and every "Paris" whose region or country matches "Texas";
+	 * "Springfield, Illinois, United States" narrows by both. Each part
+	 * after a comma has to match a different ancestor, nearest first.
+	 *
 	 * @example
 	 * ```ts
 	 * for await (const place of reader.search("munchen", { sort: true, limit: 20 }))
@@ -811,19 +860,15 @@ export class CGeoDataReader {
 			yield* this.searchRanked(text, options);
 			return;
 		}
-		const needle = foldDiacritics(text);
 		let remaining = options.limit ?? Infinity;
 		if (remaining <= 0) return;
-		const index = await this.activeSearchIndex();
-		const candidates = await index?.candidates(text);
+		const query = await this.prepareQuery(text, await this.activeSearchIndex());
 		for (const level of LEVELS) {
 			if (options.level !== undefined && options.level !== level) continue;
-			for (const id of this.searchScope(level, options, candidates)) {
+			for (const id of this.searchScope(level, options, query.candidates)) {
 				// Match on the bare names first; resolving parents is only worth
 				// doing for the few that hit.
-				const names = this.loadedNames(id) ?? (await this.loadNames(id));
-				if (!names.some((name) => foldDiacritics(name).includes(needle)))
-					continue;
+				if (!(await this.matchQuery(id, level, query))) continue;
 				yield this.loadedPlace(id) ?? (await this.place(id));
 				if (--remaining <= 0) return;
 			}
@@ -831,13 +876,15 @@ export class CGeoDataReader {
 	}
 
 	/** The `sort: true` path of `search()`: scores every match in relevance
-	 * order (Appendix B.5, `relevance.ts`), then yields highest-scored
-	 * first, ties broken by id. `limit` is applied after sorting, not
+	 * order (Appendix B.5, or B.5.1 when ranking by area; `relevance.ts`),
+	 * then yields the best first. `limit` is applied after sorting, not
 	 * during the scan -- the top match can turn up anywhere in id order. */
 	private async *searchRanked(
 		text: string,
 		options: SearchOptions,
 	): AsyncIterableIterator<Place> {
+		const areas = await this.searchAreas(options.areaTieBreak ?? "auto");
+		const compare = areas ? compareAreaRelevance : compareRelevance;
 		const needle = foldDiacritics(text);
 		const index = await this.activeSearchIndex();
 		// The table is keyed, and was scored, by each key's own folded form
@@ -850,13 +897,17 @@ export class CGeoDataReader {
 		// (an accented query can give a different field its spelling bonus
 		// than the plain key would). Falling back to the live scan for such
 		// a query is the only way to keep index and no-index results equal.
+		// So is one ranked by a different order than the table was built
+		// with, and one with a comma, which the table knows nothing about.
 		const shortQuery =
 			index !== undefined &&
+			index.relevanceRule === (areas ? RELEVANCE_AREA : RELEVANCE_PLAIN) &&
 			options.limit !== undefined &&
 			options.limit <= index.topCount &&
 			options.level === undefined &&
 			options.country === undefined &&
 			options.region === undefined &&
+			!text.includes(",") &&
 			needle === text.toLowerCase()
 				? await index.shortQuery(text)
 				: undefined;
@@ -876,25 +927,164 @@ export class CGeoDataReader {
 			return;
 		}
 
-		const parsedNeedle = prepareNeedle(text);
-		const candidates = await index?.candidates(text);
-		const scored: Array<{ id: number; score: number }> = [];
+		const query = await this.prepareQuery(text, index);
+		const scored: RankedMatch[] = [];
 		for (const level of LEVELS) {
 			if (options.level !== undefined && options.level !== level) continue;
-			for (const id of this.searchScope(level, options, candidates)) {
-				const names = this.loadedNames(id) ?? (await this.loadNames(id));
-				const quality = placeMatchQuality(names, parsedNeedle);
-				if (quality === 0) continue;
-				scored.push({ id, score: quality + LEVEL_BONUS[level] });
+			for (const id of this.searchScope(level, options, query.candidates)) {
+				const match = await this.matchQuery(id, level, query, compare);
+				if (match) scored.push(match);
 			}
 		}
-		scored.sort((a, b) => b.score - a.score || a.id - b.id);
+		if (areas) {
+			for (const match of scored)
+				match.rankArea = await this.rankArea(match.id, match.level, areas);
+		}
+		scored.sort(compare);
 
 		let remaining = options.limit ?? Infinity;
 		for (const { id } of scored) {
 			if (remaining-- <= 0) return;
 			yield this.loadedPlace(id) ?? (await this.place(id));
 		}
+	}
+
+	/** `text`'s readings (Appendix B.13) as needles, and the places a search
+	 * index says could match any of them (ascending), or undefined when
+	 * there's no index or it can't narrow one of the readings down. */
+	private async prepareQuery(
+		text: string,
+		index: SearchIndex | undefined,
+	): Promise<PreparedQuery> {
+		const parsed = parseQualifiedQuery(text);
+		const readings = parsed.map(({ head, contexts }) => ({
+			head: prepareNeedle(head),
+			contexts: contexts.map(prepareNeedle),
+		}));
+		if (!index) return { readings, candidates: undefined };
+		let candidates: number[] = [];
+		for (const { head } of parsed) {
+			const found = await index.candidates(head);
+			if (!found) return { readings, candidates: undefined };
+			candidates =
+				candidates.length === 0 ? found : unionSorted(candidates, found);
+		}
+		return { readings, candidates };
+	}
+
+	/** Whether place `id` matches any reading of `query`. With `compare`,
+	 * instead the best-ranked way it does (by that order), or undefined;
+	 * `rankArea` is left at 0 for the caller to fill in. */
+	private async matchQuery(
+		id: number,
+		level: PlaceLevel,
+		query: PreparedQuery,
+		compare?: (a: RankedMatch, b: RankedMatch) => number,
+	): Promise<RankedMatch | undefined> {
+		const names = this.loadedNames(id) ?? (await this.loadNames(id));
+		let best: RankedMatch | undefined;
+		let ancestors: string[][] | undefined;
+		for (const { head, contexts } of query.readings) {
+			let quality: number;
+			if (compare) {
+				quality = placeMatchQuality(names, head);
+				if (quality === 0) continue;
+			} else {
+				if (!names.some((name) => foldDiacritics(name).includes(head.folded)))
+					continue;
+				quality = 0;
+			}
+			let context = 0;
+			if (contexts.length > 0) {
+				ancestors ??= await this.ancestorNames(id);
+				context = contextQuality(contexts, ancestors);
+				if (context === 0) continue;
+			}
+			const match = {
+				id,
+				level,
+				quality,
+				contextQuality: context,
+				rankArea: 0,
+			};
+			if (!compare) return match;
+			if (!best || compare(match, best) < 0) best = match;
+		}
+		return best;
+	}
+
+	/** The names of place `id`'s ancestors, nearest first: a city's region
+	 * and country, a region's country, nothing for a country. */
+	private async ancestorNames(id: number): Promise<string[][]> {
+		const ids = this.placeIds(id);
+		const ancestors: number[] = [];
+		if (ids.level === "city") ancestors.push(ids.region!);
+		if (ids.level !== "country") ancestors.push(ids.country);
+		const names: string[][] = [];
+		for (const ancestor of ancestors)
+			names.push(
+				this.loadedNames(ancestor) ?? (await this.loadNames(ancestor)),
+			);
+		return names;
+	}
+
+	/** `areaTieBreak` resolved to the area bytes to rank by, or undefined
+	 * for Appendix B.5's plain order. */
+	private async searchAreas(
+		mode: "auto" | boolean,
+	): Promise<Uint8Array | undefined> {
+		if (mode === false) return undefined;
+		const areas = await this.placeAreas();
+		if (!areas && mode === true) {
+			throw new CGeoDataError(
+				"areaTieBreak: true ranks by the areas in a locate index, and none is attached; build one with build-locate-index",
+			);
+		}
+		return areas;
+	}
+
+	/**
+	 * The area byte (binary-format.md Section C.3) of every place, by id --
+	 * the size of the place and everything under it, on a log scale, a
+	 * quarter of a doubling per step -- read from the attached locate index
+	 * (`useLocateIndex()`), or undefined without one. What
+	 * `search({ sort: true })` breaks ties with (`SearchOptions.areaTieBreak`).
+	 * Read once and then kept; the array is shared, so don't modify it.
+	 */
+	async placeAreas(): Promise<Uint8Array | undefined> {
+		return (await this.activeLocateIndex())?.areas();
+	}
+
+	/** Place `id`'s rank area (Appendix B.5.1, `regionRankArea`): its area
+	 * byte, except for a region with a city of the same local name. That
+	 * takes reading the region's city names, so it's worked out only for
+	 * the regions a search actually matched, once each. */
+	private async rankArea(
+		id: number,
+		level: PlaceLevel,
+		areas: Uint8Array,
+	): Promise<number> {
+		if (level !== "region") return areas[id]!;
+		const C = this.placeTable.countryCount;
+		if (this.rankAreas?.areas !== areas) {
+			this.rankAreas = {
+				areas,
+				regions: new Int16Array(this.placeTable.totalRegions).fill(-1),
+			};
+		}
+		const { regions } = this.rankAreas;
+		const cached = regions[id - C]!;
+		if (cached >= 0) return cached;
+		const own = this.loadedNames(id) ?? (await this.loadNames(id));
+		const [lo, hi] = this.idRange("city", { region: id });
+		const cities: Array<{ localName: string; area: number }> = [];
+		for (let city = lo; city < hi; city++) {
+			const names = this.loadedNames(city) ?? (await this.loadNames(city));
+			cities.push({ localName: names[0] ?? "", area: areas[city]! });
+		}
+		const value = regionRankArea(own[0] ?? "", areas[id]!, cities);
+		regions[id - C] = value;
+		return value;
 	}
 
 	/** The ids (ascending) of `level` under the filter that `search()` has
@@ -979,19 +1169,30 @@ export class CGeoDataReader {
 	async locate(id: number): Promise<Location | null> {
 		this.checkPlaceId(id);
 		const index = await this.activeLocateIndex();
-		const cell = index
-			? decodeLocateEntry(await index.entry(id), this.header)
-			: await computeLocateCell(this, id);
-		if (!cell) return null;
+		let found: PlaceLocation | null;
+		if (index) {
+			const cell = decodeLocateEntry(await index.entry(id), this.header);
+			found = cell && { cell, area: await index.area(id) };
+		} else {
+			found = await computeLocateCell(this, id);
+		}
+		if (!found) return null;
+		const { cell, area } = found;
 		const box = this.recordBoundingBox(
 			this.chunkBoundingBox(cell.chunkIndex),
 			cell.code,
 			cell.depth,
 		);
+		const { width, height, maxDepth } = this.header;
+		const cellDegrees =
+			(360 / (width * 2 ** maxDepth)) * (180 / (height * 2 ** maxDepth));
 		return {
 			lat: (box.minLat + box.maxLat) / 2,
 			lon: (box.minLon + box.maxLon) / 2,
 			boundingBox: box,
+			// The middle of the byte's range, 2^((area - 1) / 4) up to
+			// 2^(area / 4) cells, on the same log scale.
+			area: area === 0 ? 0 : 2 ** ((area - 0.5) / 4) * cellDegrees,
 		};
 	}
 
@@ -1327,6 +1528,28 @@ function unknownResult(
 	chunkIndex: number,
 ): PlaceIdResult {
 	return { placeId: null, boundingBox, chunkIndex };
+}
+
+/** A search text's readings as needles, and what an index narrowed them
+ * to (`CGeoDataReader.prepareQuery`). */
+interface PreparedQuery {
+	readings: Array<{ head: Needle; contexts: Needle[] }>;
+	candidates: number[] | undefined;
+}
+
+/** The union of two ascending id lists, ascending, without duplicates. */
+function unionSorted(a: readonly number[], b: readonly number[]): number[] {
+	const out: number[] = [];
+	let i = 0;
+	let j = 0;
+	while (i < a.length || j < b.length) {
+		const x = i < a.length ? a[i]! : Infinity;
+		const y = j < b.length ? b[j]! : Infinity;
+		out.push(Math.min(x, y));
+		if (x <= y) i++;
+		if (y <= x) j++;
+	}
+	return out;
 }
 
 /** The first index of the ascending `sorted` whose value is >= `value`. */

@@ -243,9 +243,12 @@ test("search({ sort: true }) on the real worldwide dataset: an exact name match 
 	// that invariant rather than specific ids, since a later data rebuild
 	// can renumber places.
 	const worldReader = await openFile(WORLD_BIN);
-	// Ranking is under test here, not the index: don't depend on whether a
-	// (gitignored, possibly stale) world.search-index.bin sits next to it.
+	// Ranking is under test here, not the indexes: don't depend on whether
+	// a (gitignored, possibly stale) world.search-index.bin or
+	// world.locate-index.bin sits next to it -- the latter would switch to
+	// ranking by area, or reject if it predates area bytes.
 	await worldReader.useSearchIndex(undefined);
+	await worldReader.useLocateIndex(undefined);
 	try {
 		const unsorted = await collect(worldReader.search("amsterdam"));
 		const sorted = await collect(

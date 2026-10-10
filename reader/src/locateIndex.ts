@@ -5,15 +5,16 @@
  * scan through every chunk.
  *
  * The file is CGEODATA kind 2: the 8-byte "CGEODATA" signature and a
- * `version` varint (kind × 16 + version = 32), then an FNV-1a 64-bit
+ * `version` varint (kind × 16 + version = 33), then an FNV-1a 64-bit
  * checksum over the source's header, directory and place table, the
- * entry width, the place count, and one fixed-width entry per place id.
- * Entries are raw, so an entry is found by multiplying its id by the
- * entry width.
+ * entry width, the place count, one fixed-width entry per place id, and
+ * one area byte per place id. Entries are raw, so an entry is found by
+ * multiplying its id by the entry width.
  *
- * The representative cell of a place is defined in Section C.3, and
- * `locate()` without an index computes exactly the same cell by scanning
- * (`computeLocateCell`). The index is only a precomputed copy of it.
+ * The representative cell and area of a place are defined in Section
+ * C.3, and `locate()` without an index computes exactly the same ones by
+ * scanning (`computeLocateCell`). The index is only a precomputed copy of
+ * them.
  */
 
 import {
@@ -24,6 +25,7 @@ import {
 import type { CGeoDataHeader } from "./header.ts";
 import { mortonDecode, mortonEncode, shiftRight } from "./morton.ts";
 import type { CGeoDataReader } from "./reader.ts";
+import { areaByte } from "./relevance.ts";
 import { type ByteSource, type SourceInput, toSource } from "./source.ts";
 import { readVarint, writeVarint } from "./varint.ts";
 
@@ -32,7 +34,9 @@ const SIGNATURE = Uint8Array.from([
 	0x43, 0x47, 0x45, 0x4f, 0x44, 0x41, 0x54, 0x41,
 ]);
 const KIND_LOCATE_INDEX = 2;
-const FORMAT_VERSION = 0; // kind=2, version=0 → stored varint = 32 (0x20)
+// Version 1 added the area bytes (Section C.4); version 0 had only the
+// entries, and a reader that wants areas can't get them from one.
+const FORMAT_VERSION = 1; // kind=2, version=1 → stored varint = 33 (0x21)
 const STORED_VERSION = KIND_LOCATE_INDEX * 16 + FORMAT_VERSION;
 /** Entries are at most 48 bits, so they are exact JavaScript integers
  * (Section C.2). */
@@ -275,16 +279,37 @@ function inRanges(
 	return false;
 }
 
+/** A place's representative cell and area byte (Section C.3). */
+export interface PlaceLocation {
+	/** The representative cell. */
+	cell: LocateCell;
+	/** The area byte; never 0, since a place with a cell has an area. */
+	area: number;
+}
+
+/** The total weight `T` of cells `start .. end - 1` (Section C.3): their
+ * area in full-precision cells. */
+function areaCells(
+	cells: CellList,
+	start: number,
+	end: number,
+	maxDepth: number,
+): number {
+	let total = 0;
+	for (let i = start; i < end; i++) total += 4 ** (maxDepth - cells.depth[i]!);
+	return total;
+}
+
 /**
  * Section C.3 for one place, straight from the chunks: collects the cells
  * of every record attributed to `id` or a place under it, then picks the
- * representative cell. This is what `locate()` does without an index,
- * and it reads every non-empty chunk.
+ * representative cell and totals the area. This is what `locate()` does
+ * without an index, and it reads every non-empty chunk.
  */
 export async function computeLocateCell(
 	reader: CGeoDataReader,
 	id: number,
-): Promise<LocateCell | null> {
+): Promise<PlaceLocation | null> {
 	const { header } = reader;
 	checkGrid(header);
 	const ranges = reader.subtreeIdRanges(id);
@@ -319,7 +344,11 @@ export async function computeLocateCell(
 		putRecordCell(cells, i, chunkIndex, code, depth, header);
 	});
 	const best = representativeCell(cells, 0, found.length, header);
-	return best ? toLocateCell(best.gx, best.gy, header) : null;
+	if (!best) return null;
+	return {
+		cell: toLocateCell(best.gx, best.gy, header),
+		area: areaByte(areaCells(cells, 0, found.length, header.maxDepth)),
+	};
 }
 
 // ── Builder ───────────────────────────────────────────────────────────────────
@@ -399,6 +428,7 @@ export async function buildLocateIndex(
 	}
 
 	const entries = new Float64Array(N);
+	const areas = new Uint8Array(N);
 	const start = new Uint32Array(N); // a place's first slot in its batch
 	const cursor = new Uint32Array(N);
 	const subtreeEnd = new Uint32Array(N);
@@ -494,6 +524,14 @@ export async function buildLocateIndex(
 			entries[placeId] = best
 				? encodeLocateEntry(toLocateCell(best.gx, best.gy, header), header)
 				: 0;
+			areas[placeId] = areaByte(
+				areaCells(
+					cells,
+					start[placeId]!,
+					subtreeEnd[placeId]!,
+					header.maxDepth,
+				),
+			);
 		}
 		firstCountry = lastCountry;
 	}
@@ -502,6 +540,7 @@ export async function buildLocateIndex(
 		await reader.prefixChecksum(),
 		locateEntryWidth(header),
 		entries,
+		areas,
 	);
 }
 
@@ -514,17 +553,20 @@ function childRange(
 	return reader.subtreeIdRanges(id)[1] ?? [0, 0];
 }
 
-/** Section C.4's layout around already-computed entries. */
+/** Section C.4's layout around already-computed entries and areas. */
 function writeLocateIndex(
 	checksum: bigint,
 	entryWidth: number,
 	entries: ArrayLike<number>,
+	areas: Uint8Array,
 ): Uint8Array {
 	const versionBytes = writeVarint(STORED_VERSION);
 	const countBytes = writeVarint(entries.length);
 	const headerSize =
 		SIGNATURE.length + versionBytes.length + 8 + 1 + countBytes.length;
-	const out = new Uint8Array(headerSize + entries.length * entryWidth);
+	const out = new Uint8Array(
+		headerSize + entries.length * entryWidth + areas.length,
+	);
 	const dv = new DataView(out.buffer);
 	let off = 0;
 	out.set(SIGNATURE, off);
@@ -545,6 +587,7 @@ function writeLocateIndex(
 			value = Math.floor(value / 256);
 		}
 	}
+	out.set(areas, off);
 	return out;
 }
 
@@ -556,8 +599,10 @@ const MAX_HEADER_LENGTH = SIGNATURE.length + 8 + 8 + 1 + 8;
 
 /**
  * An open locate index file (Section C.4). Opening reads only the header,
- * and each `entry()` reads just that entry's bytes; nothing is cached, so
- * an idle index costs an open file handle and no memory.
+ * and each `entry()` or `area()` reads just that entry's bytes; only
+ * `areas()`, which a search ranked by area needs, keeps anything (one
+ * byte per place), so an idle index otherwise costs an open file handle
+ * and no memory.
  *
  * Opening does NOT verify the source checksum -- `CGeoDataReader`'s
  * `useLocateIndex()` does that against the file it's attached to.
@@ -567,6 +612,8 @@ export class LocateIndex {
 	/** The index file's name, when its source has one (`ByteSource.name`). */
 	readonly name?: string;
 	private readonly entriesStart: number;
+	private readonly areasStart: number;
+	private areasPromise: Promise<Uint8Array> | undefined;
 	/** Checksum of the header, directory and place table it was built
 	 * from (Section C.4); a reader only accepts the index when it matches
 	 * its own. */
@@ -586,6 +633,7 @@ export class LocateIndex {
 		this.source = source;
 		if (source.name !== undefined) this.name = source.name;
 		this.entriesStart = entriesStart;
+		this.areasStart = entriesStart + placeCount * entryWidth;
 		this.sourceChecksum = sourceChecksum;
 		this.entryWidth = entryWidth;
 		this.placeCount = placeCount;
@@ -635,7 +683,9 @@ export class LocateIndex {
 		}
 		if (ver !== FORMAT_VERSION) {
 			throw new CGeoDataVersionError(
-				`unsupported locate index version ${ver} (expected ${FORMAT_VERSION})`,
+				ver === 0
+					? "locate index predates place areas (kind 2, version 0); rebuild it with build-locate-index"
+					: `unsupported locate index version ${ver} (expected ${FORMAT_VERSION})`,
 				ver,
 			);
 		}
@@ -660,7 +710,7 @@ export class LocateIndex {
 		const { value: placeCount, bytesRead: pb } = readVarint(data, off);
 		off += pb;
 
-		const expectedTotal = off + placeCount * entryWidth;
+		const expectedTotal = off + placeCount * (entryWidth + 1);
 		if (source.size !== expectedTotal) {
 			throw new CGeoDataFormatError(
 				`locate index has ${source.size} bytes but header implies ${expectedTotal}`,
@@ -676,11 +726,7 @@ export class LocateIndex {
 
 	/** Place `id`'s raw entry (Section C.2); `0` means no geometry. */
 	async entry(id: number): Promise<number> {
-		if (!Number.isInteger(id) || id < 0 || id >= this.placeCount) {
-			throw new RangeError(
-				`${id} is not a place id in this locate index (0 <= id < ${this.placeCount})`,
-			);
-		}
+		this.checkId(id);
 		const bytes = await this.source.read(
 			this.entriesStart + id * this.entryWidth,
 			this.entryWidth,
@@ -689,5 +735,36 @@ export class LocateIndex {
 		for (let b = this.entryWidth - 1; b >= 0; b--)
 			value = value * 256 + bytes[b]!;
 		return value;
+	}
+
+	/** Place `id`'s area byte (Section C.3); `0` means no area. */
+	async area(id: number): Promise<number> {
+		this.checkId(id);
+		const cached = this.areasPromise;
+		if (cached) return (await cached)[id]!;
+		return (await this.source.read(this.areasStart + id, 1))[0]!;
+	}
+
+	/** Every place's area byte, by id: one read of `placeCount` bytes, the
+	 * first time, then kept -- what ranking a search by area needs. */
+	areas(): Promise<Uint8Array> {
+		this.areasPromise ??= this.source
+			.read(this.areasStart, this.placeCount)
+			.then(
+				(bytes) => bytes.slice(),
+				(error: unknown) => {
+					this.areasPromise = undefined; // try again next time
+					throw error;
+				},
+			);
+		return this.areasPromise;
+	}
+
+	private checkId(id: number): void {
+		if (!Number.isInteger(id) || id < 0 || id >= this.placeCount) {
+			throw new RangeError(
+				`${id} is not a place id in this locate index (0 <= id < ${this.placeCount})`,
+			);
+		}
 	}
 }

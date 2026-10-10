@@ -107,15 +107,32 @@ every place in Japan, Korea, China, Russia and many other countries.
 for await (const place of reader.search("munchen", { sort: true, limit: 20 })) {
 	place.internationalName;            // "Munich"
 	place.country.internationalName;    // "Germany"
-	const position = await reader.locate(place.id); // { lat, lon, boundingBox } or null
+	const position = await reader.locate(place.id); // { lat, lon, boundingBox, area } or null
 }
 ```
 
 Search is case- and diacritic-insensitive ("munchen" finds München). It
 matches any part of any name, alternative names included. With
 `sort: true`, an exact name beats a whole-word match, which beats a plain
-substring match, and a country beats a city beats a region. Filter with
-`level`, `country` or `region` (place ids).
+substring match, and among equal matches a country comes first. Filter
+with `level`, `country` or `region` (place ids).
+
+**Equal matches are ranked by area when a locate index is attached**
+(`areaTieBreak: "auto"`, the default): "berlin" puts Berlin, Germany
+ahead of the towns called Berlin in the United States, and a province
+still comes right after its own same-named city. Without a locate index
+they fall back to city before region, then id order, which is close to
+arbitrary. So attaching a locate index changes the *order* of sorted
+results, never which places match. Pass `areaTieBreak: true` to insist on
+area order (it rejects without a locate index) or `false` to opt out.
+Area is a size signal, not fame: a large rural Portland parish in Jamaica
+still outranks Portland, Oregon.
+
+A comma narrows by the places a match lies in: `"Paris, Texas"`,
+`"Springfield, Illinois, United States"`. Each part after a comma must
+match a different, further-up ancestor (region, then country). The whole
+text is still matched as a name too, for the places whose names contain
+a comma.
 
 `locate(id)` returns a point inside the place: `query()` at that point
 resolves to the place or something inside it. It **can return `null` for
@@ -123,6 +140,11 @@ a real place that `search()` finds**: a place smaller than the file's
 finest cell (a tiny island, an enclave, a boundary sliver) has no cells
 of its own. That's about 0.15% of a worldwide file. Leave those out of
 results that need a position. Don't default them to a coordinate.
+
+`area` is the place's approximate size in square degrees (within about
+9%), everything under it included. To zoom a Web Mercator map to it,
+`Math.log2(360 / Math.sqrt(area))` is the zoom at which a square of that
+area spans one 256-pixel tile; subtract a little to leave a margin.
 
 `search()` and `places()` are async iterators. Collect them with
 `for await`, or with `Array.fromAsync()` where your runtime has it.
@@ -152,8 +174,17 @@ const reader = await CGeoDataReader.open(bytes, {
 });
 ```
 
-`cgeodata build-search-index world.bin --output world.search-index.bin`
-and `cgeodata build-locate-index ...` build them (see [CLI](#cli)).
+`cgeodata build-locate-index world.bin --output world.locate-index.bin`
+and `cgeodata build-search-index ...` build them (see [CLI](#cli)).
+**Build the locate index first.** The search index stores the top
+results of 1-2 character searches ranked the same way the reader will
+rank them. With a locate index next to the `.bin`, it ranks them by area,
+matching the reader's default. Built without one, sorted 1-2 character
+searches can't use it once a locate index is present. They still return
+the same results, just more slowly (~0.6 s on a worldwide file).
+
+Only the `.bin` needs distributing: both indexes are a pure function of
+it and can be built where it's used.
 
 ## Memory and the event loop
 
@@ -206,10 +237,12 @@ Check these before migrating from another geocoder:
   "North Macedonia" ("Macedonia"), "Macao" ("Macau"). Data you stored
   earlier under the GeoNames spelling won't match new lookups until it's
   looked up again.
-- **Search ranks by match quality, not by importance.** No population or
-  size signal exists yet, so among equally good matches the order is
-  arbitrary. "berlin" puts several US towns named Berlin before the German
-  capital. Show enough results, and show each one's region and country.
+- **Search ranks by size, not by importance.** With a locate index,
+  equally good matches are ordered by area ("berlin" puts the German
+  capital first); without one, the order among them is close to
+  arbitrary. Area isn't fame, though: "portland" still puts a Jamaican
+  parish before Portland, Oregon. Show enough results, and show each
+  one's region and country.
 - **Attribution**: the data is derived from OpenStreetMap (ODbL), GeoNames
   and Natural Earth. `reader.header.attribution` holds the notice the file
   was built with. Show it wherever you show the results.
@@ -235,8 +268,8 @@ cgeodata lookup world.bin 52.37,4.9            # or points on stdin, one per lin
 cgeodata search world.bin amsterdam --sort --locate
 cgeodata show   world.bin 192858               # a place id from any other command
 cgeodata info   world.bin                      # header, counts, sizes
-cgeodata build-search-index world.bin --output world.search-index.bin
 cgeodata build-locate-index world.bin --output world.locate-index.bin
+cgeodata build-search-index world.bin --output world.search-index.bin  # after the locate index
 cgeodata help [<command>]
 ```
 

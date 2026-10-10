@@ -18,6 +18,7 @@ import {
 	type SearchOptions,
 } from "../src/index.ts";
 import {
+	buildLocateIndex,
 	buildSearchIndex,
 	SearchIndex,
 	type SearchIndexOptions,
@@ -39,7 +40,7 @@ test("buildSearchIndex: reproduces Appendix B.12 byte for byte", async () => {
 	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
 	const built = await buildSearchIndex(reader, APPENDIX_B_OPTIONS);
 	await reader.close();
-	assert.equal(built.length, 3201);
+	assert.equal(built.length, 3202);
 	assert.deepEqual(built, APPENDIX_B_BYTES);
 });
 
@@ -165,9 +166,10 @@ test("placeNames: throws RangeError for out-of-range id", async () => {
 
 /** The B.12 example with `edit` applied to a copy. Header offsets: version
  * 8, checksum 9-16, place_count 17, hash_exp 18, top_count 19,
- * top_block_exp 20, list_directory_length 21-22, lists_length 23,
- * table_directory_length 24; presence from 25, entries from 2771, lists
- * from 2818, table directory from 2865, table blocks from 2881. */
+ * top_block_exp 20, relevance_rule 21, list_directory_length 22-23,
+ * lists_length 24, table_directory_length 25; presence from 26, entries
+ * from 2772, lists from 2819, table directory from 2866, table blocks
+ * from 2882. */
 function tampered(edit: (bytes: Uint8Array) => void): Uint8Array {
 	const bytes = APPENDIX_B_BYTES.slice();
 	edit(bytes);
@@ -196,8 +198,12 @@ test("SearchIndex.open: rejects a bad signature, kind, or version", async () => 
 		/predates diacritic folding/,
 	);
 	await assert.rejects(
-		async () => await SearchIndex.open(tampered((b) => (b[8] = 0x13))),
-		/unsupported search index version 3/,
+		async () => await SearchIndex.open(tampered((b) => (b[8] = 0x12))),
+		/predates ranking by area/,
+	);
+	await assert.rejects(
+		async () => await SearchIndex.open(tampered((b) => (b[8] = 0x14))),
+		/unsupported search index version 4/,
 	);
 });
 
@@ -222,17 +228,21 @@ test("SearchIndex.open: rejects out-of-range parameters and section lengths", as
 		async () => await SearchIndex.open(tampered((b) => (b[19] = 0))),
 		/top_count 0/,
 	);
+	await assert.rejects(
+		async () => await SearchIndex.open(tampered((b) => (b[21] = 2))),
+		/relevance_rule 2/,
+	);
 });
 
 test("candidates: rejects a list directory that doesn't add up", async () => {
 	// lists_length one short: the entries still add up to 47.
-	const short = await SearchIndex.open(tampered((b) => (b[23] = 0x2e)));
+	const short = await SearchIndex.open(tampered((b) => (b[24] = 0x2e)));
 	await assert.rejects(
 		async () => await short.candidates("dam"),
 		/add up to 47, but lists_length is 46/,
 	);
 	// `and` (the third entry) claims a 2-byte bitmap, where N = 7 needs 1.
-	const bitmap = await SearchIndex.open(tampered((b) => (b[2771 + 2] = 0x05)));
+	const bitmap = await SearchIndex.open(tampered((b) => (b[2772 + 2] = 0x05)));
 	await assert.rejects(
 		async () => await bitmap.candidates("dam"),
 		/bitmap for list 367 is 2 bytes, expected 1/,
@@ -246,7 +256,7 @@ test("candidates: rejects a presence bit beyond L", async () => {
 	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
 	const bytes = await buildSearchIndex(reader, { hashExp: 1, topCount: 0 });
 	await reader.close();
-	let off = 21; // signature, version, checksum, place_count 7, three u8s
+	let off = 22; // signature, version, checksum, place_count 7, four u8s
 	for (let i = 0; i < 3; i++) off += readVarint(bytes, off).bytesRead;
 	bytes[off + 2744]! |= 0x80; // list 21959
 	await assert.rejects(
@@ -257,7 +267,7 @@ test("candidates: rejects a presence bit beyond L", async () => {
 
 test("candidates: rejects place ids beyond N", async () => {
 	// `aan`'s id list (the first stored list) names place 9 of 7.
-	const index = await SearchIndex.open(tampered((b) => (b[2818] = 0x09)));
+	const index = await SearchIndex.open(tampered((b) => (b[2819] = 0x09)));
 	await assert.rejects(
 		async () => await index.candidates("zaan"),
 		/place 9, beyond its 7 places/,
@@ -266,7 +276,7 @@ test("candidates: rejects place ids beyond N", async () => {
 
 test("shortQuery: rejects a table block that disagrees with its directory", async () => {
 	// Block 0's first key " " becomes "!", no longer the directory's first key.
-	const index = await SearchIndex.open(tampered((b) => (b[2881] = 0x21)));
+	const index = await SearchIndex.open(tampered((b) => (b[2882] = 0x21)));
 	await assert.rejects(
 		async () => await index.shortQuery("a"),
 		/not in key order/,
@@ -276,16 +286,31 @@ test("shortQuery: rejects a table block that disagrees with its directory", asyn
 // ── search() with an index attached ──────────────────────────────────────────
 
 /** Two readers over the same bytes: one with an index attached, one
- * without, so every test compares indexed against linear search. */
+ * without, so every test compares indexed against linear search. With
+ * `byArea`, both also get a locate index, so sorted searches rank by area
+ * (`areaTieBreak: "auto"`) and the index's table is built that way;
+ * without, neither has one. */
 async function makeReaders(
 	bytes: Uint8Array | string = APPENDIX_A_BYTES,
 	options: SearchIndexOptions = {},
+	byArea = false,
 ) {
-	const open = (input: Uint8Array | string) =>
-		typeof input === "string" ? openFile(input) : CGeoDataReader.open(input);
+	const open = async (input: Uint8Array | string) => {
+		const reader =
+			typeof input === "string"
+				? await openFile(input)
+				: await CGeoDataReader.open(input);
+		await reader.useLocateIndex(undefined);
+		return reader;
+	};
 	const indexed = await open(bytes);
-	await indexed.useSearchIndex(await buildSearchIndex(indexed, options));
 	const linear = await open(bytes);
+	if (byArea) {
+		const locateIndex = await buildLocateIndex(indexed);
+		await indexed.useLocateIndex(locateIndex);
+		await linear.useLocateIndex(locateIndex);
+	}
+	await indexed.useSearchIndex(await buildSearchIndex(indexed, options));
 	await linear.useSearchIndex(undefined);
 	return {
 		indexed,
@@ -331,6 +356,18 @@ const FIXTURE_QUERIES = [
 	" dam",
 	"d-h",
 	"xqzqxqz",
+	// Qualified queries (Appendix B.13).
+	"zaandam, noord",
+	"dam, nederland",
+	"dam,ned",
+	"dam, noord, ned",
+	"dam, ned, noord",
+	"antwerp, antwerp",
+	"antwerpen, belg",
+	"a, b",
+	"zaandam,",
+	",",
+	"a,",
 ];
 const OPTION_SETS: SearchOptions[] = [
 	{},
@@ -345,16 +382,20 @@ const OPTION_SETS: SearchOptions[] = [
 	{ sort: true, limit: 5 },
 	{ sort: true, limit: 2, country: 1 },
 	{ sort: true, limit: 2, level: "city" },
+	{ sort: true, limit: 2, areaTieBreak: false },
 ];
 
-for (const [name, options] of [
-	["default parameters", {}],
-	["B.12's parameters", APPENDIX_B_OPTIONS],
-	["no short-query table", { topCount: 0 }],
-	["one hashed list", { hashExp: 1 }],
+for (const [name, options, byArea] of [
+	["default parameters", {}, false],
+	["B.12's parameters", APPENDIX_B_OPTIONS, false],
+	["no short-query table", { topCount: 0 }, false],
+	["one hashed list", { hashExp: 1 }, false],
+	["ranked by area", {}, true],
+	["ranked by area, B.12's parameters", APPENDIX_B_OPTIONS, true],
+	["ranked by area, table built plainly", { areaTieBreak: false }, true],
 ] as const) {
 	test(`search with index (${name}) matches the linear scan`, async () => {
-		const readers = await makeReaders(APPENDIX_A_BYTES, options);
+		const readers = await makeReaders(APPENDIX_A_BYTES, options, byArea);
 		for (const q of FIXTURE_QUERIES)
 			for (const o of OPTION_SETS) await assertSameSearch(readers, q, o);
 		await readers.close();
@@ -365,7 +406,7 @@ test("search: a sorted 1-2 character search with a small limit reads the short-q
 	// Swap block 0's entry for `a` (`0 4`, Nederland then Amsterdam) to
 	// `4 0`: only an answer taken from the table can come out in that order.
 	const swapped = tampered((b) => {
-		const entry = b.indexOf(0x61, 2881); // "a" NUL 02 00 04
+		const entry = b.indexOf(0x61, 2882); // "a" NUL 02 00 04
 		assert.deepEqual(
 			[...b.subarray(entry, entry + 5)],
 			[0x61, 0x00, 0x02, 0x00, 0x04],
@@ -399,7 +440,7 @@ test("search: a sorted 1-2 character search with a small limit reads the short-q
 test("search: short-query places are confirmed, so a corrupt table can't add a wrong result", async () => {
 	// `a`'s entry names België (1), which has no `a` in its names.
 	const corrupt = tampered((b) => {
-		const entry = b.indexOf(0x61, 2881);
+		const entry = b.indexOf(0x61, 2882);
 		b[entry + 3] = 0x01;
 	});
 	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
@@ -407,6 +448,129 @@ test("search: short-query places are confirmed, so a corrupt table can't add a w
 	assert.deepEqual(
 		await ids(reader.search("a", { sort: true, limit: 2 })),
 		[4],
+	);
+	await reader.close();
+});
+
+// ── Ranking by area (Appendix B.5.1) ─────────────────────────────────────────
+
+/** Appendix A with its locate index (Appendix C.8) attached. */
+async function readerWithAreas(): Promise<CGeoDataReader> {
+	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
+	await reader.useLocateIndex(await buildLocateIndex(reader));
+	return reader;
+}
+
+test("search: areaTieBreak puts larger places first among equal matches", async () => {
+	const reader = await readerWithAreas();
+	// "dam": Amsterdam (4) and Zaandam (5) tie at quality 11; Zaandam has
+	// area byte 5, Amsterdam no area at all.
+	assert.deepEqual(await ids(reader.search("dam", { sort: true })), [5, 4]);
+	assert.deepEqual(
+		await ids(reader.search("dam", { sort: true, areaTieBreak: true })),
+		[5, 4],
+	);
+	assert.deepEqual(
+		await ids(reader.search("dam", { sort: true, areaTieBreak: false })),
+		[4, 5],
+	);
+	// The country still comes first; then Noord-Holland (area 14) beats
+	// the cities, region or not. The rest have no area: cities first, so
+	// the region Antwerpen (3) follows the city Antwerpen (6).
+	assert.deepEqual(
+		await ids(reader.search("a", { sort: true })),
+		[0, 2, 5, 4, 6, 3],
+	);
+	// Unsorted search ignores it.
+	assert.deepEqual(await ids(reader.search("dam")), [4, 5]);
+	await reader.close();
+
+	const plain = await CGeoDataReader.open(APPENDIX_A_BYTES);
+	assert.deepEqual(await ids(plain.search("dam", { sort: true })), [4, 5]);
+	await assert.rejects(
+		async () =>
+			await ids(plain.search("dam", { sort: true, areaTieBreak: true })),
+		/needs|none is attached/,
+	);
+	await plain.close();
+});
+
+test("buildSearchIndex: by area, the table is ranked by area and bound to the chunks", async () => {
+	const reader = await readerWithAreas();
+	const bytes = await buildSearchIndex(reader, APPENDIX_B_OPTIONS);
+	const index = await SearchIndex.open(bytes);
+	assert.equal(index.relevanceRule, 1);
+	// Section B.8: the C.4 checksum, header to place table, not B.8's.
+	assert.equal(index.sourceChecksum, 0x334bf7a76cac66ean);
+	// B.12.4: `a` is `0 4` plainly, `0 2` by area (Noord-Holland's 14).
+	assert.deepEqual(await index.shortQuery("a"), [0, 2]);
+
+	await reader.useSearchIndex(bytes);
+	assert.deepEqual(
+		await ids(reader.search("a", { sort: true, limit: 2 })),
+		[0, 2],
+	);
+	// Ranked plainly, the table's order is the wrong one: a live scan.
+	assert.deepEqual(
+		await ids(
+			reader.search("a", { sort: true, limit: 2, areaTieBreak: false }),
+		),
+		[0, 4],
+	);
+	await reader.close();
+
+	// The plain table is built without areas, so with or without them.
+	const plain = await readerWithAreas();
+	const plainIndex = await SearchIndex.open(
+		await buildSearchIndex(plain, {
+			...APPENDIX_B_OPTIONS,
+			areaTieBreak: false,
+		}),
+	);
+	assert.equal(plainIndex.relevanceRule, 0);
+	assert.deepEqual(await plainIndex.shortQuery("a"), [0, 4]);
+	await plain.close();
+
+	const none = await CGeoDataReader.open(APPENDIX_A_BYTES);
+	assert.deepEqual(
+		await buildSearchIndex(none, APPENDIX_B_OPTIONS),
+		APPENDIX_B_BYTES,
+	);
+	await assert.rejects(
+		async () => await buildSearchIndex(none, { areaTieBreak: true }),
+		RangeError,
+	);
+	// A table ranked by area is bound to the chunks: an index whose
+	// checksum is the place table's alone is rejected.
+	const mislabelled = bytes.slice();
+	mislabelled.set(APPENDIX_B_BYTES.subarray(9, 17), 9);
+	await assert.rejects(
+		async () => await none.useSearchIndex(mislabelled),
+		/checksum mismatch/,
+	);
+	await none.close();
+});
+
+test("search: a qualified query narrows by the places a match lies in", async () => {
+	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
+	const find = (text: string, options: SearchOptions = {}) =>
+		ids(reader.search(text, options));
+	assert.deepEqual(await find("dam, noord-holland"), [4, 5]);
+	assert.deepEqual(await find("zaandam, nederland"), [5]);
+	assert.deepEqual(await find("zaandam, noord, nederland"), [5]);
+	assert.deepEqual(await find("zaandam, nederland, noord"), []); // nearest first
+	assert.deepEqual(await find("zaandam, belgie"), []);
+	assert.deepEqual(await find("zaandam,"), [5]); // still typing
+	// The region Antwerpen's only ancestor, België, isn't named Antwerpen.
+	assert.deepEqual(await find("antwerp, antwerpen"), [6]);
+	assert.deepEqual(await find("antwerp, belgium"), [3, 6]);
+	assert.deepEqual(await find("noord-holland, nederland"), [2]);
+	assert.deepEqual(await find("nederland, nederland"), []); // a country has no ancestor
+	// Sorted, a better context ranks first among equal heads.
+	assert.deepEqual(await find("dam, noord-holland", { sort: true }), [4, 5]);
+	assert.deepEqual(
+		await find("antwerp, antwerpen", { sort: true, limit: 1 }),
+		[6],
 	);
 	await reader.close();
 });
@@ -539,6 +703,26 @@ if (existsSync(ZH_BIN)) {
 		for (const q of QUERIES) {
 			await assertSameSearch(readers, q);
 			await assertSameSearch(readers, q, { level: "city" });
+			await assertSameSearch(readers, q, { sort: true, limit: 5 });
+			await assertSameSearch(readers, q, { sort: true });
+		}
+		await readers.close();
+	});
+
+	test("search with index vs linear scan on zuid-holland.bin, ranked by area", async () => {
+		const readers = await makeReaders(ZH_BIN, {}, true);
+		for (const q of [
+			"dam",
+			"rotterdam",
+			"den",
+			"a",
+			"aa",
+			"z",
+			"leiden, zuid",
+			"den, holland",
+			"rijn, nederland",
+		]) {
+			await assertSameSearch(readers, q);
 			await assertSameSearch(readers, q, { sort: true, limit: 5 });
 			await assertSameSearch(readers, q, { sort: true });
 		}

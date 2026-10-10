@@ -33,11 +33,12 @@ function hexBytes(hex: string): Uint8Array {
 // C.8.1, transcribed from the spec rather than produced by the builder.
 const APPENDIX_C_BYTES = hexBytes(`
 	43 47 45 4f 44 41 54 41
-	20
+	21
 	ea 66 ac 6c a7 f7 4b 33
 	01
 	07
 	73 00 73 00 00 74 00
+	0e 00 0e 00 00 05 00
 `);
 
 function referenceFnv1a64(data: Uint8Array): bigint {
@@ -63,6 +64,9 @@ test("prefixChecksum: FNV-1a of everything before the first chunk (C.8.1)", asyn
 	await reader.close();
 });
 
+/** Square degrees of Appendix A's 45° × 22.5° full-precision cell. */
+const APPENDIX_A_CELL = 45 * 22.5;
+
 test("locate: Appendix C.8's coordinates, with and without the index", async () => {
 	const noGeometry = [1, 3, 4, 6]; // België, Antwerpen (region), Amsterdam, Antwerpen (city)
 	for (const withIndex of [false, true]) {
@@ -75,6 +79,8 @@ test("locate: Appendix C.8's coordinates, with and without the index", async () 
 				lat: 33.75,
 				lon: 67.5,
 				boundingBox: { minLon: 45, maxLon: 90, minLat: 22.5, maxLat: 45 },
+				// C.8.6: area byte 14 (T = 10), the middle of 2^(13/4) to 2^(14/4) cells.
+				area: 2 ** (13.5 / 4) * APPENDIX_A_CELL,
 			});
 		}
 		// C.8.3: the median falls in a gap and is moved to the lower row.
@@ -82,6 +88,7 @@ test("locate: Appendix C.8's coordinates, with and without the index", async () 
 			lat: 11.25,
 			lon: 112.5,
 			boundingBox: { minLon: 90, maxLon: 135, minLat: 0, maxLat: 22.5 },
+			area: 2 ** (4.5 / 4) * APPENDIX_A_CELL, // area byte 5 (T = 2)
 		});
 		for (const id of noGeometry)
 			assert.equal(await reader.locate(id), null, `id ${id}`);
@@ -338,7 +345,11 @@ test("LocateIndex.open: reads the header and entries of the C.8 file", async () 
 		await Promise.all([0, 1, 2, 3, 4, 5, 6].map((id) => index.entry(id))),
 		[0x73, 0, 0x73, 0, 0, 0x74, 0],
 	);
+	assert.equal(await index.area(5), 5);
+	assert.deepEqual([...(await index.areas())], [14, 0, 14, 0, 0, 5, 0]);
+	assert.equal(await index.area(0), 14); // from the kept areas now
 	await assert.rejects(async () => await index.entry(7), RangeError);
+	await assert.rejects(async () => await index.area(7), RangeError);
 });
 
 test("LocateIndex.open: rejects malformed files", async () => {
@@ -357,8 +368,14 @@ test("LocateIndex.open: rejects malformed files", async () => {
 	);
 	await reader.close();
 	await assert.rejects(
-		async () => await LocateIndex.open(APPENDIX_C_BYTES.subarray(0, 25)),
-		/header implies 26/,
+		async () => await LocateIndex.open(APPENDIX_C_BYTES.subarray(0, 32)),
+		/header implies 33/,
+	);
+	const version0 = APPENDIX_C_BYTES.slice();
+	version0[8] = 0x20;
+	await assert.rejects(
+		async () => await LocateIndex.open(version0),
+		/predates place areas/,
 	);
 	const wide = APPENDIX_C_BYTES.slice();
 	wide[17] = 7; // entry_width
@@ -371,7 +388,7 @@ test("LocateIndex.open: rejects malformed files", async () => {
 test("useLocateIndex: rejects an index with the wrong checksum, place count or width", async () => {
 	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
 	const badChecksum = APPENDIX_C_BYTES.slice();
-	badChecksum[9]! ^= 0xff; // first checksum byte, after "CGEODATA" + version 0x20
+	badChecksum[9]! ^= 0xff; // first checksum byte, after "CGEODATA" + version 0x21
 	await assert.rejects(
 		async () => await reader.useLocateIndex(badChecksum),
 		/checksum mismatch/,
@@ -381,7 +398,8 @@ test("useLocateIndex: rejects an index with the wrong checksum, place count or w
 	const fewer = Uint8Array.from([
 		...APPENDIX_C_BYTES.subarray(0, 18),
 		6,
-		...APPENDIX_C_BYTES.subarray(19, 25),
+		...APPENDIX_C_BYTES.subarray(19, 25), // entries of places 0-5
+		...APPENDIX_C_BYTES.subarray(26, 32), // and their areas
 	]);
 	await assert.rejects(
 		async () => await reader.useLocateIndex(fewer),
@@ -392,7 +410,8 @@ test("useLocateIndex: rejects an index with the wrong checksum, place count or w
 		...APPENDIX_C_BYTES.subarray(0, 17),
 		2,
 		7,
-		...[...APPENDIX_C_BYTES.subarray(19)].flatMap((b) => [b, 0]),
+		...[...APPENDIX_C_BYTES.subarray(19, 26)].flatMap((b) => [b, 0]),
+		...APPENDIX_C_BYTES.subarray(26),
 	]);
 	await assert.rejects(
 		async () => await reader.useLocateIndex(wider),
