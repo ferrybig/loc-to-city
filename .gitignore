@@ -33,6 +33,9 @@ node_modules/
 .docker-image-stamp
 dist/
 reader/docs/
+# demo/src/prepareStatic.ts's output, for the Docker image
+demo/public/*.br
+demo/public/.etags.json
 playwright-report/
 test-results/
 

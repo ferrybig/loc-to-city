@@ -144,10 +144,51 @@
 			color: #666;
 			font-weight: normal;
 		}
-		#layer-panel .hint {
+		#layer-panel .hint,
+		#about-panel .hint {
 			color: #666;
 			margin-top: 8px;
 			line-height: 1.4;
+		}
+
+		#about-panel {
+			position: absolute;
+			bottom: 24px;
+			left: 12px;
+			z-index: 1000;
+			background: white;
+			padding: 10px 14px;
+			border-radius: 8px;
+			box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+			font-size: 12px;
+			max-width: 280px;
+		}
+		#about-panel h2 {
+			font-size: 13px;
+			margin: 0 0 6px;
+		}
+		#about-panel p {
+			margin: 0;
+		}
+		#about-panel summary {
+			cursor: pointer;
+			margin-top: 6px;
+		}
+		#download-list {
+			margin: 6px 0 0;
+			padding: 0;
+			list-style: none;
+		}
+		#download-list li {
+			margin-top: 4px;
+		}
+		#download-list .hint {
+			margin-top: 0;
+		}
+		#download-list .row-value {
+			float: right;
+			color: #666;
+			margin-left: 8px;
 		}
 		</style>
 	</head>
@@ -208,6 +249,28 @@
 				in, lines mark where places meet: darker between regions, darkest
 				between countries.
 			</div>
+		</section>
+
+		<section id="about-panel" aria-labelledby="about-panel-heading" hidden>
+			<h2 id="about-panel-heading">Use the data</h2>
+			<p id="docs-link" hidden>
+				<a href="/docs/">Reader API docs</a>
+			</p>
+			<details id="downloads">
+				<summary>Download the dataset</summary>
+				<ul id="download-list"></ul>
+				<p class="hint">
+					Keep the file names: <code>openFile()</code> picks up the indexes next
+					to the <code>.bin</code>. They're optional, and
+					<code>cgeodata build-search-index</code>
+					/
+					<code>build-locate-index</code>
+					build them from the
+					<code>.bin</code>
+					too.
+				</p>
+				<p class="hint" id="data-attribution"></p>
+			</details>
 		</section>
 
 		<div id="map"></div>
@@ -474,6 +537,45 @@
 			const item = e.target.closest('[role="option"]');
 			if (item) pick(Number(item.dataset.index));
 		});
+
+		// ---- docs and downloads ----
+		function fmtBytes(bytes) {
+			if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+			return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+		}
+
+		/** The file's attribution notice, whose `[text](url)` links become
+		 * real ones. */
+		function fmtAttribution(text) {
+			return escapeHtml(text).replace(
+				/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+				'<a href="$2">$1</a>',
+			);
+		}
+
+		async function loadAbout() {
+			const resp = await fetch("/api/about");
+			if (!resp.ok) return;
+			const about = await resp.json();
+			const docsLink = document.getElementById("docs-link");
+			if (about.docs) {
+				docsLink.querySelector("a").href = about.docs;
+				docsLink.hidden = false;
+			}
+			document.getElementById("download-list").innerHTML = about.downloads
+				.map(
+					(d) => `<li>
+			<a href="${escapeHtml(d.url)}" download>${escapeHtml(d.name)}</a>
+			<span class="row-value">${fmtBytes(d.bytes)}</span>
+			<div class="hint">${escapeHtml(d.description)}</div>
+		</li>`,
+				)
+				.join("");
+			document.getElementById("data-attribution").innerHTML =
+				`Data: ${fmtAttribution(about.attribution)}`;
+			document.getElementById("about-panel").hidden = false;
+		}
+		loadAbout().catch(() => {});
 
 		async function goToPlace(place) {
 			try {

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
  * The CGEODATA demo's web server: serves the Leaflet page (with Leaflet
- * itself, see staticAssets.ts), a JSON query API, and a tile overlay.
+ * itself, see staticAssets.ts), a JSON query API, a tile overlay, the
+ * reader's API reference under /docs/ (once `npm run docs -w reader` has
+ * built it) and the dataset plus the indexes in use as downloads.
  *
  *   node src/server.ts [port] [dataset.bin]
  *
@@ -14,48 +16,42 @@
  * The dataset is only ever read in a piscina pool of worker threads
  * (src/worker.ts); this thread just routes requests to them.
  */
-import {
-	createServer,
-	type IncomingMessage,
-	type ServerResponse,
-} from "node:http";
+import { stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import express, { type Request, type Response } from "express";
 import { Piscina, queueOptionsSymbol } from "piscina";
-import { loadStaticAssets, sendAsset } from "./staticAssets.ts";
+import {
+	type Download,
+	download,
+	downloadRouter,
+	downloadUrl,
+} from "./downloads.ts";
+import { errorHandler, QueueFullError } from "./errors.ts";
+import { hasDocs, staticRouter } from "./staticAssets.ts";
 import { type LaneOptions, LaneTaskQueue } from "./taskQueue.ts";
 import { defaultTileResolution } from "./tiles.ts";
 import type { Cancellable, WorkerData } from "./worker.ts";
 
 /** The worker's exports, each one a task `piscina.run` can name. */
 type Tasks = typeof import("./worker.ts");
-/** The ones a request runs; `indexes` only runs once, at startup. */
-type RequestTask = Exclude<keyof Tasks, "indexes">;
-
-/** The pool's queue already holds `maxQueue` tasks. */
-class QueueFullError extends Error {}
+/** The ones a request runs; `info` only runs once, at startup. */
+type RequestTask = Exclude<keyof Tasks, "info">;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
 
-const TILE_RE = /^\/tiles\/(\d+)\/(\d+)\/(\d+)\.png$/;
-
 /** The query parameter `name` as a number, or null when it is absent,
- * empty or not a finite number (`Number(null)` and `Number("")` are 0,
- * which would otherwise pass for a real value). */
-function numberParam(url: URL, name: string): number | null {
-	const raw = url.searchParams.get(name);
-	if (raw === null || raw.trim() === "") return null;
+ * empty, repeated or not a finite number (`Number("")` is 0, which would
+ * otherwise pass for a real value). */
+function numberParam(req: Request, name: string): number | null {
+	const raw = req.query[name];
+	if (typeof raw !== "string" || raw.trim() === "") return null;
 	const value = Number(raw);
 	return Number.isFinite(value) ? value : null;
 }
 
 const MAX_TILE_ZOOM = 24;
-
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-	res.writeHead(status, { "Content-Type": "application/json" });
-	res.end(JSON.stringify(body));
-}
 
 async function main(): Promise<void> {
 	const port = Number(process.argv[2] ?? 8766);
@@ -64,7 +60,10 @@ async function main(): Promise<void> {
 		? path.resolve(datasetArg)
 		: path.join(REPO_ROOT, "data/03-final/zuid-holland.bin");
 
-	const assets = loadStaticAssets();
+	const docs = hasDocs();
+	if (!docs) {
+		console.error("No API docs; build them with `npm run docs -w reader`.");
+	}
 
 	console.error(`Loading ${datasetPath}...`);
 	const pool = new Piscina({
@@ -86,7 +85,7 @@ async function main(): Promise<void> {
 	 * bypass the queue (see LaneTaskQueue); a task instead carries a
 	 * `cancelled` flag, set once the client goes away (see Cancellable). */
 	async function run<N extends RequestTask>(
-		res: ServerResponse,
+		res: Response,
 		name: N,
 		task: Omit<Parameters<Tasks[N]>[0], keyof Cancellable>,
 	): Promise<Exclude<ReturnType<Tasks[N]>, undefined>> {
@@ -115,113 +114,117 @@ async function main(): Promise<void> {
 
 	// Doubles as a startup check: a dataset that fails to open rejects
 	// here, before the server listens, rather than on every request.
-	const indexStatus: string[] = await pool.run(undefined, { name: "indexes" });
-	for (const line of indexStatus) console.error(line);
+	const info: ReturnType<Tasks["info"]> = await pool.run(undefined, {
+		name: "info",
+	});
+	for (const { message } of info.indexes) console.error(message);
 	console.error("Loaded.");
 
-	async function handle(
-		req: IncomingMessage,
-		url: URL,
-		res: ServerResponse,
-	): Promise<void> {
-		const asset = assets.get(url.pathname);
-		if (asset) {
-			sendAsset(req, res, asset);
-			return;
-		}
+	const [searchIndex, locateIndex] = info.indexes;
+	const downloads = [
+		download(datasetPath, "The dataset"),
+		searchIndex?.used &&
+			download(searchIndex.path, "Search index: faster search"),
+		locateIndex?.used &&
+			download(
+				locateIndex.path,
+				"Locate index: positions of places, search ranked by area",
+			),
+	].filter((d): d is Download => !!d);
 
-		if (url.pathname === "/api/query") {
-			const lat = numberParam(url, "lat");
-			const lon = numberParam(url, "lon");
-			if (lat === null || lon === null) {
-				sendJson(res, 400, { error: "missing or invalid lat/lon" });
-				return;
-			}
-			sendJson(res, 200, await run(res, "query", { lat, lon }));
-			return;
-		}
+	const app = express();
+	app.disable("x-powered-by");
 
-		if (url.pathname === "/api/search") {
-			const q = url.searchParams.get("q") ?? "";
-			if (!q.trim()) {
-				sendJson(res, 200, { results: [] });
-				return;
-			}
-			sendJson(res, 200, { results: await run(res, "search", { q }) });
-			return;
-		}
+	app.use(staticRouter());
+	app.use(downloadRouter(downloads));
 
-		if (url.pathname === "/api/locate") {
-			const id = numberParam(url, "id");
-			if (id === null || !Number.isInteger(id) || id < 0) {
-				sendJson(res, 400, { error: "missing or invalid id" });
-				return;
-			}
-			const pos = await run(res, "locate", { id });
-			if (!pos) {
-				sendJson(res, 404, { error: "place has no geometry" });
-				return;
-			}
-			sendJson(res, 200, pos);
-			return;
-		}
-
-		const tileMatch = TILE_RE.exec(url.pathname);
-		if (tileMatch) {
-			const z = Number(tileMatch[1]);
-			const x = Number(tileMatch[2]);
-			const y = Number(tileMatch[3]);
-			// `res` overrides the zoom-based default, for benchmarking.
-			const resolution = url.searchParams.has("res")
-				? numberParam(url, "res")
-				: defaultTileResolution(z);
-			const tilesPerSide = 2 ** z;
-			if (
-				z > MAX_TILE_ZOOM ||
-				x >= tilesPerSide ||
-				y >= tilesPerSide ||
-				resolution === null ||
-				!Number.isInteger(resolution) ||
-				resolution < 1 ||
-				resolution > 256
-			) {
-				sendJson(res, 400, { error: "invalid tile coordinates or res" });
-				return;
-			}
-			const png = await run(res, "tile", { x, y, z, resolution });
-			res.writeHead(200, {
-				"Content-Type": "image/png",
-				"Cache-Control": "public, max-age=3600",
-			});
-			res.end(png);
-			return;
-		}
-
-		sendJson(res, 404, { error: "not found" });
-	}
-
-	const server = createServer((req, res) => {
-		const url = new URL(req.url ?? "/", "http://localhost");
-		handle(req, url, res).catch((err: unknown) => {
-			// The client went away; there's no one to answer.
-			if (res.destroyed) return;
-			// A RangeError is the reader rejecting the request's coordinate
-			// or place id. Anything but that or a full queue is a bug.
-			const status =
-				err instanceof QueueFullError
-					? 503
-					: err instanceof RangeError
-						? 400
-						: 500;
-			if (status === 500) console.error(err);
-			sendJson(res, status, {
-				error: err instanceof Error ? err.message : String(err),
-			});
+	app.get("/api/about", async (_req, res) => {
+		res.json({
+			attribution: info.attribution,
+			docs: docs ? "/docs/" : null,
+			downloads: await Promise.all(
+				downloads.map(async (d) => ({
+					name: d.name,
+					description: d.description,
+					url: downloadUrl(d),
+					bytes: (await stat(d.path)).size,
+				})),
+			),
 		});
 	});
 
+	app.get("/api/query", async (req, res) => {
+		const lat = numberParam(req, "lat");
+		const lon = numberParam(req, "lon");
+		if (lat === null || lon === null) {
+			res.status(400).json({ error: "missing or invalid lat/lon" });
+			return;
+		}
+		res.json(await run(res, "query", { lat, lon }));
+	});
+
+	app.get("/api/search", async (req, res) => {
+		const q = typeof req.query.q === "string" ? req.query.q : "";
+		if (!q.trim()) {
+			res.json({ results: [] });
+			return;
+		}
+		res.json({ results: await run(res, "search", { q }) });
+	});
+
+	app.get("/api/locate", async (req, res) => {
+		const id = numberParam(req, "id");
+		if (id === null || !Number.isInteger(id) || id < 0) {
+			res.status(400).json({ error: "missing or invalid id" });
+			return;
+		}
+		const pos = await run(res, "locate", { id });
+		if (!pos) {
+			res.status(404).json({ error: "place has no geometry" });
+			return;
+		}
+		res.json(pos);
+	});
+
+	app.get(/^\/tiles\/(\d+)\/(\d+)\/(\d+)\.png$/, async (req, res) => {
+		const z = Number(req.params[0]);
+		const x = Number(req.params[1]);
+		const y = Number(req.params[2]);
+		// `res` overrides the zoom-based default, for benchmarking.
+		const resolution =
+			req.query.res !== undefined
+				? numberParam(req, "res")
+				: defaultTileResolution(z);
+		const tilesPerSide = 2 ** z;
+		if (
+			z > MAX_TILE_ZOOM ||
+			x >= tilesPerSide ||
+			y >= tilesPerSide ||
+			resolution === null ||
+			!Number.isInteger(resolution) ||
+			resolution < 1 ||
+			resolution > 256
+		) {
+			res.status(400).json({ error: "invalid tile coordinates or res" });
+			return;
+		}
+		const png = await run(res, "tile", { x, y, z, resolution });
+		res.set({
+			"Content-Type": "image/png",
+			"Cache-Control": "public, max-age=3600",
+		});
+		res.end(png);
+	});
+
+	app.use((_req, res) => {
+		res.status(404).json({ error: "not found" });
+	});
+	app.use(errorHandler);
+
 	const host = process.env.HOST ?? "127.0.0.1";
-	server.listen(port, host, () => {
+	// Express hands a failure to listen (a port in use) to the callback.
+	app.listen(port, host, (err?: Error) => {
+		if (err) throw err;
 		console.error(`Serving on http://${host}:${port} (dataset=${datasetPath})`);
 	});
 }

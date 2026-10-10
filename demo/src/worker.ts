@@ -22,23 +22,38 @@ export interface WorkerData {
 	datasetPath: string;
 }
 
+/** Whether one sidecar index is in use, for the server to log and to
+ * offer for download. */
+export interface IndexStatus {
+	path: string;
+	/** Attached: found next to the dataset and matching it. */
+	used: boolean;
+	message: string;
+}
+
 /** Opens the sidecar index `openFile()` found next to the dataset, if
- * there is one; one that doesn't match the dataset is dropped. Returns
- * what happened, for the server to log once rather than every worker
- * logging it. */
+ * there is one; one that doesn't match the dataset is dropped. */
 async function attachIndex(
 	kind: string,
-	indexPath: string,
+	path: string,
 	has: () => Promise<boolean>,
 	drop: () => Promise<void>,
-): Promise<string> {
+): Promise<IndexStatus> {
 	try {
 		return (await has())
-			? `Using ${kind} index ${indexPath}.`
-			: `No ${kind} index at ${indexPath}; ${kind} scans the dataset.`;
+			? { path, used: true, message: `Using ${kind} index ${path}.` }
+			: {
+					path,
+					used: false,
+					message: `No ${kind} index at ${path}; ${kind} scans the dataset.`,
+				};
 	} catch (error) {
 		await drop();
-		return `Ignoring ${kind} index ${indexPath}: ${(error as Error).message}`;
+		return {
+			path,
+			used: false,
+			message: `Ignoring ${kind} index ${path}: ${(error as Error).message}`,
+		};
 	}
 }
 
@@ -66,10 +81,11 @@ const indexStatus = [
 	),
 ];
 
-/** One line per sidecar index saying whether this worker uses it. Every
- * worker opens the same files, so any one worker's answer holds for all. */
-export function indexes(): string[] {
-	return indexStatus;
+/** The dataset's attribution notice, and whether each sidecar index is in
+ * use. Every worker opens the same files, so any one worker's answer
+ * holds for all. */
+export function info(): { attribution: string; indexes: IndexStatus[] } {
+	return { attribution: reader.header.attribution, indexes: indexStatus };
 }
 
 /** Set on every request's task by the server, and flipped to true once

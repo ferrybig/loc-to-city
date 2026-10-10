@@ -76,3 +76,14 @@ test("search results come back when the search box is focused again", async ({
 	await expect(options).toHaveCount(0);
 	await expect(page.locator(".leaflet-popup-content")).toContainText("Delft");
 });
+
+test("the dataset can be downloaded from the page", async ({ page }) => {
+	await page.goto("/");
+	await page.locator("#downloads summary").click();
+	const link = page.getByRole("link", { name: "zuid-holland.bin" });
+	await expect(link).toBeVisible();
+	const resp = await page.request.get((await link.getAttribute("href"))!);
+	expect(resp.status()).toBe(200);
+	expect(resp.headers()["content-disposition"]).toContain("zuid-holland.bin");
+	expect((await resp.body()).subarray(0, 4).toString("latin1")).toBe("CGEO");
+});

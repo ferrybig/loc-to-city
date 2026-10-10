@@ -8,16 +8,20 @@
 		"test": "node --test test/*.test.ts",
 		"typecheck": "tsc -p tsconfig.test.json",
 		"e2e": "playwright test",
-		"dev": "node src/server.ts"
+		"dev": "node src/server.ts",
+		"prepare-static": "node src/prepareStatic.ts"
 	},
 	"dependencies": {
 		"@ferrybig/cgeodata-reader": "*",
+		"express": "^5.2.1",
+		"express-static-gzip": "^3.0.2",
 		"leaflet": "1.9.4",
 		"piscina": "^5.3.2",
 		"pngjs": "^7.0.0"
 	},
 	"devDependencies": {
 		"@playwright/test": "^1.48.0",
+		"@types/express": "^5.0.6",
 		"@types/node": "^24.0.0",
 		"@types/pngjs": "^6.0.5",
 		"typescript": "^5.7.0"

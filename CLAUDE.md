@@ -40,7 +40,13 @@ Four npm workspaces (Node >=26, see `.nvmrc`), all TypeScript, ESM
   (`00-raw` → `01-extracted` → `02-resolved` → `03-final`) and file
   dependency graph. Outputs land in `data/02-resolved/`, which is what you
   point the compressor at.
-- **`demo/`** — a click-to-query Leaflet page plus a grid tile overlay.
+- **`demo/`** — an Express server: a click-to-query Leaflet page plus a
+  grid tile overlay, the reader's TypeDoc output under `/docs/` (when
+  built), and the dataset plus the sidecar indexes in use under
+  `/download/`. Static files and downloads are served from disk;
+  `npm run prepare-static -w demo -- [dir...]` (the Docker build runs it)
+  writes `.br` files and a content-hash `.etags.json` per directory. Don't
+  run it in a dev checkout: its output goes stale on the next edit.
 
 ## Code style: tabs
 
