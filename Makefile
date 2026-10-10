@@ -1,6 +1,8 @@
 .PHONY: world europe netherlands world-high-res
 world: data/03-final/world.bin
-world-high-res: data/03-final/world-high-res.bin
+world-high-res: data/03-final/world-high-res.bin \
+	data/03-final/world-high-res.locate-index.bin \
+	data/03-final/world-high-res.search-index.bin
 europe: data/03-final/europe.bin
 netherlands: data/03-final/zuid-holland.bin
 
@@ -79,8 +81,11 @@ $(FINAL_BINS): %: %.args node_modules data/02-resolved/$$(SOURCE)/cities-filtere
 FORCE:
 
 # Sidecar indexes the reader (and so the demo) picks up next to a .bin, e.g.
-# `make data/03-final/world-high-res.search-index.bin`.
-%.search-index.bin: %.bin node_modules
+# `make data/03-final/world-high-res.search-index.bin`. The search index
+# comes after the locate index: build-search-index ranks its short-query
+# table by area when a locate index is next to the .bin, as the reader then
+# ranks searches, and the reader only uses a table ranked its own way.
+%.search-index.bin: %.bin %.locate-index.bin node_modules
 	node reader/src/cli.ts build-search-index $< --output $@
 
 %.locate-index.bin: %.bin node_modules
