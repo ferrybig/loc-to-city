@@ -252,9 +252,13 @@
 		</section>
 
 		<section id="about-panel" aria-labelledby="about-panel-heading" hidden>
-			<h2 id="about-panel-heading">Use the data</h2>
+			<h2 id="about-panel-heading">Using the data:</h2>
 			<p id="docs-link" hidden>
 				<a href="/docs/">Reader API docs</a>
+			</p>
+			<p id="data-precision"></p>
+			<p class="hint" id="data-precision-full">
+				(east–west × north–south) at the equator
 			</p>
 			<details id="downloads">
 				<summary>Download the dataset</summary>
@@ -269,7 +273,6 @@
 					<code>.bin</code>
 					too.
 				</p>
-				<p class="hint" id="data-precision"></p>
 				<p class="hint" id="data-attribution"></p>
 			</details>
 		</section>
@@ -555,7 +558,7 @@
 		 * longitude is widest. */
 		function fmtPrecision({ lon, lat }) {
 			const METRES_PER_DEGREE = 111_195;
-			return `Precision of the data: cells of ${fmtLength(lon * METRES_PER_DEGREE)} \u00d7 ${fmtLength(lat * METRES_PER_DEGREE)} (east\u2013west \u00d7 north\u2013south) at the equator; the east\u2013west size shrinks towards the poles.`;
+			return `Data precision: ${fmtLength(lon * METRES_PER_DEGREE)} × ${fmtLength(lat * METRES_PER_DEGREE)}`;
 		}
 
 		/** The file's attribution notice, whose `[text](url)` links become
