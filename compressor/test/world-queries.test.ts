@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -8,8 +8,11 @@ import { openFile } from "@ferrybig/cgeodata-reader/node";
 
 // Spot-checks against the worldwide build, the counterpart of
 // zuid-holland-queries.test.ts for everything `countries.md` documents.
-// Skipped unless a worldwide .bin exists (CGEODATA_WORLD_BIN, else
-// data/03-final/world.bin, else world-high-res.bin).
+// Skipped unless a worldwide .bin exists. Uses CGEODATA_WORLD_BIN if set,
+// else the most recently built of data/03-final/world.bin and
+// world-high-res.bin (they are built at different times, and a stale one
+// would report fixes as broken). The first test below says which file ran
+// and warns when it is older than the resolved input it was built from.
 //
 // Two kinds of case:
 // - Plain cases are answers that were fixed (or were never broken) and must
@@ -21,9 +24,17 @@ import { openFile } from "@ferrybig/cgeodata-reader/node";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FINAL = path.resolve(__dirname, "../../data/03-final");
-const BIN_PATH = [process.env.CGEODATA_WORLD_BIN, path.join(FINAL, "world.bin"), path.join(FINAL, "world-high-res.bin")].find(
-  (candidate): candidate is string => candidate !== undefined && existsSync(candidate),
-);
+const RESOLVED_INPUT = path.resolve(__dirname, "../../data/02-resolved/world/hierarchy.json");
+
+function pickWorldBin(): string | undefined {
+  const fromEnv = process.env.CGEODATA_WORLD_BIN;
+  if (fromEnv !== undefined) return existsSync(fromEnv) ? fromEnv : undefined;
+  return [path.join(FINAL, "world.bin"), path.join(FINAL, "world-high-res.bin")]
+    .filter((candidate) => existsSync(candidate))
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+}
+
+const BIN_PATH = pickWorldBin();
 const skip = BIN_PATH === undefined;
 
 /** Any non-empty answer: the tier must resolve, whatever it is called. */
@@ -143,3 +154,11 @@ for (const c of CASES) {
     }
   });
 }
+
+test("which worldwide .bin the cases ran against", { skip }, (t) => {
+  const bin = statSync(BIN_PATH!);
+  t.diagnostic(`using ${BIN_PATH} (built ${bin.mtime.toISOString()})`);
+  if (existsSync(RESOLVED_INPUT) && statSync(RESOLVED_INPUT).mtimeMs > bin.mtimeMs) {
+    t.diagnostic(`WARNING: ${BIN_PATH} is older than ${RESOLVED_INPUT}; rebuild it before trusting failures`);
+  }
+});

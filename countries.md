@@ -157,7 +157,7 @@ below).
   Check by comparing NE's Germany ring to OSM's `admin_level=2` Germany at
   these points. The same fix as the item above (OSM outlines) would cover
   it; the build-time cost of full-precision OSM outlines needs measuring
-  (the README's "How much precision these tolerances cost" has the NE
+  (history.md's "How much precision these tolerances cost" has the NE
   numbers).
 
   **Research item:** before committing to it, measure whether OSM's
@@ -373,13 +373,15 @@ tessellates its country, so the bug was always grain, not coverage.
 - **Guelph gap-fill.** Guelph, Ontario is `place=city` at level 6 (Ontario's
   regional-municipality tier), a single-tier city distinct from the
   level-8 municipalities. Gap-filled at 6; `search` found no Guelph before.
-- **Terrace regressed.** *(open)* 54.5164, -128.6003 resolves to `Regional
-  District of Kitimat-Stikine` again on the 2026-10-10 builds, although the
+- **Terrace does not resolve on the current builds.** *(open)* 54.5164,
+  -128.6003 returns `Regional District of Kitimat-Stikine`, although the
   entry above was verified fixed. `data/02-resolved/world/cities-filtered.geojsonseq`
-  (2026-10-09) has no Canadian feature named `Terrace` at all (Toronto and
-  Guelph are there), so the loss is upstream of the compressor: either the
-  2026-09-29 planet extract no longer has the level-8 relation, or
-  data-ingest drops it. Not investigated.
+  (built 2026-10-09 13:00) has no Canadian feature named `Terrace` at all
+  (Toronto and Guelph are there), and both `world-high-res.bin` and
+  `world-e8-d9.bin` agree, so the loss is upstream of the compressor. Not
+  established whether this is a regression in data-ingest, a resolved input
+  built before the relevant code, or the 2026-09-29 planet extract lacking
+  the relation: see the Bremen entry under Germany for how to tell.
 - **Surrounding rural municipality.** *(open)* 49.952987, -98.299484 is
   `Portage la Prairie` (the city); 49.888884, -98.170395 is `Rural
   Municipality of Portage la Prairie`. See "Surrounding rural unit".
@@ -518,15 +520,25 @@ tessellates its country, so the bug was always grain, not coverage.
   `place=city` relation at level 6 for the city itself, and `DE: { city:
   [8, 6] }` gap-fills it. Verified at the time that it leaked no Landkreis
   name into normal cities (Munich, Cologne, Frankfurt, Hannover unchanged).
-- **Bremen regressed.** *(open)* 53.079296, 8.801694 returns `region
-  Bremen`, `city -` on the 2026-10-10 builds, and
-  `data/02-resolved/world/cities-filtered.geojsonseq` (2026-10-09) has no
-  German feature named `Bremen`. Same symptom as Reading, Brighton and
-  Terrace, all of which are level-6 or otherwise gap-filled entries; Guelph
-  (also level-6 gap-fill) survived, and Westminster (level-8 gap-fill)
-  too. Candidates to bisect: `20eba2c` (stream primaries instead of
-  batching), `9c6a89a` (OSM country borders), `15fb005` (UK/Ireland grain),
-  or a planet-extract change. Fixing this likely fixes the UK ones.
+- **Bremen does not resolve on the current builds.** *(open)* 53.079296,
+  8.801694 returns `region Bremen`, `city -`, and
+  `data/02-resolved/world/cities-filtered.geojsonseq` (built 2026-10-09
+  13:00) has no German feature named `Bremen`. `world-high-res.bin`
+  (2026-10-10) and `world-e8-d9.bin` agree because both were compressed from
+  that input; `world.bin` is not present in this checkout (the other
+  worktree's, from 2026-09-28, predates the fix). Same symptom as Reading,
+  Brighton, Bristol and Terrace, all gap-fill or otherwise missing entries;
+  Guelph (level-6 gap-fill) and Westminster (level-8 gap-fill) are present.
+
+  **Not established:** whether this is a regression, or just a resolved
+  input built before the code that fixes it. The input is only one minute
+  older than the last merge touching `data-ingest` (`337f74e`), which is not
+  conclusive. To tell: re-run `prepare-world.ts` with the current code and
+  check whether `Bremen` appears (a full run, see PIPELINE-STAGES.md), or
+  scratch-script the extract for the level-6 relation first. If it is a
+  regression, candidates to bisect are `20eba2c` (stream primaries instead
+  of batching), `9c6a89a` (OSM country borders) and `15fb005` (UK/Ireland
+  grain). Rebuild before trusting any "regressed" label here.
 - **Berlin and Hamburg are regions with no city.** *(open)* 52.520008,
   13.404954 and 53.551086, 9.993682. Confirmed: neither has a second,
   lower-level relation anywhere in the German extract, unlike Bremen. See
@@ -936,13 +948,13 @@ for Scotland and Northern Ireland.
   are unchanged (Guildford, Cambridge, Malvern). A two-tier county whose
   representative point is unparished (Worcestershire) is added but loses to
   the smaller district or parish wherever one exists.
-- **Level-6 gap-fill is not working.** *(open)* On the 2026-10-10 builds
-  Reading (51.4556, -0.9693), Brighton (50.8225, -0.1372) and Bristol
+- **Level-6 gap-fill does not show up on the current builds.** *(open)*
+  On the 2026-10-10 builds Reading (51.4556, -0.9693), Brighton (50.8225, -0.1372) and Bristol
   (51.453900, -2.595348) all return `England`, `city -`, and
   `cities-filtered.geojsonseq` has no GB feature named `Reading`, `Bristol`
   or `Brighton and Hove`. Level-8 gap-fill still works (`City of Westminster`
-  is there and resolves). Same symptom as Bremen and Terrace; see Germany for
-  the bisect candidates. (Kinross, 56.128332, -3.306370, now resolves to
+  is there and resolves). Same symptom as Bremen and Terrace; whether it is a
+  regression or a stale input is undetermined, see Germany. (Kinross, 56.128332, -3.306370, now resolves to
   `Lochgelly` through the Scottish Voronoi cells, not to `Fife`.)
 - **London and Potters Bar.** *(open)* 51.515046, -0.093212 (City of London)
   and 51.695597, -0.187626 (Potters Bar) return `England`, `city -`. London
