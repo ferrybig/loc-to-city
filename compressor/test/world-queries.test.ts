@@ -1,7 +1,7 @@
-import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import type { CGeoDataReader } from "@ferrybig/cgeodata-reader";
 import { openFile } from "@ferrybig/cgeodata-reader/node";
@@ -125,7 +125,10 @@ const CASES: Case[] = [
 
 let reader: Promise<CGeoDataReader> | undefined;
 function world(): Promise<CGeoDataReader> {
-  return (reader ??= openFile(BIN_PATH!));
+  if (!reader) {
+    reader = openFile(BIN_PATH!);
+  }
+  return reader;
 }
 
 for (const c of CASES) {
