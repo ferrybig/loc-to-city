@@ -49,6 +49,38 @@ from the generated table's comments and are the share of the country's
 Natural Earth area that level's polygons add up to, so over 100% means
 overlapping candidates.
 
+## What each tier is for
+
+The three tiers feed three pickers in a consumer such as Immich, and an
+answer is judged by whether it belongs in the picker for its tier:
+
+- **Country** is shown in a country list.
+- **Region** is shown in a state / province / region list.
+- **City** is shown in a city / village list.
+
+Every answer serves two questions: "where was this photo taken" and the
+reverse, "show me all photos in the city of Beijing". The reverse question
+only works if the place is listed where a person looks for it. So:
+
+- The city tier names the city or village a person would say (Beijing, not
+  "Dongcheng District"; Tokyo, not "Shinjuku"; London, not "City of
+  Westminster"). The project does not go deeper than city / village / rural
+  level, so a sub-district is not a better answer than the city around it.
+- A city must not exist only as a region. Berlin, Prague and Kyiv listed in
+  the state / province / region picker and absent from the city picker is
+  wrong, even though the name shown for a photo is the same.
+- A region list should hold regions: a city, district or parish that fills
+  the region tier because the country has no level between country and
+  town is a symptom to record, not an answer.
+- A rule that would pass a district, or a region named for the city, to
+  make a number look better is the wrong rule.
+
+When deciding whether a lookup "resolves correctly", or whether a new
+`COUNTRY_ADMIN_LEVELS` choice is an improvement, apply this and not "the
+name looks plausible". The capitals benchmark in
+`compressor/test/world-queries.test.ts` is this rule applied to every
+country (see "Capitals" under Cross-cutting patterns).
+
 ## How a place gets its country, region and city
 
 - **Country** comes from Natural Earth's 10m `admin_0` outlines
@@ -232,6 +264,105 @@ below).
   Egypt, Chad, Eritrea and Libya were handled with the Voronoi fallback;
   none of the others have been examined for whether OSM has a better level
   or whether the fallback is the right tool. *(open)*
+- **Capitals.** *(open)* `compressor/test/world-queries.test.ts` looks up
+  the capital of every country and dependency GeoNames lists one for
+  (232; its `CAPITALS` and `OPEN_CAPITALS` tables carry the
+  coordinates and the exact rule) and measured 75 resolving and 157
+  not, on `world-high-res.bin` (built 2026-10-10). A capital resolves when
+  the country is right and the **city** tier is named for the capital. The
+  goal is a city answer: "all photos in the city of Beijing" is a city
+  query, so a capital must not answer with a district inside it (Beijing
+  as "Dongcheng District", Tokyo as "Shinjuku", London as "City of
+  Westminster") nor only as a region (Berlin, Prague and Kyiv are in the
+  region selector and never in the city one; see "What each tier is for"
+  above). Each miss is one of five shapes, which are different work:
+  - **No country, or the wrong one** (5): the point is outside every
+    outline. Vatican and Gibraltar answer Italy and Spain; the three atolls
+    answer nothing. See "Natural Earth's outlines are too coarse" above and
+    the Vatican section.
+    Gibraltar (Gibraltar); Tarawa (Kiribati); Majuro (Marshall Is.);
+    Funafuti (Tuvalu); Vatican City (Vatican)
+  - **Country only** (26): neither a region nor a city covers the point.
+    Microstates and small territories, and also Manila (Philippines),
+    Tbilisi (Georgia) and Skopje (North Macedonia), which have their own
+    sections.
+    Andorra la Vella (Andorra); The Valley (Anguilla); Oranjestad (Aruba);
+    Nassau (Bahamas); George Town (Cayman Is.); Willemstad (Curaçao);
+    Stanley (Falkland Is.); Port-aux-Français (Fr. S. Antarctic Lands);
+    Tbilisi (Georgia); Bissau (Guinea-Bissau); Saint Helier (Jersey);
+    Kuwait City (Kuwait); Valletta (Malta); Monaco (Monaco); Alofi (Niue);
+    Skopje (North Macedonia); Manila (Philippines); Adamstown (Pitcairn
+    Is.); Grytviken (S. Geo. and the Is.); Jamestown (Saint Helena); San
+    Marino (San Marino); Philipsburg (Sint Maarten); Gustavia (St-
+    Barthélemy); Marigot (St-Martin); Saint-Pierre (St. Pierre and
+    Miquelon); Mata-Utu (Wallis and Futuna Is.)
+  - **The capital is only a region** (40): the region carries the
+    capital's name and no city covers the point. This is the previous
+    entry ("Capitals that are their own region"), which has the untried
+    mechanism for it; Kyiv, Prague and Bremen are tracked by their own
+    cases there.
+    Vienna (Austria); Baku (Azerbaijan); Minsk (Belarus); Hamilton
+    (Bermuda); Thimphu (Bhutan); Gaborone (Botswana); Gitega (Burundi);
+    Praia (Cabo Verde); Bangui (Central African Rep.); Yamoussoukro (Côte
+    d'Ivoire); Nicosia (Cyprus); Prague (Czechia); Kinshasa (Dem. Rep.
+    Congo); Djibouti (Djibouti); Mbabane (eSwatini); Banjul (Gambia);
+    Berlin (Germany); Conakry (Guinea); Pristina (Kosovo); Riga (Latvia);
+    Maseru (Lesotho); Monrovia (Liberia); Vilnius (Lithuania); Lilongwe
+    (Malawi); Kuala Lumpur (Malaysia); Male (Maldives); Bamako (Mali);
+    Port Louis (Mauritius); Saipan (N. Mariana Is.); Yaren (Nauru);
+    Bucharest (Romania); Moscow (Russia); Castries (Saint Lucia);
+    Bratislava (Slovakia); Ljubljana (Slovenia); Honiara (Solomon Is.);
+    Basseterre (St. Kitts and Nevis); Dushanbe (Tajikistan); Port of Spain
+    (Trinidad and Tobago); Kyiv (Ukraine)
+  - **A region around it, no city** (26): the region is a province,
+    parish or federal district (Washington is "District of Columbia", New
+    Delhi is "Delhi", Brasília is "Distrito Federal"), and no city covers
+    the point. Washington, New Delhi and Brasília are the capital's own
+    jurisdiction under a different name, so they probably need the same
+    mechanism as the previous shape.
+    Manama (Bahrain); Bridgetown (Barbados); Belmopan (Belize); Brasília
+    (Brazil); Road Town (British Virgin Is.); Quito (Ecuador); Suva
+    (Fiji); Nuuk (Greenland); Saint George's (Grenada); Saint Peter Port
+    (Guernsey); New Delhi (India); Macau (Macao); Antananarivo
+    (Madagascar); Plymouth (Montserrat); Ngerulmud (Palau); Kigali
+    (Rwanda); Apia (Samoa); Victoria (Seychelles); Kingstown (St. Vin. and
+    Gren.); Khartoum (Sudan); Lomé (Togo); Nuku‘alofa (Tonga); Tunis
+    (Tunisia); Cockburn Town (Turks and Caicos Is.); Washington (United
+    States of America); Port-Vila (Vanuatu)
+  - **A district, ward or parish instead of the capital** (60): the
+    country's city tier is finer than its capital (Beijing, Tokyo, Seoul,
+    Bangkok, Lisbon, London and many more). The capital's own boundary
+    exists in OSM for most of these, usually a level above the one the
+    country is configured at; check the country's `admin_level` before
+    assuming a data gap. Where the district polygons tile the capital, a
+    whole-city gap-fill never wins (see Tallinn, Mexico City, Lisbon).
+    Algiers (Algeria); Saint John’s (Antigua and Barb.); Buenos Aires
+    (Argentina); Yerevan (Armenia); Canberra (Australia); Brussels
+    (Belgium); Porto-Novo (Benin); Bandar Seri Begawan (Brunei); Phnom
+    Penh (Cambodia); Beijing (China); Brazzaville (Congo); San José (Costa
+    Rica); Havana (Cuba); Tallinn (Estonia); Accra (Ghana); Port-au-Prince
+    (Haiti); Tegucigalpa (Honduras); Hong Kong (Hong Kong); Baghdad
+    (Iraq); Kingston (Jamaica); Tokyo (Japan); Amman (Jordan); Astana
+    (Kazakhstan); Nairobi (Kenya); Bishkek (Kyrgyzstan); Vientiane (Laos);
+    Beirut (Lebanon); Nouakchott (Mauritania); Mexico City (Mexico);
+    Palikir (Micronesia); Ulan Bator (Mongolia); Maputo (Mozambique); Nay
+    Pyi Taw (Myanmar); Abuja (Nigeria); Kingston (Norfolk Island);
+    Pyongyang (North Korea); Muscat (Oman); Islamabad (Pakistan); Panama
+    City (Panama); Port Moresby (Papua New Guinea); Lima (Peru); Lisbon
+    (Portugal); Dakar (Senegal); Freetown (Sierra Leone); Singapore
+    (Singapore); Mogadishu (Somalia); Pretoria (South Africa); Seoul
+    (South Korea); Paramaribo (Suriname); Taipei (Taiwan); Bangkok
+    (Thailand); Dili (Timor-Leste); Ankara (Turkey); Charlotte Amalie
+    (U.S. Virgin Is.); Abu Dhabi (United Arab Emirates); London (United
+    Kingdom); Tashkent (Uzbekistan); Caracas (Venezuela); Hanoi (Vietnam);
+    Sanaa (Yemen)
+  - Work it from the test: `node --test compressor/test/world-queries.test.ts`
+    lists every miss with what it answered. When a country's config is
+    fixed, move its row from `OPEN_CAPITALS` to `CAPITALS` and edit the lists
+    here. The rule is deliberately strict and is not to be relaxed to make
+    numbers look better: accepting a district, or a region named for the
+    capital, would pass 76 more capitals and say nothing about whether the
+    answer is what a user expects.
 
 ### The `place=city/town/village` tie-break tool
 
