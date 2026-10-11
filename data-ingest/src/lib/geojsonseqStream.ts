@@ -7,7 +7,7 @@ const RECORD_SEPARATOR = 0x1e;
  * export -f geojsonseq` produces) one feature at a time, without ever
  * holding the whole file in memory -- needed for multi-GB admin exports
  * (a naive full read is exactly what caused the OOM documented in
- * README.md's "Europe scaling test" section, for the same class of file). */
+ * history.md's "What scaling to Europe taught us" section, for the same class of file). */
 export async function* streamGeoJSONSeq(path: string): AsyncGenerator<Feature> {
   for await (const record of streamGeoJSONSeqRecords(path)) {
     yield JSON.parse(record.toString("utf8")) as Feature;

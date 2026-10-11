@@ -3,7 +3,7 @@
 `nl_cities.geojson` (and, until 2026-09-28, `eu_cities.geojson`) was
 produced by `scripts/extract_boundaries.py` /
 `scripts/extract_boundaries_europe.py` — the Python prototype documented
-in the root `README.md`'s "Historical record" section, deleted once the
+in the root `history.md`, deleted once the
 TypeScript pipeline superseded it. This repo's `CLAUDE.md` explicitly
 forbids resurrecting that deleted code, so nothing regenerates either
 file. Both were OSM `admin_level=10` ("woonplaats"-equivalent) polygons,

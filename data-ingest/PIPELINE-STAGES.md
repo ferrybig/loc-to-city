@@ -201,7 +201,7 @@ machine that doesn't already have the input.
 ## Orphan input: `data/00-raw/orphan/nl_cities.geojson`
 
 Produced by `scripts/extract_boundaries.py` — the deleted Python
-prototype (see README's "Historical record" section and this repo's
+prototype (see `history.md` and this repo's
 `CLAUDE.md`, which explicitly forbids resurrecting `scripts/`/`webapp/`).
 Nothing in the current TypeScript pipeline regenerates it, and — since
 `prepare-zuid-holland.ts`'s deletion — nothing reads it either any more.

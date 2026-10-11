@@ -11,11 +11,11 @@ get it wrong near borders — see README's "Why nearest-point is wrong"). The
 target consumer is Immich (Node.js), which is why the reader has zero
 runtime dependencies.
 
-`README.md` is split in two: everything up to "Historical record: the
-Python prototype" describes the current, working system; everything after
-that is a deleted Python prototype kept only as a record of what was
-measured and where the format/algorithms came from. Don't resurrect deleted
-`scripts/`/`webapp/` code or reference it as if it still exists.
+`README.md` describes the current, working system. `history.md` is what the
+deleted Python prototype (`scripts/`, `webapp/`) taught us, kept only as a
+record of what was measured and where the format/algorithms came from. Don't
+resurrect deleted `scripts/`/`webapp/` code or reference it as if it still
+exists.
 
 `countries.md` is the per-country ledger: which `admin_level` each country
 resolves at, every override/fallback and the measurement behind it, and the

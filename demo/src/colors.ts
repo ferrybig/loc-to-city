@@ -1,7 +1,6 @@
 /**
  * Deterministic place -> color mapping for the tile overlay, ported from
- * the deleted Python prototype's tile overlay (see README's historical
- * record). A place's global id is hashed to a hue (0-360); lightness is
+ * the deleted Python prototype's tile overlay (see history.md). A place's global id is hashed to a hue (0-360); lightness is
  * fixed and chroma depends only on the level, so a city stands out more
  * than a region-only or country-only area. The same place always renders
  * the same color across tiles, zoom levels, and requests of one dataset;

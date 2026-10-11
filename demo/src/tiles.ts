@@ -1,6 +1,6 @@
 /**
  * Renders a single Leaflet XYZ tile as a PNG, ported from the deleted
- * Python prototype's tile renderer (see README's historical record):
+ * Python prototype's tile renderer (see history.md):
  * query the reader for a sub-sampled grid of pixel centers in the tile,
  * color each cell by a hash of the resolved place, render small, then
  * upscale with nearest-neighbor (so the grid's actual cell structure stays

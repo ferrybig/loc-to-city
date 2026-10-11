@@ -2277,5 +2277,5 @@ A full-precision cell of this file is `45°` wide and `22.5°` high,
 - [FNV] Eastlake, D., Fowler, G., Noll, L., Vo, K-P., and T. Hansen,
   "The FNV Non-Cryptographic Hash Algorithm",
   draft-eastlake-fnv, <https://datatracker.ietf.org/doc/draft-eastlake-fnv/>.
-- [README](https://github.com/ferrybig/loc-to-city#readme): the prototype and measurements this format
+- [history.md](https://github.com/ferrybig/loc-to-city/blob/master/history.md): the prototype and measurements this format
   is derived from.
