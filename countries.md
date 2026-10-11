@@ -729,6 +729,53 @@ worldwide resolved data (`make netherlands`) and
   enclaves' own country answer may still be coarse; see Natural Earth item.
 - **Border artifact against Germany.** *(open)* 52.441101, 6.848860 returns
   Germany. See "Border artifacts".
+- **A village that crosses a municipal border is two places.**
+  *(false positive)* `search ansen` lists Ansen (Drenthe) twice, as ids
+  179687 and 179692; Alteveer (Drenthe) too, 52.6829, 6.4778 (De Wolden,
+  179701) and 52.6842, 6.4998 (Hoogeveen, 179714), which Google Maps also
+  draws as two polygons. Kept as is, decided 2026-10-11: a place here is an
+  administrative unit, and these are two units that happen to share a name.
+  Measured on `world-high-res.bin` and the `planet-latest-admin.geojson`
+  it was built from:
+  - Each village is two `admin_level=10` relations, both `source=BAG` with
+    the same `name`. Ansen is 3104 (Westerveld) and 3161 (De Wolden),
+    `ref:woonplaatscode`. The BAG's municipal woonplaats regulations make
+    woonplaats boundaries coincide with municipal ones, so a village
+    straddling the border is two woonplaatsen by design.
+  - They are separate places in the source too. Alteveer's halves are in
+    different municipalities and carry different `wikidata` (`Q2473000`,
+    `Q2289052`); Ansen's carry the same one (`Q1766685`), so shared
+    wikidata is no rule either way.
+  - Merging was considered and rejected. There is no safe rule: the same
+    shape occurs across region and country borders (Texarkana TX/AR,
+    Karesuando/Karesuvanto, Baarle-Nassau/Baarle-Hertog, the two
+    Rheinfeldens), where merging would be wrong, and any rule loose enough
+    to catch Alteveer needs exceptions. The visible cost is one extra row in
+    a search; a lookup shows the same "Ansen, Drenthe, Netherlands" for
+    both ids, and a consumer can dedupe on the displayed name, region and
+    country.
+  - The Dutch city tier has 39 `(name, region)` pairs that occur more than
+    once; 28 are adjacent polygons (polygons sharing border vertices) of
+    this kind: Ansen, Alteveer, Ruinen, Pesse, Spier, Stuifzand,
+    Tiendeveen, Hoogersmilde, Nieuweroord, Koedijk, Oudkarspel, Ursem,
+    Purmer, Biervliet, Kloetinge, Buurmalsen, Zennewijnen, Hoenderloo,
+    Klarenbeek, Loo Gld, Mastenbroek, Kloosterhaar, Sibculo,
+    Borgercompagnie, Startenhuizen, Vinkel, Zevenbergschen Hoek,
+    Deurningen. The other 11 are different villages that share a name
+    (Beek, Nes, Oudega, Heusden, ...; 9 km to 70 km apart).
+  - Worldwide, over `cities-filtered.geojsonseq` (252,735 cities), 4,408
+    groups share country, region and name; in 424 at least two polygons
+    share a border vertex (United States 147, Canada 72, Puerto Rico 32,
+    Netherlands 28, Brazil 9, Indonesia 9). Not looked through; an upper
+    bound for how common this is, which is the point.
+  - Spot-check: 52.795652, 6.367950 (inside 3104, Westerveld) resolves to
+    179687 and 52.782611, 6.333693 (inside 3161, De Wolden) to 179692, as
+    the polygons say.
+  - Related but not the same thing: 52.797867, 6.353445 is geometrically
+    inside De Wolden's Ansen (3161) but resolves to Westerveld's (3104),
+    because its ~300 m cell is mostly 3104 and a cell holds one answer.
+    That is ordinary border resolution, and harmless here since the names
+    are identical.
 
 ## Nicaragua (NI)
 

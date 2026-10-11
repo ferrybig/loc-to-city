@@ -49,6 +49,8 @@ interface Case {
   country?: Expected;
   region?: Expected;
   city?: Expected;
+  /** Must resolve to a different city id than this point (two same-named places, not one). */
+  otherCityThan?: readonly [lat: number, lon: number];
   /** Open issue: the countries.md section that documents why this fails. */
   todo?: string;
 }
@@ -84,6 +86,8 @@ const CASES: Case[] = [
   { name: "Almere, not Huizen", at: [52.333399, 5.237517], city: "Almere" },
   { name: "Soest, not Soesterberg", at: [52.131565, 5.277514], city: "Soest" },
   { name: "Open water off Enkhuizen is Lelystad's (false positive, see Netherlands)", at: [52.683459, 5.295410], region: "Flevoland", city: "Lelystad" },
+  { name: "Ansen: the Westerveld and De Wolden halves are separate places (false positive, see Netherlands)", at: [52.795652, 6.36795], country: "Netherlands", region: "Drenthe", city: "Ansen", otherCityThan: [52.782611, 6.333693] },
+  { name: "Alteveer: the De Wolden and Hoogeveen halves are separate places (false positive, see Netherlands)", at: [52.6829, 6.4778], country: "Netherlands", region: "Drenthe", city: "Alteveer", otherCityThan: [52.6842, 6.4998] },
   { name: "Amsterdam", at: [52.3676, 4.9041], region: "North Holland", city: "Amsterdam" },
   { name: "Paris", at: [48.8566, 2.3522], country: "France", city: "Paris" },
 
@@ -151,6 +155,11 @@ for (const c of CASES) {
       const expected = c[tier];
       if (expected === undefined) continue;
       assert.ok(matches(result[tier], expected), `${tier}: expected ${expected === ANY ? "any" : JSON.stringify(expected)}, got ${got}`);
+    }
+    if (c.otherCityThan !== undefined) {
+      const other = await (await world()).query(c.otherCityThan[0], c.otherCityThan[1]);
+      assert.ok(result.city !== null && other.city !== null, `city: expected both points to resolve a city, got ${got}`);
+      assert.notEqual(result.city.id, other.city.id, `city: ${c.at.join(", ")} and ${c.otherCityThan.join(", ")} are both place ${result.city.id}`);
     }
   });
 }
