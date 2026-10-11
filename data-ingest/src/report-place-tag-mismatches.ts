@@ -1,4 +1,4 @@
-// README.md's "Known issues" place=city/town/village tie-break item: scans
+// countries.md's place=city/town/village tie-break tool section: scans
 // the merged admin-boundary corpus (same source prepare-world.ts reads) and
 // reports every settlement where OSM's `place` tag names a real
 // city/town/village at an admin_level the country's current

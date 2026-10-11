@@ -17,6 +17,18 @@ that is a deleted Python prototype kept only as a record of what was
 measured and where the format/algorithms came from. Don't resurrect deleted
 `scripts/`/`webapp/` code or reference it as if it still exists.
 
+`countries.md` is the per-country ledger: which `admin_level` each country
+resolves at, every override/fallback and the measurement behind it, and the
+known-wrong places. **Any change to `countryAdminLevels.ts`, a Voronoi
+fallback list, or how a country is resolved must be recorded in that
+country's section there** (including attempts that were reverted). Open
+problems end their title with `*(open)*` (also `*(unsolvable)*`,
+`*(human error)*`, `*(false positive)*`), so
+`grep -n '\*(open)\*' countries.md` lists the work. Spot-check coordinates
+in it are mirrored in `compressor/test/world-queries.test.ts`: fixed places
+are plain tests, *(open)* ones are `todo` tests; move a case from `todo` to
+plain when you fix it.
+
 ## Workspaces
 
 Four npm workspaces (Node >=26, see `.nvmrc`), all TypeScript, ESM
@@ -233,7 +245,7 @@ before trusting a coverage-percentage comment: the auto-detected level
 that best tessellates a country by area isn't always the level whose
 *names* are the ones a lookup should return (see the US county-vs-
 incorporated-place and Canada regional-district-vs-city entries in
-README.md's "Known issues and open work" section). A quick loop —
+`countries.md`). A quick loop —
 `npm run reader -- lookup data/03-final/world.bin <lat,lon>` against a handful of
 well-known cities in the country just changed — catches a wrong city name
 (or a `city` that's empty because gap-fill couldn't cover it) far faster
@@ -376,7 +388,7 @@ vote entirely for candidates resolving to it — first level primary
 unconditionally, later levels gap-fill *within that region only*. Two
 flatter designs (a country-wide multi-level `city` list; a region
 override with every level primary at once) were tried and both caused
-measured regressions elsewhere — see README's "New York" entry — because
+measured regressions elsewhere — see `countries.md`'s United States section — because
 a large candidate level can out-vote a real, smaller one it geographically
 contains at their shared boundary cells once both are eligible for the
 same cell; `[primary, ...gapFill]` order is what prevents that.
@@ -400,8 +412,8 @@ through the same `assignCityRegion`/`emitCity` path as a real OSM one —
 it isn't a separate output shape, just an extra candidate source. The
 region fallback must run *before* `finalRegions`/`regionIndex` are built
 (every downstream region assignment depends on it), the city fallback
-runs after everything else. Both opt-in per country (see README's "Libya,
-Egypt, Chad and Eritrea" and "Slovenia" entries for the full rationale,
+runs after everything else. Both opt-in per country (see `countries.md`'s Libya
+and Slovenia sections for the full rationale,
 why a fixed-radius buffer per point was rejected in favor of a real
 tessellation, and a known residual limitation: a real OSM city's
 `repPoint` can land in a neighboring region's Voronoi cell when that

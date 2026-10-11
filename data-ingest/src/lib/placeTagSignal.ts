@@ -68,8 +68,8 @@ export async function collectPlaceTagCandidates(
 
 /** A group of same-(country,name) candidate relations at more than one
  * admin_level, where OSM's `place` tag settles which level is "the real
- * settlement" -- the disambiguation signal README.md's "Known issues"
- * describes (place=city/town/village was rejected as a geometry source,
+ * settlement" -- the disambiguation signal countries.md's "place=city/town/village
+ * tie-break tool" section describes (place=city/town/village was rejected as a geometry source,
  * since 98.5% of matches are bare label nodes with no polygon at all, but
  * kept as a tie-break: Bremen's real city relation is `admin_level=6`
  * `place=city`, distinct from the `admin_level=4` Land with no `place` tag

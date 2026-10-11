@@ -103,7 +103,7 @@ async function main(): Promise<void> {
     [...index.regionsByCountryName].filter(([, r]) => region.regionLevelByCountry.get(r.country) === r.level),
   );
 
-  // README's "Voronoi-from-cities500" fallback, region half
+  // The Voronoi-from-cities500 fallback (countries.md, Slovenia), region half
   // (VORONOI_REGION_FALLBACK's doc comment has the full rationale): for a
   // country with no usable OSM region tier at all, synthesize one from
   // cities500.txt grouped by admin1 code. Must run before regionIndex is
@@ -273,7 +273,7 @@ async function main(): Promise<void> {
     if (await emitCity(gapFillById.get(id)!, geometryJson)) cityCount++;
   }
 
-  // README's "Voronoi-from-cities500" fallback (VORONOI_CITY_FALLBACK's
+  // The Voronoi-from-cities500 fallback (countries.md, Libya; VORONOI_CITY_FALLBACK's
   // doc comment has the full rationale): a hand-reviewed list of
   // countries with a confirmed, genuine absence of OSM city-tier
   // administrative polygons, not fixable by any admin_level choice.

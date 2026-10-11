@@ -230,7 +230,7 @@ Check these before migrating from another geocoder:
 - **What "city" means varies by country.** The reader returns whichever
   OpenStreetMap level covers that country best: municipalities in the
   Netherlands, counties in most of the US, communes in France, localities
-  in Australia. See "Known issues and open work" in the project README.
+  in Australia. See `countries.md` in the project root for each country.
 - **Country names come from Natural Earth, in English.** `localName` and
   `internationalName` are the same for countries. Some spellings differ
   from GeoNames: "United States of America" (GeoNames: "United States"),

@@ -83,8 +83,8 @@ export interface PrimaryLevelResult {
  * wide. See `CountryAdminLevels.overrides`'s doc comment for why this
  * primary-then-gap-fill order matters -- both a flat country-wide
  * multi-level `city` list and a flat "every override level is primary"
- * design were tried and caused real regressions (README's "New York"
- * entry has the measurements). */
+ * design were tried and caused real regressions (countries.md's United States
+ * section has the measurements). */
 export function selectPrimaryLevels(
   index: AdminBoundaryIndex,
   countries: CountryIndex,
@@ -209,8 +209,8 @@ export interface GapFillTracker {
  * the same country too (an Arkansas level-7 township, say) -- uncovered
  * by any Arkansas level-8 primary on its own account, so it would
  * wrongly gap-fill in as if Arkansas also used level 7, contesting cells
- * against real level-8 towns it geographically contains (see README's
- * "New York" entry for the exact regression this caused before
+ * against real level-8 towns it geographically contains (see countries.md's
+ * United States section for the exact regression this caused before
  * `resolveRegion` was added here). `resolveRegion`, when given, excludes
  * exactly that case: a candidate whose own level is *some* region's
  * override level, but doesn't appear anywhere in the override list of

@@ -6,8 +6,8 @@ import type { LonLat } from "./geo.ts";
  * https://download.geonames.org/export/dump/, the `cities500` export:
  * every populated place with population >= 500 or that is a national/
  * admin1/admin2 seat, whichever is coarser). Only the columns this
- * project's Voronoi fallback (README's "Open" -> Voronoi-from-cities500
- * item) actually needs are parsed out; the rest of GeoNames' 19 columns
+ * project's Voronoi fallback (countries.md's Libya and Slovenia
+ * sections) actually needs are parsed out; the rest of GeoNames' 19 columns
  * are ignored. */
 export interface Cities500Row {
   geonameId: string;

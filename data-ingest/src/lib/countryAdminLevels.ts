@@ -17,8 +17,9 @@ export interface CountryAdminLevels {
    * already applies country-wide. A region's own levels never compete
    * against the country's `city` level, or against another region's
    * override levels, or against each other except via that same primary-
-   * then-gap-fill order -- see README's "New York" entry for the two
-   * regressions this shape exists to avoid: a country-wide multi-level
+   * then-gap-fill order -- see countries.md's United States
+   * section for the two regressions this shape exists to avoid: a
+   * country-wide multi-level
    * `city` list let a large gap-fill level (NY's towns) out-vote real,
    * smaller cities it geographically contains elsewhere in the country
    * (Arkansas townships beating Arkansas towns); and a flat "every listed
@@ -79,7 +80,7 @@ export interface CountryAdminLevels {
  *   matches 64.0% of them vs. county's 4.3% (county's own name is almost
  *   never what GeoNames calls the place). Uncovered (unincorporated)
  *   points gap-fill to region instead of showing a wrong county name --
- *   see README's "US resolved at county grain, not city". New York
+ *   see countries.md's United States section. New York
  *   State is a further, region-scoped exception on top of that: its own
  *   real municipal tier is level 7 (towns, 92.8% of the state), not the
  *   nationally-correct 8 (villages, only 2.1% there) -- confirmed level 7
@@ -99,8 +100,8 @@ export interface CountryAdminLevels {
  *   primary (its villages, the more specific real answer wherever one
  *   exists) and level 7 only gap-fills *within New York*, never
  *   contesting a cell a village already covers -- see this file's
- *   `overrides` doc comment above for the general rule, and README's
- *   "New York" entry for both measured regressions this final shape
+ *   `overrides` doc comment above for the general rule, and countries.md's
+ *   United States section for both measured regressions this final shape
  *   avoids.
  * - CA: same shape as US -- level 6 (regional districts, 66.2%) auto-won
  *   over level 8 (municipalities, 31.4%), resolving Terrace, BC as
@@ -134,7 +135,8 @@ export interface CountryAdminLevels {
  *   place=city-tagged admin_level=6 relation for the city itself
  *   (distinct from the Land); city [8, 6] gap-fills it in. Berlin and
  *   Hamburg have no relation below level 4 at all -- no level choice
- *   fixes those two, see README's "Open" list.
+ *   fixes those two, see countries.md ("Capitals that are their own
+ *   region").
  * - UZ, LA: the generated region pick (level 6) was a district tier --
  *   Uzbekistan's 204 tumani/shahri, Laos's 148 muang -- not the real
  *   province tier, because `region`'s candidate scan only ever considered
@@ -160,7 +162,7 @@ export interface CountryAdminLevels {
  *     ("Town Parks"). `[7, 10]`: the 11 districts primary. Level 10 is
  *     townlands (Lisnagarvy, "Corporation"), not towns, so Lisburn and
  *     Bangor still resolve to their district -- OSM has no polygon for
- *     them, see README.
+ *     them, see countries.md's United Kingdom section.
  *   - Scotland: level 10 is ~150 islands plus a few city-centre areas
  *     ("Old Town" in Edinburgh, "City Centre" in Aberdeen) that beat the
  *     real unit, the level-6 council area; Glasgow and Dundee resolved to
@@ -181,8 +183,8 @@ export interface CountryAdminLevels {
  *   (the `place=city` relations Dublin, Cork, ...; no district covers
  *   them) gap-fills. Names are OSM's, e.g. "The Municipal District of
  *   Kilkenny City".
- * - CU, MD, NI: found by `report-place-tag-mismatches.ts` (README's
- *   "place=city/town/village tie-break" item) -- each country's configured
+ * - CU, MD, NI: found by `report-place-tag-mismatches.ts` (countries.md's
+ *   "place=city/town/village tie-break tool" section) -- each country's configured
  *   level already tessellates the country (Cuba's 117 level-6
  *   municipalities at 97.7%, Moldova's level-8 communes at 100.4%,
  *   Nicaragua's level-6 municipios at 128.1%), so the area vote alone
@@ -211,7 +213,8 @@ export interface CountryAdminLevels {
  *   Acajutla, and 38 others of the 40 the tie-break tool found). San
  *   Salvador the capital has no level-7 relation at all (only level
  *   6/4) -- same unfixable-by-level-choice shape as Berlin/Hamburg/Sana'a
- *   in README's "Open" list, unaffected either way.
+ *   in countries.md ("Capitals that are their own region"),
+ *   unaffected either way.
  * - LU: same discovery, verified narrower than SV/CU/MD/NI's scale (409
  *   level-8 communes vs. only 271 level-9 features nationally, and only
  *   84 of those are `place=village` -- the rest suburb/hamlet/
@@ -262,8 +265,8 @@ export interface CountryAdminLevels {
  *   own `region` level, *and* carries an identical second relation
  *   (same Wikidata id, Q23438) at level 8 -- a genuine duplicate of the
  *   same real-world boundary at two admin_levels, not a smaller district
- *   the way Astana's/Sana'a's sub-divisions are (see README's "Open"
- *   list) -- confirmed by comparing every tag on both relations. This is
+ *   the way Astana's/Sana'a's sub-divisions are (see countries.md's
+ *   "Capitals that are their own region") -- confirmed by comparing every tag on both relations. This is
  *   the one region-level-capital case in this file that turned out
  *   fixable, because the duplicate exists; Minsk (BY) and Yerevan (AM,
  *   `place=city` at AM's own level-4 `region`) were checked the same way
@@ -311,8 +314,8 @@ export interface CountryAdminLevels {
  *   pass ever runs; `createGapFillTracker` only promotes a candidate whose
  *   representative point isn't already covered by a primary, so the
  *   level-8 whole-city candidate is correctly (if unhelpfully) rejected
- *   every time. This is the same underlying shape as README's "Capitals
- *   that are themselves a region resolve to a city district" Open
+ *   every time. This is the same underlying shape as countries.md's "Capitals
+ *   that are their own region"
  *   issue (Astana, Sana'a, Aden) -- a real settlement whose own finer
  *   subdivisions already exhaustively tile its area under different
  *   names -- just one level down (a city resolving to its own district,
@@ -414,7 +417,7 @@ export interface CountryAdminLevels {
  * the final region layer is still deduplicated by name. Entries with very
  * low city coverage (Egypt, Mauritania, Niger, and similar) reflect a
  * genuine, confirmed absence of sub-region administrative *polygon* data
- * in OSM for that country (see README's "Known issues"), not a level
+ * in OSM for that country (see countries.md), not a level
  * chosen incorrectly -- there is no better level to pick instead.
  */
 export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
@@ -676,8 +679,8 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
 
 /** Countries with a genuine, confirmed absence of city-tier administrative
  * *polygon* data in OSM (per this file's own `city` coverage comments --
- * Libya 0%, Egypt 0.1%, Chad 0.7%, Eritrea 0%; see README's "Libya, Egypt,
- * Chad and Eritrea had no city tier"), not a wrong level pick -- there is
+ * Libya 0%, Egypt 0.1%, Chad 0.7%, Eritrea 0%; see countries.md's Libya
+ * section), not a wrong level pick -- there is
  * no OSM admin_level that would fix these, at any level.
  * `voronoiFallback.ts`'s `buildCityFallback` synthesizes a city polygon
  * per `cities500.txt` point instead, via a Voronoi diagram clipped to the
@@ -689,7 +692,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
  * (Khartoum resolves to neither region nor city despite the region entry
  * claiming 100.5% coverage) but isn't listed yet -- its zero-city root
  * cause wasn't distinguished from the same still-open region-drop
- * question the README raises for it, so adding it here without checking
+ * question countries.md raises for it, so adding it here without checking
  * first could paper over a second, different bug the way Slovenia's
  * region gap once did for its city tier. */
 export const VORONOI_CITY_FALLBACK: ReadonlySet<string> = new Set(["LY", "EG", "TD", "ER"]);
@@ -700,7 +703,7 @@ export const VORONOI_CITY_FALLBACK: ReadonlySet<string> = new Set(["LY", "EG", "
  * whose OSM city tier is a district/council-area level with no polygon for
  * the towns inside it -- Scotland's 32 council areas, Northern Ireland's 11
  * districts (Melrose, Lisburn and Bangor have no admin polygon at all;
- * README's "Wales, Northern Ireland, Scotland and Ireland" entry).
+ * countries.md's United Kingdom section).
  * Unlike the country-wide fallback it is clipped per *container*: each
  * primary city polygon in a listed region (the district itself) gets a
  * Voronoi tessellation of the cities500 points inside it
@@ -720,7 +723,7 @@ export const VORONOI_CITY_FALLBACK_WITHIN_REGIONS: ReadonlyMap<string, readonly 
  * directly). Slovenia is the one confirmed case so far: its real regional
  * tier, OSM `admin_level=7` ("Upravna Enota"), only covers 17.6% of the
  * country -- not a full tessellation, so no `region` level fixes it (see
- * README's "Slovenia has zero cities"). Same opt-in philosophy as
+ * countries.md's Slovenia section). Same opt-in philosophy as
  * `VORONOI_CITY_FALLBACK`: added only after confirming no real OSM region
  * tier exists, not automatically. */
 export const VORONOI_REGION_FALLBACK: ReadonlySet<string> = new Set(["SI"]);

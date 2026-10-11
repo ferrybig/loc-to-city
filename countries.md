@@ -1,0 +1,1093 @@
+# Countries
+
+The per-country status of the worldwide build: which OSM `admin_level`
+each country's region and city tier resolves at, which exceptions exist
+(`overrides`, `wholeUnits`, Voronoi fallbacks), what was measured when they
+were chosen, and what is still wrong. Every change to
+`data-ingest/src/lib/countryAdminLevels.ts` (or to how a country is
+resolved) should be recorded in the country's section here, including the
+dead ends: a reverted attempt is the cheapest thing to write down and the
+most expensive to rediscover.
+
+The README keeps the pipeline and format story; this file keeps the
+country story. The code's own doc comments in `countryAdminLevels.ts` carry
+the mechanics of each knob; this file carries the reasoning and the
+evidence.
+
+## Reading this file
+
+Every entry is a bullet starting with a bold title. Titles of entries that
+need attention end with a marker, so `grep -n '\*(open)\*' countries.md`
+lists the work:
+
+- *(open)*: wrong today and fixable, or not yet understood. The entry says
+  what is known and what to try next.
+- *(unsolvable)*: wrong today and nothing in this pipeline can fix it (the
+  data does not exist, or the format cannot express it). Say why, so nobody
+  re-investigates.
+- *(human error)*: the source data (OSM, Natural Earth, GeoNames) is wrong
+  or inconsistent, as opposed to this pipeline mishandling correct data.
+  Worth reporting upstream; works around it only if cheap.
+- *(false positive)*: looked wrong on the map, is right. Kept so the next
+  person who spots it does not spend an afternoon on it.
+
+An entry without a marker is resolved or purely informational (a config
+choice and why). Resolved entries stay, with the measurement that justified
+them, because the same mistake gets proposed again.
+
+Spot-check coordinates are `lat, lon` and were looked up on
+`data/03-final/world-high-res.bin` (built 2026-10-10) unless stated
+otherwise. `compressor/test/world-queries.test.ts` turns the coordinates in
+this file into a test against whichever worldwide `.bin` exists: places that
+resolve correctly are plain tests, *(open)* places with a known expected
+answer are `todo` tests (they run, a failure is reported as todo, and one
+that starts passing is the signal to close the entry). Keep the two in step.
+
+Section order is alphabetical by English country name, with the ISO code
+and the current config in the first line of each. Coverage percentages come
+from the generated table's comments and are the share of the country's
+Natural Earth area that level's polygons add up to, so over 100% means
+overlapping candidates.
+
+## How a place gets its country, region and city
+
+- **Country** comes from Natural Earth's 10m `admin_0` outlines
+  (`data/00-raw/natural-earth/ne_10m_admin_0_countries.geojson`), keyed by
+  `ISO_A2_EH`. Cities and regions are assigned to a country by sampling a
+  point against that index, corrected by OSM's own `admin_level=2` borders
+  where the two disagree (`osmCountryBorders.ts`; fixed Baarle-Hertog's
+  Belgian enclaves). The correction applies to *assigning candidates to a
+  country* only. The country *polygons* the compressor draws are still
+  Natural Earth's, unsimplified (`COUNTRY_SIMPLIFY_TOLERANCE` is `0`).
+- **Region** and **city** are OSM `admin_level` tiers chosen per country in
+  `COUNTRY_ADMIN_LEVELS` (`{ region: [...], city: [...] }`). The 3-pass
+  detection in `adminLevelDetection.ts` picks the finest level that covers
+  at least 60% of the country as the *primary* city tier and gap-fills any
+  later-listed level wherever no primary covers a candidate's representative
+  point. The generated table was then hand-reviewed; the notes below are
+  that review.
+- **`overrides`** (region name -> `[primary, ...gapFill]`) replaces a
+  country's city levels inside one region (the New York way). **`wholeUnits`**
+  promotes named whole cities and drops their sub-units (Wales).
+- **Voronoi fallbacks** synthesize polygons from GeoNames `cities500.txt`
+  points where OSM has none: `VORONOI_CITY_FALLBACK` (whole country),
+  `VORONOI_CITY_FALLBACK_WITHIN_REGIONS` (clipped to a region's district
+  polygons), `VORONOI_REGION_FALLBACK` (Slovenia).
+- A **city whose region cannot be determined is dropped**, not kept
+  region-less (`emitCity` in `prepare-world.ts`).
+- Anything no polygon covers falls back one tier: a point with no city
+  shows the region, a point with no region shows the country.
+
+## Finding more of these
+
+Most of what is in this file was found by looking at the demo's tile
+overlay and then asking "why does that look wrong". Patterns that have
+paid off:
+
+1. **Unusually shaped or sized records.** One record far larger than its
+   neighbours, or a record whose bounding box swallows another's. Lelystad
+   is the canonical false positive (below), but it is also how the Polish
+   rings were spotted. Mechanically:
+   `node reader/src/cli.ts list <bin> --level city --country <name> --json`
+   gives ids, and `locate <bin> <id>... --json` gives each place's `area`
+   (square degrees) and `boundingBox`; sort by area, or look for a bounding
+   box that contains a smaller place's.
+2. **Matching names across tiers.** A city that equals its region, or two
+   cities in one region whose names differ by an administrative prefix
+   (`gmina Lubin` / `Lubin`). Usually the rural unit around a town (see
+   "Surrounding rural unit" below).
+3. **A region with no city, or a country with no region.** Look the point up;
+   a `-` in the middle of a country is a hole in the candidates, not the
+   ocean. `lookup` at the capital and the five largest cities of a country
+   is a five-minute audit.
+4. **Names that GeoNames knows and we do not.** `search` for a name from
+   `cities500.txt` (`Izbica`) and see which polygon, if any, carries it.
+5. **A border that only ever bends one way.** If the artifacts always push
+   the same country into its neighbours, it is an outline problem, not a
+   tier problem.
+6. **Low city coverage in the generated table.** The comments next to each
+   `COUNTRY_ADMIN_LEVELS` entry list the share of the country that tier
+   covers. Under about 20% (Angola 9.1, Azerbaijan 4.2, Georgia 4.3,
+   Montenegro 9.6, Namibia 0.1, Uganda 6.4, Uruguay 1.3, Qatar 1.2, ... and
+   a tail of islands) means most of that country answers with its region.
+   Check those by hand before trusting any of them.
+
+Confirming a hypothesis about the OSM data does not need a world rebuild:
+scratch-script the extracted GeoJSON directly. `data-ingest`'s own
+`report-place-tag-mismatches.ts` is the template (see the tie-break tool
+below).
+
+## Cross-cutting patterns
+
+- **Natural Earth's outlines are too coarse for small territories and for
+  borders.** *(open)* Jersey (9 km across) is a 47-vertex ring and Guernsey
+  59 in `ne_10m_admin_0_countries.geojson`, confirmed by direct inspection
+  and unmodified by this pipeline. At `--max-depth 8` this mostly hides: the
+  max-depth tie-break in `quadtree.ts` picks *some* winner for an ambiguous
+  leaf cell even at sample score `0`, as long as one candidate is the sole
+  one still touching that branch, which papers over the gap between the
+  crude outline and the real coastline. At `--max-depth 11` (an earlier
+  `world_high_res.bin`) subdivision reaches cells the real boundary never
+  touches, which correctly resolve to nothing and look like data loss
+  instead. Baarle-Hertog/Baarle-Nassau likely shares the root cause,
+  compounded by its enclave topology. The fix would be to source outlines
+  from OSM's own `admin_level=2` relations (already extracted) as an
+  override for territories under some area threshold. Not a
+  `quadtree.ts`/`geometry.ts` bug: both builds classify the same coarse
+  polygon correctly. It also blocks pushing `--max-depth` further, since
+  finer subdivision only exposes it more. See "Border artifacts" for the
+  large-country form of the same thing, and Monaco and Vatican for the
+  micro-state form.
+- **Border artifacts** *(open)*. The same 10m outline problem on ordinary
+  borders, always seen as one country's outline overshooting its neighbour's
+  (resolved with `region -`, `city -`, since the overshooting country has no
+  candidates there). Reported on `world-high-res.bin`:
+  - 52.441101, 6.848860: expected Netherlands, got Germany.
+  - 50.710482, 6.090031: expected Belgium, got Germany.
+  - 49.947409, 6.159039: expected Luxembourg, got Germany.
+  - 49.446226, 5.977764: expected France, got Luxembourg.
+  - 49.533439, 5.691605: expected France, got Belgium.
+  - 50.264491, 12.187872: expected Czechia, got Germany.
+
+  Germany is on the wrong side in four of six. Hypothesis (not verified):
+  the OSM correction (`withOsmCountryBorders`) only changes which country
+  a *candidate city or region* is assigned to; it never touches
+  `country-polygons.geojson`, which is Natural Earth as shipped, so a
+  strip along the border is a country-level answer for the wrong country.
+  Check by comparing NE's Germany ring to OSM's `admin_level=2` Germany at
+  these points. The same fix as the item above (OSM outlines) would cover
+  it; the build-time cost of full-precision OSM outlines needs measuring
+  (the README's "How much precision these tolerances cost" has the NE
+  numbers).
+
+  **Research item:** before committing to it, measure whether OSM's
+  `admin_level=2` borders are actually more accurate than Natural Earth's
+  10m outlines. Sample the six points above plus a few dozen random border
+  points per neighbouring pair, and compare each source against a trusted
+  reference (a known border marker, or the cities500 points on either side).
+  OSM is not automatically better: its country relations include territorial
+  waters and dependencies folded into the parent country (the reason
+  `osmCountryBorders.ts` only uses it for the narrow enclave correction), and
+  disputed borders are tagged by local consensus. If OSM wins, it may also
+  answer the Somaliland and Northern Cyprus cases below, since OSM carries
+  those as their own `admin_level=2` relations (needs checking: whether they
+  have an `ISO3166-1` tag at all).
+- **Surrounding rural unit named after its town** *(open)*. Poland, Belarus,
+  Canada, the US (Michigan), Russia (Crimea): a town or city polygon sits as
+  a hole in a larger rural unit that carries the same name (`Kościan` inside
+  `gmina Kościan`, `Portage la Prairie` inside `Rural Municipality of
+  Portage la Prairie`). Administratively this is usually correct: the town
+  is a separate municipality from the rural one around it, which is named
+  after its seat. The open question is the *label*: a point in a farm field
+  around Kościan answers `gmina Kościan` as its "city", which is accurate
+  but reads as a different place from the town. Options, none tried: strip
+  the administrative prefix for display (then the two names are identical,
+  and the polygon-in-polygon suspicion above looks like a bug), keep the
+  names and live with it, or let the rural unit fall back to the region
+  (as the US does for unincorporated land). Needs a decision from whoever
+  uses the answer (Immich shows one string). Detection by name alone is
+  easy, but some pairs do not share a name: Simferopol's two units, and
+  Krasnystaw's, were spotted by eye.
+- **Capitals that are their own region** *(open)*. The capital is an OSM
+  `admin_level` of the *region* tier, so the only polygons below it are its
+  districts, or nothing. Seen at: Berlin and Hamburg (Germany), Prague
+  (Czechia), Kyiv (Ukraine), Moscow (Russia), Astana (Kazakhstan), Sana'a
+  and Aden (Yemen), Tashkent (Uzbekistan), Minsk (Belarus), Yerevan
+  (Armenia), Ashgabat (Turkmenistan, fixed by a duplicate relation). The
+  levels cannot express this: there is no tier where the city appears as a
+  city. What the current primary/gap-fill model *cannot* do is repeat a
+  region polygon as a city. An untried mechanism: a short opt-in list of
+  "city-state regions" (like `VORONOI_CITY_FALLBACK`) that also emits the
+  region polygon as a gap-fill city, which would make Kyiv, Berlin,
+  Hamburg, Prague and Moscow answer with their own name without disturbing
+  districts elsewhere. A city that has finer districts under a *different*
+  name than itself (Tallinn, Mexico City, Lisbon, below) is a separate,
+  harder shape: the district polygons tile the city, so a whole-city
+  gap-fill never gets the chance to win.
+- **Towns mapped only as place nodes cannot be returned.** *(unsolvable)*
+  Shire (14.083301, 38.281860) and Yebokile (10.447974, 37.896309) in
+  Ethiopia have no boundary relation in OSM (the whole of Ethiopia has two
+  polygons finer than level 6), so the best a polygon lookup can give is
+  the zone (`Semien Mi'irabawi Zone`, `East Gojjam`). A fix would mean
+  adding `place=*` nodes as a nearest-point fallback, which is a design
+  change, not a level pick. The same shape explains Angola and Namibia
+  below, where the Voronoi fallback is the lever instead.
+- **Countries without an ISO code in Natural Earth are dropped.**
+  *(open)* The country polygons keep `ISO_A2_EH` codes; features whose code
+  is `-99` (Northern Cyprus `CYN`, Somaliland `SOL`, the Cyprus UN buffer
+  zone `CNM`) have none, so they never reach `country-polygons.geojson` and
+  their area is "no country". See Cyprus and Somalia. Natural Earth gives
+  each of them a `SOVEREIGNT` / `ADM0_A3`, so mapping them onto an existing
+  code is a small change in `prepare-world.ts`, but it is a political choice
+  (Northern Cyprus under Cyprus or Turkey; Somaliland under Somalia) that
+  should be made on purpose.
+  The OSM-borders research item under "Border artifacts" may cover these
+  too, but the sovereignty choice remains either way.
+- **Countries with a thin city tier.** The generated table lists every
+  country whose chosen city level covers under 20% of it:
+  AO 9.1, AZ 4.2, BB 19.6, BH 0.6, BW 18.1, BZ 5.3, CF 0.2, CV 6.3, DM 0.9,
+  GE 4.3, LR 0.2, ME 9.6, MP 3.1, MV 9.7, MW 10.2, NA 0.1, QA 1.2, SX 11.7,
+  TT 0.1, UG 6.4, UY 1.3, WS 0.3 (and empty city lists: BM, ER, FJ, GD, GL,
+  GW, HM, KN, LC, LS, LY, MR, MS, NE, NR, PW, SC, SH, SZ, TC, VC, VG, VU).
+  Egypt, Chad, Eritrea and Libya were handled with the Voronoi fallback;
+  none of the others have been examined for whether OSM has a better level
+  or whether the fallback is the right tool. *(open)*
+
+### The `place=city/town/village` tie-break tool
+
+`place=city/town/village` was evaluated as an alternative to `admin_level`
+matching and rejected for geometry (tested on the Netherlands extract: 98.5%
+of matches are bare label nodes with no polygon, the same nearest-labeled-
+point approach this project exists to replace; the rest are informal
+`boundary=place` outlines). The tag survives as a disambiguation signal:
+Bremen's original fix was found exactly this way (its `admin_level=6`
+relation carries `place=city`, the `admin_level=4` Land does not).
+
+`data-ingest/src/report-place-tag-mismatches.ts` (library
+`data-ingest/src/lib/placeTagSignal.ts`) automates finding more of them. Its
+own corpus scan (independent of `COUNTRY_ADMIN_LEVELS`, since filtering by
+the current config would hide exactly the missing levels) groups same-
+`(country, name)` relations across admin levels and flags any whose `place`
+tag names a level the country's config does not already treat as a city.
+Read-only: it prints candidates for hand review and a
+`countryAdminLevels.ts` edit. A worldwide run found 814 candidates; 773 were
+false positives of one shape (a same-named entity already resolving
+correctly through a different configured level; Brazil's small
+municipalities are nearly all single-district, so the district carries the
+municipality's name), which `findPlaceTagMismatches` now excludes
+(`alreadyResolvedAtLevel`), leaving 41 real candidates. Ten countries got a
+real gap-fill fix, listed in their own sections: Cuba, Moldova, Nicaragua,
+El Salvador, Luxembourg, Belarus, Canada, Latvia, Turkmenistan, Venezuela
+(partial). Nine were investigated and deliberately left alone (Armenia,
+Argentina, Indonesia, Burkina Faso, Czechia, Iran, and the
+Estonia/Mexico/Portugal group), also in their sections. None of the fixes
+were findable by the area vote alone: every one's configured level already
+tessellates its country, so the bug was always grain, not coverage.
+
+---
+
+## Afghanistan (AF)
+
+`region [4]`, `city [5]`.
+
+- **Region was the district tier and city a Kabul-only tier.** Region was
+  districts (384 of them) and city the Kabul-only nahia tier (0.6%). Now
+  region 4 (provinces) / city 5 (districts, ~100%): Kunduz resolves to
+  `Kunduz Province / Kunduz District`, Kabul to `Kabul Province / Kabul
+  Municipality` (the local name `کابل ښاروالۍ`).
+
+## Angola (AO)
+
+`region [4]`, `city [6]` (9.1% coverage).
+
+- **Benguela and Huambo resolve to their province only.** *(open)*
+  -12.600135, 13.393707 (expected city Benguela) returns `Benguela
+  Province` with `city -`; -12.775308, 15.732937 (expected Huambo) returns
+  `Huambo Province` with `city -`. With 9.1% of the country covered by the
+  chosen level, most of Angola answers with its province. Unexamined:
+  whether OSM has a better level (municipios vs comunas), and whether
+  Angola belongs in `VORONOI_CITY_FALLBACK` (see "Countries with a thin
+  city tier"). Check the OSM extract for these two relations first.
+
+## Argentina (AR)
+
+`region [4]`, `city [5]`.
+
+- **Place-tagged level 8 deliberately not gap-filled.** Acevedo's
+  place-tagged level (8) sits three tiers below the configured level 5, and
+  nationally only ~268 of 3,292 level-8 features carry a real settlement
+  `place` tag (~8%, mostly `place=municipality`): the same sparse,
+  inconsistent tagging as Indonesia, and the only Argentine candidate to
+  survive the false-positive filter, suggesting an isolated gap.
+
+## Armenia (AM)
+
+`region [4]`, `city [5]`.
+
+- **Abovyan "gap" is a display-name variant.** The tie-break tool reported
+  Աբովյան (Abovyan) but it already resolves, as "Աբովյան համայնք"
+  ("Abovyan community"), the real level-5 entity. The tool's exact-string
+  grouping does not normalize away an administrative suffix. No change.
+- **Yerevan is a level-4 region with no lower duplicate.** *(open)* Checked
+  the same way as Ashgabat and Minsk; no level fixes it. See "Capitals that
+  are their own region".
+
+## Belarus (BY)
+
+`region [4]`, `city [8, 6]` (99.5% at 8, gap-fill 6).
+
+- **Level 6 gap-fill for Baranavichy.** Level 6 holds 9 `place=city`
+  relations (Belarus's major cities below the level-4 ones); 8 of them
+  already resolved through an identically-named level-8 entry. Only
+  Baranavichy (Баранавічы, 7th-largest city) lacked one; confirmed by
+  `world.bin` resolving it to nothing before the fix.
+- **Minsk is a level-4 region.** *(open)* See "Capitals that are their own
+  region".
+- **A village council surrounds Mikashevichy.** *(open)* 52.225276,
+  27.468910 resolves to `Мікашэвічы / Mikashevichy` and 52.212235,
+  27.444878 to `Сінкевіцкі сельскі Савет` (Sinkevichy rural council), whose
+  polygon wraps the town. Here the names do *not* match, so this is the
+  "Surrounding rural unit" pattern with a differently named rural unit
+  (the council is named after a village, not after the town).
+
+## Brazil (BR)
+
+`region [4]`, `city [9]` (66.6% coverage).
+
+- **Major cities missing despite 66.6% city coverage.** *(open)* Neither
+  São Paulo nor Rio de Janeiro (the city, not the state) resolves: `lookup`
+  at each city's own coordinates returned `city -`. Re-checked on
+  `world-high-res.bin`: -23.5505, -46.6333 now returns `Sé`, a distrito
+  (district) of São Paulo, so level 9 is the district tier in the big
+  metros and the municipality is level 8 with no competing same-name
+  candidate at level 9 at all. Not a tie the tie-break tool's
+  (country, name) grouping can resolve. Not yet investigated whether
+  widening to `[9, 8]` fixes both this and the 6 villages the tie-break
+  tool found.
+
+## Burkina Faso (BF)
+
+`region [4]`, `city [6]` (67.2%).
+
+- **Level-8 place-tagged candidates already resolve.** Koudougou,
+  Tenkodogo, Bagaré, Lankoué and Toéni share their name with the level-6
+  department containing them (departments are named after their chief
+  town), so all five already resolve under their own plain name. Gap-filling
+  8 in would only put a finer level in contention for cells its container
+  already names correctly (the New York / Arkansas risk). Not applied.
+
+## Canada (CA)
+
+`region [4]`, `city [8, 6]` (31.4% at 8, gap-fill 6).
+
+- **Resolved at regional-district grain, not city.** Terrace, BC used to
+  resolve to `Regional District of Kitimat-Stikine`: level 6 (regional
+  districts, 66.2%) auto-won the area vote over level 8 (real municipalities,
+  31.4%). Overridden to level 8; measured against cities500's 3,298 Canadian
+  places on a North-America-only build: level 8 name-matches 31.3%
+  (1,032/3,298) against level 6's 14.8% (487), about 2.1x better, though far
+  below the US's equivalent 64.0% because incorporated-place coverage is
+  thinner nationally. Most remaining "misses" are not wrong (GeoNames lists
+  neighbourhoods such as Abbottsfield, Aberdeen, Agincourt North, which
+  correctly resolve to Beverly, Kamloops, Scarborough).
+- **Guelph gap-fill.** Guelph, Ontario is `place=city` at level 6 (Ontario's
+  regional-municipality tier), a single-tier city distinct from the
+  level-8 municipalities. Gap-filled at 6; `search` found no Guelph before.
+- **Terrace regressed.** *(open)* 54.5164, -128.6003 resolves to `Regional
+  District of Kitimat-Stikine` again on the 2026-10-10 builds, although the
+  entry above was verified fixed. `data/02-resolved/world/cities-filtered.geojsonseq`
+  (2026-10-09) has no Canadian feature named `Terrace` at all (Toronto and
+  Guelph are there), so the loss is upstream of the compressor: either the
+  2026-09-29 planet extract no longer has the level-8 relation, or
+  data-ingest drops it. Not investigated.
+- **Surrounding rural municipality.** *(open)* 49.952987, -98.299484 is
+  `Portage la Prairie` (the city); 49.888884, -98.170395 is `Rural
+  Municipality of Portage la Prairie`. See "Surrounding rural unit".
+
+## Chad (TD)
+
+`region [4]`, `city [8]` (0.7%), in `VORONOI_CITY_FALLBACK`.
+
+- **No city tier in OSM; synthesized from GeoNames.** See "Libya, Egypt,
+  Chad and Eritrea" under Libya. N'Djamena now resolves to its own name.
+- **Regions with no cities were dropped.** Chad had kept only `Ouaddaï` (the
+  one region holding its 5 cities) before the region-seeding fix in the
+  README; all 23 regions are there now.
+
+## Cuba (CU)
+
+`region [4]`, `city [6, 8]` (97.7% at 6, gap-fill 8).
+
+- **Santiago de Cuba gap-fill.** Santiago carries its own `place=city`
+  relation at level 8, nested inside its level-6 `place=municipality` (the
+  big rural municipality the unmodified config would name it). Found by the
+  tie-break tool. The configured level already tessellates the country, so
+  the bug was grain, not coverage.
+
+## Cyprus (CY)
+
+`region [6]`, `city [8]`.
+
+- **Northern Cyprus resolves to no country.** *(open)* 35.257394,
+  33.731461 returns `country -`. Natural Earth's `N. Cyprus` (`CYN`) and
+  the UN buffer zone (`CNM`) have `ISO_A2_EH` `-99`, so they are dropped.
+  Expected: Cyprus or Turkey (the user's call: it is a political choice, see
+  "Countries without an ISO code").
+
+## Czechia (CZ)
+
+`region [4]`, `city [8]` (99.3%).
+
+- **Prague is a region with no city.** *(open)* 50.087382, 14.421787
+  returns `region Praha / Prague`, `city -`. Same shape as Berlin: the
+  capital is a level-4 region. See "Capitals that are their own region".
+- **Place-tagged level-10 villages deliberately not gap-filled.** Level 8
+  (`place=municipality`/`city` where tagged) already resolves every sampled
+  case, including Brno and all 6 same-named "Babice" municipalities. The
+  1,065 of 3,307 level-10 features that are `place=village` look like
+  cadastral villages nested inside an already-correct municipality (the
+  New York / Arkansas risk: a finer level contesting its container's cells
+  for no naming benefit). The one survivor of the strict filter, Petřkovice,
+  is a `place=borough` at level 9 inside Ostrava, not a standalone
+  settlement.
+
+## Egypt (EG)
+
+`region [4]`, `city [6]` (0.1%), in `VORONOI_CITY_FALLBACK`.
+
+- **No city tier in OSM; synthesized from GeoNames.** See Libya. Cairo's
+  exact GeoNames coordinate resolved to `Cairo`, but central Cairo
+  (30.0444, 31.2357) resolves to the district `Būlāq Abū al ‘Ilā`, a real,
+  separate Cairo district also in cities500: expected Voronoi nearest-site
+  behaviour, not a bug.
+- **Regions with no cities were dropped** (Egypt had 27 region polygons and
+  lost them all; fixed, see the README).
+- **21.869146, 33.739014 resolves to no country.** *(false positive)* That
+  is Bir Tawil, the disputed strip that neither Egypt nor Sudan claims
+  (its coordinates are 21°52′N 33°44′E). "No country" is correct. Natural
+  Earth leaves it unassigned and so do we.
+
+## El Salvador (SV)
+
+`region [5]`, `city [6, 7]` (101.3% at 6, gap-fill 7).
+
+- **Gap-fill 7 for the `place=city/town` tier.** Level 6 is
+  `place=district`/`municipality` (the real admin tier; Santa Ana, the
+  second city, is `place=district`), and a separate same-named level-7
+  relation is `place=city`/`town` (Santa Ana itself, Acajutla, and 38 of
+  the 40 the tool found).
+- **San Salvador has no level-7 relation.** *(open)* Only levels 6 and 4
+  exist, so no level fixes it; same shape as Berlin. See "Capitals that are
+  their own region".
+
+## Eritrea (ER)
+
+`region [4]`, `city []` (0%), in `VORONOI_CITY_FALLBACK`.
+
+- **No city tier in OSM; synthesized from GeoNames.** See Libya. Asmara
+  resolves to its own name.
+
+## Estonia (EE)
+
+`region [6]`, `city [9]` (94.6%).
+
+- **Tallinn is not a city.** *(open)* Tallinn is `place=city` at level 8,
+  distinct from the configured level 9's ~4,821-feature tessellation
+  (asustusüksus settlement units). It looked like a clean small-set fix (59
+  level-8 features: 48 `place=civil_parish` plus Tallinn) and was applied as
+  `city: [9, 8]`; a real rebuild showed no effect and it was reverted.
+  Tallinn's linnaosad (districts) are themselves tagged at level 9, already
+  primary, so Tallinn's area is covered by its own already-primary children
+  before the gap-fill runs; `createGapFillTracker` only promotes a candidate
+  whose representative point is not already covered by a primary. `search`
+  for "Tallinn" finds nothing; only `Põhja-Tallinna linnaosa` and its siblings
+  resolve. The same shape as Mexico and Portugal below (a settlement whose
+  finer subdivisions already tile it under different names). It would need a
+  mechanism the primary/gap-fill model lacks: a named polygon overriding the
+  label for cells its own primary children cover.
+
+## Ethiopia (ET)
+
+`region [4]`, `city [5]`.
+
+- **Wrong tiers.** Region was the zone tier and city the woreda tier (12.6%
+  coverage), so most of the country had no city. Now region 4 (regional
+  states) / city 5 (zones, ~100%): Shire -> `Tigray / Semien Mi'irabawi
+  Zone`, Yebokile -> `Amhara / East Gojjam`, Addis Ababa -> `Addis Ababa /
+  Addis Ababa`.
+- **Shire and Yebokile are place nodes only.** *(unsolvable)* See
+  "Towns mapped only as place nodes".
+
+## Georgia (GE)
+
+`region [6]`, `city [8]` (4.3%).
+
+- **Khobi Municipality has no city.** *(open)* 42.316670, 41.903229
+  returns `Khobi Municipality`, `city -`. City coverage is 4.3% nationally,
+  so most of the country answers with its municipality. Not yet checked
+  whether OSM simply lacks the polygons (possibly bad OSM data, as
+  suspected from the map) or whether another level covers the towns.
+
+## Germany (DE)
+
+`region [4]`, `city [8, 6]` (97.8% at 8, gap-fill 6).
+
+- **Bremen is a city-state with a second relation.** Germany's three
+  city-states are `admin_level=4`, the same level as every other Land, so
+  they lost the city slot to the region tier. Bremen has a separate
+  `place=city` relation at level 6 for the city itself, and `DE: { city:
+  [8, 6] }` gap-fills it. Verified at the time that it leaked no Landkreis
+  name into normal cities (Munich, Cologne, Frankfurt, Hannover unchanged).
+- **Bremen regressed.** *(open)* 53.079296, 8.801694 returns `region
+  Bremen`, `city -` on the 2026-10-10 builds, and
+  `data/02-resolved/world/cities-filtered.geojsonseq` (2026-10-09) has no
+  German feature named `Bremen`. Same symptom as Reading, Brighton and
+  Terrace, all of which are level-6 or otherwise gap-filled entries; Guelph
+  (also level-6 gap-fill) survived, and Westminster (level-8 gap-fill)
+  too. Candidates to bisect: `20eba2c` (stream primaries instead of
+  batching), `9c6a89a` (OSM country borders), `15fb005` (UK/Ireland grain),
+  or a planet-extract change. Fixing this likely fixes the UK ones.
+- **Berlin and Hamburg are regions with no city.** *(open)* 52.520008,
+  13.404954 and 53.551086, 9.993682. Confirmed: neither has a second,
+  lower-level relation anywhere in the German extract, unlike Bremen. See
+  "Capitals that are their own region".
+- **Border artifacts** *(open)* on the Dutch, Belgian, Luxembourg and Czech
+  borders: see "Border artifacts".
+
+## Indonesia (ID)
+
+`region [4]`, `city [5]`.
+
+- **Place-tagged level 7 deliberately not gap-filled.** The place-tagged
+  level sits two tiers below the configured level 5 via an untagged level-6
+  district, and covers ~696 of Indonesia's ~75,000 villages (6,859 level-7
+  features, most untagged or `neighbourhood`/`subdistrict`). Gap-filling
+  would promote an arbitrary subset to city grain while leaving the rest at
+  regency level, a patchier result than the consistent level 5.
+
+## Iran (IR)
+
+`region [4]`, `city [7]` (104.4%).
+
+- **Place-tagged candidates are Tehran neighbourhoods.** The configured
+  level already resolves every sampled case; the tagged ones nest inside an
+  already-correct level-7 entity (the CZ noise shape, same contested-cells
+  risk). Not applied.
+
+## Ireland (IE)
+
+`region [6]`, `city [8, 7]`.
+
+- **Level 10 was 51,414 townlands.** Galway resolved to `Townparks`. Now the
+  98 municipal districts at level 8 are primary (97% of the land) and the
+  level-7 `place=city` relations (Dublin, Cork) gap-fill, since no district
+  covers them. Names are OSM's: `The Municipal District of Kilkenny City`,
+  `The Municipal District of Clane — Maynooth`.
+
+## Jersey and Guernsey (JE, GG)
+
+- **Natural Earth's outlines are 47 and 59 vertices.** *(open)* See
+  "Natural Earth's outlines are too coarse".
+
+## Kazakhstan (KZ)
+
+`region [4]`, `city [6]`.
+
+- **Astana resolves to a city district.** *(open)* 51.142310, 71.433792
+  returns `region Астана / Astana`, `city Есіл ауданы / Esil district`. The
+  republican cities are level-4 regions, so the only thing below is the
+  city's own districts. See "Capitals that are their own region".
+
+## Laos (LA)
+
+`region [4]`, `city [6]`.
+
+- **Region was a district tier, not a province tier.** See Uzbekistan,
+  which has the identical story. The generated `region: [6]` was only
+  considered because level 6 was the only level listed for the country. Level
+  4 is Laos's 18 provinces (100.7%); freed level 6 (148 muang, 100.8%) as a
+  real city tier (Pakse resolves to `ເມືອງປາກເຊ`, Pak Sé District), where the
+  city had previously been forced onto a 0.2%-coverage level 7.
+
+## Latvia (LV)
+
+`region [5]`, `city [8, 7]` (98.0% at 8, gap-fill 7).
+
+- **Real towns are at level 7, not 8.** Latvia tags its town tier with
+  `border_type=town` (72 of 75 level-7 features) and no `place` value, so
+  the tie-break tool's `place`-only filter could not see it; found by manual
+  investigation. The configured level 8 is `place=civil_parish`/`parish` (511
+  of 1,678 level-8 features), the rural tier, so Aizkraukle and Koknese
+  resolved to "Aizkraukles pagasts" / "Kokneses pagasts". Level 7 gap-fills
+  the real towns (Aizkraukle's level-9 village bbox sits inside its level-7
+  town polygon).
+- **Rīga and the other six republic cities.** *(open)* They are
+  `border_type=city` at level 5, the country's own region level, so no
+  level choice fixes it. See "Capitals that are their own region".
+
+## Libya (LY)
+
+`region [4]`, `city []` (0%), in `VORONOI_CITY_FALLBACK`.
+
+- **Libya, Egypt, Chad and Eritrea had no city tier, fixed with a Voronoi
+  fallback synthesized from GeoNames.** Tripoli, Cairo, N'Djamena and
+  Asmara all resolved to `city -`: a genuine, confirmed absence of city-tier
+  OSM administrative polygons (0 to 0.7% coverage), not a wrong level, so
+  no `admin_level` choice could fix it. `voronoiFallback.ts`'s
+  `buildCityFallback` takes the country's `cities500.txt` points as sites
+  (`d3-delaunay`, clipped to a bbox, then to the real outline with
+  `@turf/intersect`), giving every point in the country a city that follows
+  local point density. A synthesized city still resolves to its real region
+  (`prepare-world.ts` routes it through `assignCityRegion`/`emitCity`).
+  Deliberately a real tessellation rather than a fixed-radius buffer: buffers
+  overlap in dense areas and leave gaps in sparse ones, so a point between
+  two buffers would fall through to the region (the nearest-labeled-point
+  failure mode this project exists to fix). Every cities500 point is a
+  site, unfiltered by population, matching the granularity of real OSM city
+  polygons. Opt-in only, same philosophy as `COUNTRY_ADMIN_LEVELS`. Verified
+  on a scoped Africa build.
+- **Libya's regions were dropped** before region-seeding (23 polygons);
+  fixed, see the README.
+
+## Luxembourg (LU)
+
+`region [6]`, `city [8, 9]` (100.8% at 8, gap-fill 9).
+
+- **Level 9 `place=village` gap-fill.** 409 level-8 communes against 271
+  level-9 features nationally, 84 of which are `place=village` (the rest
+  suburb/hamlet/neighbourhood). Each of the 14 the tool found is a clean
+  same-name pair (Beckerich, Dippach, Mamer have an untagged level-8 commune
+  and a `place=village` level-9 relation nested inside it), unlike
+  Indonesia/Czechia where it would help an arbitrary subset.
+- **Border artifact against Germany and France.** *(open)* See "Border
+  artifacts": 49.947409, 6.159039 resolves to Germany instead of
+  Luxembourg; 49.446226, 5.977764 resolves to Luxembourg instead of France.
+
+## Mexico (MX)
+
+`region [4]`, `city [6]`.
+
+- **Ciudad de México is not a city.** *(open)* The federal entity is
+  `place=state` at level 4, the country's region level, and has a second
+  whole-city `place=city` relation at level 8 (population 9,209,944). It
+  looked fixable as `city: [6, 8]` (the Ashgabat shape) and was applied, but
+  the capital's alcaldías (Iztacalco, Xochimilco, Milpa Alta, Tláhuac, ...)
+  are tagged at level 6, already primary, so the gap-fill candidate is
+  rejected every time. Reverted. See Estonia for the same shape.
+- Conkal, Espinal, Piedras Negras and Tulum (the other four candidates)
+  already resolve through identically-named level-6 entries.
+
+## Moldova (MD)
+
+`region [4]`, `city [8, 9]`.
+
+- **Bălți.** It is `place=city` at level 9 inside an unnamed level-8
+  container; Chișinău is `place=city` at level 8 and unaffected. Gap-fill 9.
+  Level 8 communes tessellate at 100.4%, so the area vote never surfaced it.
+
+## Monaco (MC)
+
+`region []`, `city [8]` (78.2%).
+
+- **Monaco resolves to France.** *(open)* 43.730840, 7.421372 (inside the
+  principality) returns `France / Provence-Alpes-Côte d'Azur`, `city -`.
+  Monaco's polygon is in `country-polygons.geojson`, so it is in the
+  build, but at the leaf cell that contains this point France wins. Same
+  family as Vatican and the Jersey/Guernsey item: a tiny country, a coarse
+  Natural Earth outline, ambiguous leaf cells decided by share. Expected: the
+  country Monaco and its city (a micro-state's city is the state; see
+  "Capitals that are their own region" for the mechanism that would give it
+  one).
+
+## Namibia (NA)
+
+`region [4]`, `city [8]` (0.1%).
+
+- **Okahandja resolves to its region only.** *(open)* -21.979981,
+  16.910706 returns `Otjozondjupa Region`, `city -`. City coverage is 0.1%
+  nationally, so Namibia effectively has no city tier. Candidate for
+  `VORONOI_CITY_FALLBACK` after confirming OSM has nothing better (see
+  "Countries with a thin city tier").
+
+## Netherlands (NL)
+
+`region [4]`, `city [10]` (110.8%).
+
+The reference country: `data/03-final/zuid-holland.bin` is filtered from the
+worldwide resolved data (`make netherlands`) and
+`compressor/test/zuid-holland-queries.test.ts` pins the known cases:
+
+- 52.488789, 4.794346: Wormerveer, not Zaandijk.
+- 52.034656, 4.388124: Den Haag, not Nootdorp.
+- 51.970738, 4.123725: Europoort, not Hoek van Holland.
+- 52.333399, 5.237517: Almere, not Huizen.
+- 52.131565, 5.277514: Soest, not Soesterberg.
+
+- **Lelystad is huge.** *(false positive)* 52.683459, 5.295410 (open water
+  off Enkhuizen, near the Houtribdijk) genuinely resolves to Lelystad, not
+  Enkhuizen or generic Flevoland. Lelystad's official municipal boundary is
+  765 km² but only about 230 km² is land; the rest is IJsselmeer and
+  Markermeer water under its jurisdiction. Any lookup that tests which polygon contains the point agrees on this;
+  only a nearest-labeled-point lookup (Immich's current one) disagrees,
+  because it picks the physically closest label. Shows up
+  in the "unusually sized records" search, and is not a bug.
+- **Baarle-Hertog's Belgian enclaves resolved to NL and were dropped.**
+  Fixed by `withOsmCountryBorders` (Natural Earth's 10m outline has no
+  enclaves). The country *polygon* layer is still Natural Earth, so the
+  enclaves' own country answer may still be coarse; see Natural Earth item.
+- **Border artifact against Germany.** *(open)* 52.441101, 6.848860 returns
+  Germany. See "Border artifacts".
+
+## Nicaragua (NI)
+
+`region [4]`, `city [6, 10]` (128.1% at 6, gap-fill 10).
+
+- **León, Matagalpa and Jinotepe.** Each has a real `place=city`/`town`
+  relation at level 10 nested inside its level-6 `place=municipality`,
+  distinct from the far more numerous non-settlement level-10 features
+  (hamlets, isolated dwellings, neighbourhoods), which the tie-break
+  signal's own `place` filter excludes by tag rather than by level.
+
+## North Macedonia (MK)
+
+`region []`, `city [8]` (98.8%).
+
+- **Region tier removed by hand.** The only level 4/5/6 candidate was
+  "Град Скопје" (City of Skopje, 2.3%), one municipality's boundary that
+  happens to carry a lower admin level, not a region tier. Set to `region:
+  []`. The city tier (level 8) already resolved correctly.
+- **41.432573, 22.011393 returns only the country.** *(open)* Reported with
+  "missing everything except country": `city -` (and `region -` is
+  expected given the line above). At this location the lookup cell is large
+  (lat 41.31..41.48, lon 21.80..22.15), which suggests the leaf stopped
+  subdividing over a region where no level-8 polygon covers; not yet
+  checked whether OSM lacks the municipality here. Note that `region -`
+  everywhere in North Macedonia is by design.
+
+## Poland (PL)
+
+`region [6]` (powiat), `city [7]` (gmina), 100.1%.
+
+- **City records named `gmina X`.** *(open)* 2,108 of Poland's 2,403 city
+  records are named `gmina …`, which is OSM's name for a rural or mixed
+  gmina; the urban gmina of a town is just `Kościan`. GeoNames (Immich's
+  current source) says `Izbica`, not `gmina Izbica`. So what the user
+  usually sees is the administrative label. Stripping the prefix for
+  display is the cheapest fix, but see the next item before doing it.
+- **Town inside its own rural gmina.** *(open)* Six reported pairs; both
+  places are the same `region`, the outer is a `gmina X` and the inner
+  is `X`:
+
+  | inner (`X`) | outer (`gmina X`) |
+  |---|---|
+  | 52.086468, 16.644287 Kościan | 52.058190, 16.668835 |
+  | 51.398777, 16.217194 Lubin | 51.362778, 16.249809 |
+  | 50.526087, 22.721100 Biłgoraj | 50.538745, 22.751999 |
+  | 50.988260, 23.169994 Krasnystaw | 50.969562, 23.214798 |
+  | 50.720373, 23.259945 Zamość (also a region of its own) | 50.763608, 23.254623 |
+
+  (Biała Podlaska, 193016 `gmina Biała Podlaska` and 193017 `Biała Podlaska`,
+  is a seventh.) Measured on `world-high-res.bin`: 148 `gmina X` records
+  have a plain `X` twin in the same powiat, so this is systematic, not a
+  data glitch. Hypothesis (unverified against the extract): the polygons
+  are right. In Poland the urban gmina of a town (`gmina miejska`) and the
+  rural gmina around it (`gmina wiejska`, seat in the town) are separate
+  level-7 relations, so the town is a hole in its rural gmina. The names
+  are then correct, and the open question is the "Surrounding rural unit"
+  label policy. Zamość is the variant where the town is a city county
+  (`powiat grodzki`), hence its region is also `Zamość`. The reported
+  suspicion that the polygon-in-polygon is a mistake is worth one check
+  against the OSM extract before choosing a policy. The reporter also
+  saw several OSM city names inside a single block of these.
+
+  **Needs more investigation before any change:** whether someone living
+  there would consider `gmina X` to be "their city/village" at all. A rural
+  gmina is an administrative unit made of many villages; its residents
+  usually name their own village (or the town they belong to), not the
+  gmina, so `gmina Izbica` may be the right polygon with the wrong *kind* of
+  answer for a "city" field. The alternatives are to strip the prefix, to
+  fall back to the region for rural gminas, or to find a finer tier (sołectwo
+  or village relations, if OSM has them for Poland). Do not strip
+  `gmina ` blindly: it would also hide the 148 town/gmina twins behind
+  identical names. Same question for the other "Surrounding rural unit"
+  countries.
+- **Whole blocks with a country but no region or city.** *(open)* Seven
+  reported points, all in central/eastern Poland, all returning `Poland`,
+  `region -`, `city -`:
+  51.638902, 17.824631; 51.602666, 20.083008; 52.229377, 17.273254;
+  52.107138, 20.628204; 52.431106, 20.714550; 51.147479, 21.968193;
+  51.137894, 22.846928. The reporter sees city names for these areas on the
+  OSM map, so the polygons exist, which points at a whole region (or a
+  group of powiat/gmina relations) being dropped or mis-assigned before the
+  compressor: either the powiat does not get picked up as a region
+  (and its gminas are dropped by `emitCity`'s "no region, no city" rule), or
+  the relations lack a usable `name`. Untested; first step is to
+  scratch-script the extract at one of these points and read the
+  `admin_level=6` and `7` relations covering it.
+  (The `world-queries` todo tests encode all seven.)
+
+## Portugal (PT)
+
+`region [6]`, `city [8]` (100.7%).
+
+- **Lisboa is not a city.** *(open)* Lisboa is `place=city` at level 7
+  (the concelho tier, 292 nationally), but Lisbon's freguesias (Alvalade,
+  Belém, Benfica, Carnide, ...) are tagged at level 8, already primary.
+  Applied as `city: [8, 7]`, verified no effect, reverted. The other 291
+  concelhos already resolve through an identically-named level-8 entry. See
+  Estonia.
+
+## Russia (RU)
+
+`region [4]`, `city [6]` (104.0%).
+
+- **Moscow has a region and no city.** *(open)* 55.7558, 37.6173 returns
+  `Москва / Moscow`, `city -`. See "Capitals that are their own region".
+- **Simferopol municipality council inside Simferopol district.** *(open)*
+  44.949006, 34.118385 is `Симферопольский городской совет / Simferopol
+  municipality council`; 44.959454, 33.983116 is `Симферопольский район /
+  Simferopol District`. Another "Surrounding rural unit" case, harder to
+  detect by name or geometry because there is an irregular border strip
+  between the two. The country answer for Crimea is `Russia`, from Natural
+  Earth.
+- **Russia and Turkey span several continent files.** Moscow,
+  Yekaterinburg, Novosibirsk and Istanbul each resolve to their region
+  exactly once. Fixed by deduplicating relations by id across files.
+
+## Saudi Arabia (SA)
+
+`region [4]`, `city [6]` (99.8%).
+
+- **City was level 10, splitting Riyadh into neighbourhoods.** Now region 4
+  (13 provinces) / city 6 (governorates): Riyadh -> `Riyadh Region / Riyadh
+  Governorate`, Jeddah -> `Makkah Region / Jeddah Governorate`. Level 10 was
+  1.5% coverage and urban neighbourhoods (Thulaim).
+
+## Slovenia (SI)
+
+`region []` plus `VORONOI_REGION_FALLBACK`, `city [8]` (101.9%).
+
+- **Zero regions, hence zero cities, fixed with the Voronoi machinery.**
+  City coverage was already fine (real municipalities: Bled, Solčava,
+  Mežica), but there was no usable region candidate, so `emitCity`'s "no
+  region, drop the city" rule dropped every Slovenian city (Bled and Maribor
+  both absent from `world.bin`). The nearest regional tier, OSM
+  `admin_level=7` ("Upravna Enota"), covers 17.6%, not a tessellation.
+  `buildRegionFallback` groups cities500 points by GeoNames admin1 code,
+  computes one Voronoi diagram over all points together (per-group diagrams
+  would leave gaps at group borders), then `@turf/union`s each group's cells.
+  602 points fall into exactly 212 admin1 codes, matching
+  `admin1CodesASCII.txt`'s 212 municipalities; the 212 polygons' combined
+  area matches the country's (~20,277 km²), so no gaps or overlaps. It runs
+  before `finalRegions`/`regionIndex` are built.
+- **A handful of cities land in the wrong synthesized region.** *(open)*
+  `assignCityRegion` places a real OSM city by its `repPoint`
+  (`pointOnFeature`, roughly a bbox midpoint), and a large or off-centre
+  polygon's `repPoint` can land closer to a neighbour's Voronoi site.
+  Confirmed on Ljubljana (polygon spans 14.41-14.76 lon; its `repPoint` lands
+  in the "Dol pri Ljubljani" cell) and Puconci (lands in "Grad"). Of 271
+  Slovenian cities 2 look like real misassignments; the ~95 whose city and
+  region names differ are legitimate. On `world-high-res.bin`, 46.0569,
+  14.5058 returns `region Ljubljana`, `city -`: the same residue. A fix would
+  use each city's own centroid, or bias the sites by extent. Not attempted.
+
+## Somalia (SO)
+
+- **Somaliland resolves to no country.** *(open)* 10.611344, 47.369614
+  returns `country -`. Natural Earth's `Somaliland` (`SOL`) has `ISO_A2_EH`
+  `-99` and is dropped, see "Countries without an ISO code".
+
+## Sudan (SD)
+
+`region [4]`, `city [6]` (72.2%).
+
+- **No city tier, and the zero-region drop is not fully explained.**
+  *(open)* Khartoum resolves to neither region nor city although the config
+  records 100.5% region coverage, the same pattern the "Regions with no
+  cities were dropped" fix (README) was supposed to cover, not yet
+  distinguished from it. Deliberately not in `VORONOI_CITY_FALLBACK` yet:
+  adding a fallback on top of an unexplained bug risks hiding the second
+  issue, the way Slovenia's region gap once masked its city tier being fine.
+  Coverage is patchy, not uniformly zero, across this class of country:
+  Niamey (Niger) and Nouakchott (Mauritania) resolve all the way to city
+  despite low national percentages.
+
+## Taiwan (TW)
+
+`region [4]`, `city [7, 8]`.
+
+- **Villages instead of townships.** City was level 9 (7,545 villages).
+  Now `[7, 8]`: townships (level 8) are primary, and the level-7 districts
+  (inside special municipalities) gap-fill: Taipei -> `Taipei City / Xinyi
+  District`, Kaohsiung -> `Kaohsiung City / Xinxing District`.
+
+## Turkmenistan (TM)
+
+`region [4]`, `city [5, 8]`.
+
+- **Ashgabat has a duplicate.** The capital is `place=city` at level 4 (the
+  region level) *and* has an identical second relation (same Wikidata id,
+  Q23438) at level 8, a genuine duplicate of the same boundary at two levels
+  (all tags compared), unlike Astana's districts. The one capital-is-region
+  case that turned out fixable. Minsk and Yerevan were checked the same way
+  and have no duplicate.
+
+## Ukraine (UA)
+
+`region [4]`, `city [7]` (99.7%).
+
+- **Kyiv has a region and no city.** *(open)* 50.441108, 30.527229 returns
+  `Київ / Kyiv`, `city -`; the expected city is `Kyiv`. See "Capitals that
+  are their own region".
+
+## United Kingdom (GB)
+
+`region [4]`, `city [6, 8, 10]`, with `overrides` for Wales, Northern Ireland
+and Scotland, `wholeUnits` for Wales, and `VORONOI_CITY_FALLBACK_WITHIN_REGIONS`
+for Scotland and Northern Ireland.
+
+- **The country-wide pick.** City was level 10 (civil parishes) only, leaving
+  London (51.507674, -0.130119), unitary towns and nearly all of Scotland
+  without a city. Now `[6, 8, 10]`: parishes primary, districts/boroughs
+  (8) and unitary authorities/Scottish council areas (6) gap-filled. London
+  -> `City of Westminster`, Reading -> `Reading`, Brighton -> `Brighton and
+  Hove`, Kinross -> `Fife`, Edinburgh -> `City of Edinburgh` (the Reading,
+  Brighton and Kinross results no longer hold, see below). Parished towns
+  are unchanged (Guildford, Cambridge, Malvern). A two-tier county whose
+  representative point is unparished (Worcestershire) is added but loses to
+  the smaller district or parish wherever one exists.
+- **Level-6 gap-fill is not working.** *(open)* On the 2026-10-10 builds
+  Reading (51.4556, -0.9693), Brighton (50.8225, -0.1372) and Bristol
+  (51.453900, -2.595348) all return `England`, `city -`, and
+  `cities-filtered.geojsonseq` has no GB feature named `Reading`, `Bristol`
+  or `Brighton and Hove`. Level-8 gap-fill still works (`City of Westminster`
+  is there and resolves). Same symptom as Bremen and Terrace; see Germany for
+  the bisect candidates. (Kinross, 56.128332, -3.306370, now resolves to
+  `Lochgelly` through the Scottish Voronoi cells, not to `Fife`.)
+- **London and Potters Bar.** *(open)* 51.515046, -0.093212 (City of London)
+  and 51.695597, -0.187626 (Potters Bar) return `England`, `city -`. London
+  is the quirk: there is no "London" polygon, only its boroughs, and the City
+  of London is not a borough. Potters Bar is in Hertfordshire (an
+  unparished or parished district area, not checked), so it may or may not be
+  the same cause as the level-6 item above. Both not investigated.
+- **Northern Ireland `[7, 10]`.** Belfast lost its cell to a level-10
+  townland ("Town Parks"); now `Belfast City District` (the 11 districts
+  primary). Level 10 is townlands, never towns.
+- **Scotland `[6, 10]`.** Level 10 is ~150 islands plus city-centre areas
+  ("Old Town", "City Centre") beating the real unit, so Glasgow and Dundee
+  had no city. The 32 council areas (79,814 km², 47.5% of an outline that
+  includes territorial waters, i.e. all its land) are primary: `City of
+  Edinburgh`, `Glasgow City`.
+- **Wales `[10, 6]` + `wholeUnits`.** Level 10 is 878 communities
+  tessellating the country (Pontypridd is a `place=town` community). The
+  first fix, `[6, 10]`, put the 22 principal areas first and Pontypridd
+  became `Rhondda Cynon Taf`. Communities are primary now, and `wholeUnits`
+  promotes Cardiff, Swansea and Newport (cities whose communities are
+  neighbourhoods like "Castle") and drops their communities
+  (`findSuppressedByWholeUnits`, 106 suppressed). Tradeoff: Swansea's rural
+  Gower also resolves to `Swansea`.
+- **Towns in Northern Ireland and Scotland.** OSM has no polygon for towns
+  like Lisburn, Bangor or Melrose: the only containing polygons are the
+  council area/district and, in NI, a townland. Each primary district in
+  those two regions is replaced by a Voronoi tessellation of the cities500
+  points inside it, clipped to the district (`buildContainerFallback`; 792
+  cells; a container with no point stays as itself). Checked: Melrose,
+  Lisburn, Bangor, Belfast, Edinburgh, Glasgow, Aberdeen, Inverness, Dundee,
+  Fort William. Found on the way: the container must *not* also be emitted
+  as a backstop, because at max depth a border leaf between two cells is
+  won by the largest share, always the container (~5% of random Highland
+  lookups returned `Highland`). The cells use GeoNames' own names and
+  points, so a rural cell is named after the nearest village (`Strathpeffer`
+  at 57.6, -4.5), and Derry is GeoNames' `Londonderry County Borough`.
+- **Maghaberry is not in cities500.** *(open)* It resolves to `Moira`; it
+  would need OSM `place` nodes as the point source.
+
+## United States of America (US)
+
+`region [4]`, `city [8]` (10.7%), with `overrides: { "New York": [8, 7] }`.
+
+- **County grain, not city.** Seattle (47.602922, -122.331390) used to
+  resolve to `King County`: county (level 6, 103.0%) auto-won the >=60% vote
+  over incorporated places (level 8, 10.7%, since unincorporated land is
+  common). Overridden to level 8; measured against cities500's 21,785 US
+  places, level 8 name-matches 64.0% against the county's 4.3% (a county's
+  name is almost never what GeoNames calls a place). Uncovered
+  (unincorporated) points fall back to the region instead of showing a
+  wrong county name.
+- **New York: a per-region override.** Manhattan, Brooklyn, the Bronx and
+  Albany still returned `city null`: New York's real municipal tier is
+  `admin_level=7` (towns, 92.8% of the state), not 8 (villages, 2.1%
+  there). Fixed with `overrides` (region name -> `[primary, ...gapFill]`).
+  Two flatter designs were tried first and both regressed:
+  - A country-wide `US: { city: [7, 8] }` fixed NY but lost 399 correct
+    cities500 matches nationally (63.95% -> 62.12%). A large level-7
+    township out-votes a real, smaller level-8 town it contains at their
+    shared boundary cells: `buildChunkRecords`' max-depth tie-break takes
+    the candidate with the larger *share* of an ambiguous leaf cell, and
+    `pruneAncestors` does not treat geometric nesting as exclusive the way
+    the hierarchy's own city-in-region ancestry is. Confirmed on
+    Wrightsville, AR (5.5 km²), which lost a boundary cell to the 1,120 km²
+    Big Rock Township.
+  - A single-level `overrides: { "New York": [7] }` fixed Arkansas (a
+    candidate at an override level, but not its own region's, is excluded
+    from `detectGapFill`) but broke NY internally: villages (level 8) lost to
+    their containing town by the same share mechanism (Village of Akron ->
+    Town of Newstead, Ardsley -> Greenburgh), still -80 against the baseline.
+
+  `[8, 7]` fixes both: villages are NY's primary and never compete with
+  towns for cells they cover; towns only gap-fill where no village covers
+  them (Manhattan, Brooklyn, the Bronx, Albany). Net on the same run: 63.88%
+  (13,917) against the plain-8 baseline's 63.95% (13,931), a wash on count
+  but a real quality gain. A few NY villages (Akron, Ardsley) still lose
+  edge cells to their town: the same finite-resolution imprecision as the
+  Natural Earth item (each village's own representative point resolves
+  correctly), and it would need a real containment relationship between
+  same-tier candidates or higher `--max-depth`.
+- **Parkman, Ohio has no city.** *(open)* 41.370754, -81.064682 returns
+  `Ohio`, `city -`, though Parkman is a label in OSM. With level 8 at 10.7%
+  coverage, most of the US is the "unincorporated -> region" fallback by
+  design; Ohio township names are typically level 9 (civil townships) and not
+  in the city tier. Not checked whether the polygon exists.
+- **Township around a village.** *(open)* 43.710199, -82.935448 is `Ubly`;
+  43.702009, -82.904034 is `Bingham Township`. In Michigan villages sit
+  inside townships and both are tagged at level 8, so the smaller wins where
+  it exists and the township answers around it. Another "Surrounding rural
+  unit" instance, with the US-wide twist that a township is not really a
+  city either.
+
+## Uzbekistan (UZ)
+
+`region [4]`, `city [6]`.
+
+- **Region was the district tier.** The generated `region: [6]` (204
+  tumani/shahri) won by being the only level in range, since `region`'s scan
+  only measures levels the entry already lists (`selectRegionLevels` in
+  `adminLevelDetection.ts`, `isRegionLevel` in `adminBoundaryIndex.ts`).
+  Level 4 is 13 viloyats (62.9%). Samarkand's region is now `Samarqand
+  Viloyati`.
+- **City tier appeared as a side effect.** With region off level 6, `city:
+  [6]` covers 99.9% with real district names; city had been forced onto
+  level 8 at 1.3% purely because 6 was claimed. Samarkand resolves to
+  `Samarqand shahri`.
+- **Tashkent is a region with no city.** *(open)* Returns `region Toshkent
+  shahri, city Chilonzor Tumani` (a district): the capital exists only as the
+  level-4 relation `region` resolves to (confirmed by scanning every
+  Toshkent/Tashkent relation). See "Capitals that are their own region".
+
+## Vatican (VA)
+
+No `COUNTRY_ADMIN_LEVELS` entry (no region or city tier).
+
+- **Vatican resolves to Italy, or to a country with no region or city.**
+  *(open)* 41.903323, 12.454001 returns `Vatican`, `region -`, `city -`;
+  41.903786, 12.451823 returns `Italy`, `region -`, `city -` (not even Rome's
+  region, so the leaf cell is lost to a country-only record). Expected both
+  to be the country Vatican with a region and city. Same family as Monaco.
+  The mechanism for "a country that is its own city" is the one described in
+  "Capitals that are their own region".
+
+## Venezuela (VE)
+
+`region [4]`, `city [7, 8]`.
+
+- **Level 7 is parroquias, 101.9%, almost untagged.** Level 8 carries 267
+  real settlement tags (147 town, 69 village, 51 city) in a layer with 899
+  untagged/suburb/hamlet features. Gap-filling 8 is a real but partial win:
+  most parroquias are named after their seat (Aguasay), but El Salto, Las
+  Trincheras and San Antonio de Los Altos now resolve under their own plain
+  name. "Los Robles", the one candidate to survive the strict filter, does
+  not benefit.
+- **Maracaibo.** *(open)* Venezuela's 2nd-largest city has no admin boundary
+  above `place=neighbourhood` at level 9: a deeper bug of the Brazil shape,
+  not reachable by this gap-fill.
+
+## Yemen (YE)
+
+`region [4]`, `city [6]`.
+
+- **Capital resolves to a district.** *(open)* Sana'a returns `region
+  أمانة العاصمة` with `city مديرية الثورة`; Aden is the same pattern one
+  level down (its city boundary is the only level-5 feature in Yemen).
+  Level 6 (districts, 99.5%) splits the larger cities while being about
+  right for rural areas, and no single level fits both. See "Capitals that
+  are their own region".

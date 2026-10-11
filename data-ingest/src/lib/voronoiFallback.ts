@@ -29,7 +29,7 @@ export interface VoronoiCityCandidate {
   geometry: Polygon | MultiPolygon;
 }
 
-/** README's "Voronoi-from-cities500" fallback: for a country whose OSM
+/** The Voronoi-from-cities500 city fallback (countries.md, Libya): for a country whose OSM
  * city boundaries are missing or near-empty (Libya, Egypt, Chad, Eritrea
  * -- `countryAdminLevels.ts`'s own comments record ~0-0.7% city
  * coverage), synthesize a city polygon per `cities500.txt` point instead,
@@ -100,10 +100,10 @@ export interface VoronoiRegionCandidate {
   geometry: Polygon | MultiPolygon;
 }
 
-/** README's "Voronoi-from-cities500" fallback, region half: for a country
+/** The Voronoi-from-cities500 region fallback (countries.md, Slovenia): for a country
  * with no usable region tier at all (`region: []` -- Slovenia, whose real
  * regional tier, OSM's "Upravna Enota" at level 7, only covers 17.6% of
- * the country, see README's "Slovenia has zero cities" entry), groups its
+ * the country, see countries.md's Slovenia section), groups its
  * own `cities500.txt` points by GeoNames admin1 code and unions each
  * group's individual Voronoi cells (computed together, over every point
  * in the country at once, so adjacent groups tile exactly -- computing a

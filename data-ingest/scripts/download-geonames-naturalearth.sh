@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Downloads the two small, non-OSM raw inputs every pipeline reads:
 # GeoNames' populated-places export (cities500, used by prepare-world.ts's
-# Voronoi fallback -- see README's "Libya, Egypt, Chad and Eritrea" /
-# "Slovenia" entries) and its admin1 code->name table (display names
+# Voronoi fallback -- see countries.md's Libya and
+# Slovenia sections) and its admin1 code->name table (display names
 # only, no coordinates), plus Natural Earth's country outlines (the
 # country-polygon source for all three pipelines). Idempotent and safe to
 # re-run: each file is only re-downloaded if the server says it changed
