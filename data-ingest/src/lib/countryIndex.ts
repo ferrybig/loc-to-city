@@ -210,7 +210,7 @@ export interface CountryIndex {
  * that a 5.5km outline gets wrong -- all of them on coastlines and
  * borders, answering "unknown" where a country was meant, or the reverse.
  * Build time is paid once per rebuild; that error would ship in every
- * file. See README's "How much precision these tolerances cost".
+ * file. See history.md's "How much precision these tolerances cost".
  *
  * Regions are a different trade and stay simplified -- see
  * adminBoundaryIndex.ts. */
