@@ -11,6 +11,15 @@ netherlands: data/03-final/zuid-holland.bin
 # the next run to mistake for an up-to-date one.
 .DELETE_ON_ERROR:
 
+# Without this, `make <name>.search-index.bin` builds <name>.locate-index.bin
+# as an intermediate file of the pattern rule chain and deletes it again
+# afterwards, leaving a search index ranked by area and no locate index to go
+# with it. Secondary files are kept, and (unlike .PRECIOUS, which would also
+# keep a half-written one) still deleted by .DELETE_ON_ERROR when their recipe
+# fails. A pattern as prerequisite (`.SECONDARY: %.locate-index.bin`) is
+# ignored by make; the bare form is the portable one.
+.SECONDARY:
+
 # --- Compressing a resolved dataset into a final .bin ----------------------
 #
 # Every .bin is one compressor run over data/02-resolved/$(SOURCE)/. A target
