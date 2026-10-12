@@ -1,6 +1,7 @@
 import { CGeoDataFormatError } from "./errors.ts";
 import {
 	readDeltaVarintList,
+	readDeltaVarints32Into,
 	readDeltaVarintsInto,
 	readVarint,
 } from "./varint.ts";
@@ -14,12 +15,17 @@ export interface ChunkRecords {
 	/** Stored Morton codes, chunk-local, strictly increasing. Typed arrays
 	 * rather than plain ones for this and the other per-record fields: a
 	 * big chunk holds over a million records, and parsing and holding them
-	 * as boxed JS arrays costs several times as much. */
-	codes: Float64Array;
+	 * as boxed JS arrays costs several times as much. A `Uint32Array` when
+	 * every code fits in one (`max_depth` 16 and under), else a
+	 * `Float64Array`: decoded chunks are what fills the reader's cache, so
+	 * the narrower array keeps more of them in it. */
+	codes: Float64Array | Uint32Array;
 	/** Each record's depth in the chunk's quadtree, 0 to `max_depth`. */
 	depths: Uint8Array;
-	/** Local palette index per record: 0 = "no place", k = palette[k-1]. */
-	paletteIndices: Uint32Array;
+	/** Local palette index per record: 0 = "no place", k = palette[k-1].
+	 * As wide as the file stores them (Section 8.3's S), rounding 3 bytes
+	 * up to a `Uint32Array`. */
+	paletteIndices: Uint8Array | Uint16Array | Uint32Array;
 }
 
 /** The index width S from Section 8.3's table. */
@@ -30,29 +36,36 @@ function paletteIndexWidth(paletteCount: number): number {
 	return 4;
 }
 
-/** `out.length` unsigned `width`-byte little-endian integers (Section
- * 8.3's palette indices) from `buf` at `offset` into `out`. */
-function readLittleEndianInto(
+/** `n` unsigned `width`-byte little-endian integers (Section 8.3's
+ * palette indices) from `buf` at `offset`, in the narrowest typed array
+ * that holds `width` bytes. Always a copy, so the inflated block can be
+ * freed. */
+function readLittleEndian(
 	buf: Uint8Array,
 	offset: number,
 	width: number,
-	out: Uint32Array,
-): Uint32Array {
-	const n = out.length;
+	n: number,
+): Uint8Array | Uint16Array | Uint32Array {
 	switch (width) {
 		case 1:
-			out.set(buf.subarray(offset, offset + n));
-			break;
-		case 2:
+			// Not `buf.slice()`: the block is a Buffer, whose `slice` returns
+			// a view.
+			return new Uint8Array(buf.subarray(offset, offset + n));
+		case 2: {
+			const out = new Uint16Array(n);
 			for (let i = 0, b = offset; i < n; i++, b += 2)
 				out[i] = buf[b]! | (buf[b + 1]! << 8);
-			break;
-		case 3:
+			return out;
+		}
+		case 3: {
+			const out = new Uint32Array(n);
 			for (let i = 0, b = offset; i < n; i++, b += 3) {
 				out[i] = buf[b]! | (buf[b + 1]! << 8) | (buf[b + 2]! << 16);
 			}
-			break;
-		default:
+			return out;
+		}
+		default: {
+			const out = new Uint32Array(n);
 			for (let i = 0, b = offset; i < n; i++, b += 4) {
 				out[i] =
 					buf[b]! |
@@ -60,8 +73,9 @@ function readLittleEndianInto(
 					(buf[b + 2]! << 16) |
 					(buf[b + 3]! << 24);
 			}
+			return out;
+		}
 	}
-	return out;
 }
 
 /** Whether the power of two `span` divides `value`, both below 2^53: a
@@ -97,9 +111,17 @@ export function parseChunk(buf: Uint8Array, maxDepth: number): ChunkRecords {
 		throw new CGeoDataFormatError("chunk codes run past end of block");
 	}
 	const codesStart = offset;
-	const codes = new Float64Array(recordCount);
-	const codesBytesRead =
-		readDeltaVarintsInto(buf, codesStart, codes) - codesStart;
+	// Codes are below 4^max_depth, which fits 32 bits up to max_depth 16.
+	let codes: Uint32Array | Float64Array;
+	let codesEnd: number;
+	if (maxDepth <= 16) {
+		codes = new Uint32Array(recordCount);
+		codesEnd = readDeltaVarints32Into(buf, codesStart, codes);
+	} else {
+		codes = new Float64Array(recordCount);
+		codesEnd = readDeltaVarintsInto(buf, codesStart, codes);
+	}
+	const codesBytesRead = codesEnd - codesStart;
 	if (codesBytesRead !== codesLength) {
 		throw new CGeoDataFormatError(
 			`chunk codes_length mismatch: header says ${codesLength}, decoding consumed ${codesBytesRead}`,
@@ -122,12 +144,7 @@ export function parseChunk(buf: Uint8Array, maxDepth: number): ChunkRecords {
 			"chunk palette_indices array runs past end of block",
 		);
 	}
-	const paletteIndices = readLittleEndianInto(
-		buf,
-		offset,
-		indexWidth,
-		new Uint32Array(recordCount),
-	);
+	const paletteIndices = readLittleEndian(buf, offset, indexWidth, recordCount);
 	offset += indicesBytes;
 
 	if (offset !== buf.length) {

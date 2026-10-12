@@ -63,6 +63,7 @@ export { toSource } from "./source.ts";
 export {
 	IncompleteBufferError,
 	readDeltaVarintList,
+	readDeltaVarints32Into,
 	readDeltaVarintsInto,
 	readVarint,
 	readVarintList,
