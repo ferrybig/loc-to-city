@@ -505,8 +505,12 @@ contain the point while another country's does. That fixes enclaves
 Natural Earth's 10m outlines don't have (Baarle-Hertog's Belgian enclaves
 inside NL resolved to NL and were dropped) without letting OSM's
 territorial waters or its folding of dependencies into a parent country
-change anything else. That is which country a *city or region* belongs
-to. The country *outlines* the compressor draws are OSM's own
+change anything else. Only a polygon Natural Earth places nowhere at all
+(a coastal village inland of its coastline, like Ter Heijde; an atoll it
+lacks) is sampled again against the drawn outlines below (`outlineAt`),
+instead of being dropped. Relations tagged `natural=coastline` are never
+candidates (islands with admin tags added). That is which country a
+*city or region* belongs to. The country *outlines* the compressor draws are OSM's own
 (`loadOsmCountryRelations`): the `admin_level=2` relation, or a
 dependency's own ISO-tagged relation (Hong Kong, Puerto Rico), territorial
 waters included. Where two outlines overlap (a dependency inside its

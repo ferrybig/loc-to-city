@@ -115,6 +115,7 @@ interface AdminBoundaryProps {
   admin_level?: string;
   name?: string;
   "name:en"?: string;
+  natural?: string;
 }
 
 /** Pass 1 of the 3-pass admin_level auto-detection (README.md's "Europe
@@ -130,8 +131,15 @@ interface AdminBoundaryProps {
  * after the country itself is resolved; `PLAUSIBLE_ADMIN_LEVELS` is just
  * a cheap, country-agnostic prefilter so country resolution -- the
  * expensive part -- is never attempted on a level nothing anywhere
- * uses. */
-export async function buildAdminBoundaryIndex(files: string[], countries: CountryIndex): Promise<AdminBoundaryIndex> {
+ * uses.
+ *
+ * `outlineAt` places what Natural Earth places nowhere (see
+ * `resolvePolygonCountry`). */
+export async function buildAdminBoundaryIndex(
+  files: string[],
+  countries: CountryIndex,
+  outlineAt?: (point: LonLat) => string | null,
+): Promise<AdminBoundaryIndex> {
   const cityCandidates: CityCandidateMeta[] = [];
   const areaByCountryLevel = new Map<string, Map<number, number>>();
   const regionAreaByCountryLevel = new Map<string, Map<number, number>>();
@@ -152,6 +160,12 @@ export async function buildAdminBoundaryIndex(files: string[], countries: Countr
     if (!levelRaw) continue;
     const level = Number(levelRaw);
     if (!PLAUSIBLE_ADMIN_LEVELS.has(level)) continue;
+    // An island's coastline multipolygon with admin tags added (Penghu's
+    // islets at admin_level=4, Indonesia's at 5), not an administrative
+    // unit. Worldwide that is 143 named region candidates and 1,103 city
+    // candidates, all of them islands, islets or skerries by name; as a
+    // region each became a "province" of its country.
+    if (props?.natural === "coastline") continue;
 
     const geometry = feature as Feature<Polygon | MultiPolygon>;
     // Still needed as a point known to lie on the feature (gap-fill and
@@ -160,6 +174,7 @@ export async function buildAdminBoundaryIndex(files: string[], countries: Countr
     const { bbox: featureBbox, repPoint } = bboxAndPointOnFeature(geometry.geometry);
     const country = resolvePolygonCountry(geometry, featureBbox, repPoint, countries, {
       alwaysSample: REGION_SAMPLE_LEVELS.has(level),
+      ...(outlineAt ? { outlineAt } : {}),
     });
     if (!country) {
       diagnostics.noCountry++;

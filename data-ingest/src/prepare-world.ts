@@ -33,7 +33,12 @@ import type { CityProperties, HierarchyCountry } from "@loc-to-city/compressor";
 import { discoverAdminGeoJsonFiles } from "./lib/osmFiles.ts";
 import { loadCountryIndex } from "./lib/countryIndex.ts";
 import { loadOsmCountryRelations, withOsmCountryBorders } from "./lib/osmCountryBorders.ts";
-import { cutCountriesOutOfForeignRegions, type Outline, resolveCountryOverlaps } from "./lib/countryOutlines.ts";
+import {
+  cutCountriesOutOfForeignRegions,
+  type Outline,
+  outlineLookup,
+  resolveCountryOverlaps,
+} from "./lib/countryOutlines.ts";
 import { bboxAndPointOnFeature } from "./lib/pointOnFeature.ts";
 import { buildAdminBoundaryIndex } from "./lib/adminBoundaryIndex.ts";
 import type { CityCandidateMeta } from "./lib/adminBoundaryIndex.ts";
@@ -130,7 +135,10 @@ async function main(): Promise<void> {
   outlines.clear();
 
   console.error("Pass 1/4: scanning merged corpus for city/region candidates...");
-  const index = await buildAdminBoundaryIndex(files, countries);
+  // A polygon Natural Earth puts entirely at sea (a coastal village inland
+  // of its coastline, an atoll it doesn't have) gets the country whose
+  // outline is drawn there -- see resolvePolygonCountry.
+  const index = await buildAdminBoundaryIndex(files, countries, outlineLookup(resolved.outlines));
 
   console.error("Pass 1.5/4: selecting each country's region level...");
   const region = selectRegionLevels(index, countries);

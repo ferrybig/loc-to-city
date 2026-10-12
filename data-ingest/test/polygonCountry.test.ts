@@ -133,3 +133,31 @@ test("a polygon thinner than the sample grid falls back to its representative po
   const sliver = box(5, 5, 5.0001, 9);
   assert.equal(resolve(sliver, [5.00005, 7], true), "WE");
 });
+
+// The drawn outlines, territorial waters included: WEST's reaches 2 degrees
+// out to sea, south of its coast.
+const outlineAt = ([x, y]: LonLat): string | null => (x >= 0 && x < 10 && y >= -2 && y <= 10 ? "WE" : null);
+
+test("a polygon Natural Earth puts entirely at sea gets the country whose outline is there", () => {
+  // A coastal village south of WEST's Natural Earth coastline (Ter Heijde).
+  const offshore = box(4, -1, 5, -0.5);
+  assert.equal(resolve(offshore, [4.5, -0.75]), null, "without outlines: dropped");
+  for (const alwaysSample of [false, true]) {
+    assert.equal(
+      resolvePolygonCountry(offshore, bbox(offshore), [4.5, -0.75], countries, { alwaysSample, outlineAt }),
+      "WE",
+    );
+  }
+  const farOut = box(30, 30, 31, 31);
+  assert.equal(resolvePolygonCountry(farOut, bbox(farOut), [30.5, 30.5], countries, { outlineAt }), null);
+});
+
+test("the outlines don't get a say for a polygon with any land", () => {
+  // Mostly at sea, but the land it has is EAST's.
+  const outlineEverywhere = (): string => "WE";
+  const coastal = box(10, -1.5, 11, 0.5);
+  assert.equal(
+    resolvePolygonCountry(coastal, bbox(coastal), [10.5, -1], countries, { alwaysSample: true, outlineAt: outlineEverywhere }),
+    "EA",
+  );
+});

@@ -150,6 +150,13 @@ export function cutCountriesOutOfForeignRegions(
   return { geometryByRegion, cuts };
 }
 
+/** Which outline contains a point, for outlines `resolveCountryOverlaps`
+ * has made disjoint (the first in R-tree order, for a sliver it missed). */
+export function outlineLookup(outlines: ReadonlyMap<string, Outline>): (point: LonLat) => string | null {
+  const index = indexOutlines(outlines);
+  return ([x, y]) => index.first(x, y);
+}
+
 function indexOutlines(outlines: ReadonlyMap<string, Outline>): CountryPolygonIndex {
   const index = new CountryPolygonIndex();
   for (const [code, outline] of outlines) {

@@ -99,7 +99,10 @@ country (see "Capitals" under Cross-cutting patterns).
   keyed by `ISO_A2_EH`. Cities and regions are assigned to a country by
   sampling a point against Natural Earth's outlines, corrected by OSM's own
   `admin_level=2` borders where the two disagree (`osmCountryBorders.ts`;
-  fixed Baarle-Hertog's Belgian enclaves). The country *polygons* the
+  fixed Baarle-Hertog's Belgian enclaves). A polygon Natural Earth places
+  nowhere at all (every sample at sea) gets the country whose drawn outline
+  is there instead (`resolvePolygonCountry`'s `outlineAt`; see "Places
+  Natural Earth puts at sea were dropped"). The country *polygons* the
   compressor draws are OSM's (`loadOsmCountryRelations`): each code's
   `admin_level=2` relation, or a dependency's own ISO-tagged relation
   (Hong Kong at level 3, Puerto Rico at 4), territorial waters included,
@@ -224,6 +227,65 @@ below).
   (see Tanzania). About 40 points flip between two overlapping duplicate
   city polygons ("Village of Alix" / "Alix"), because the candidate order
   the compressor's tie-break follows changed; neither name is wrong.
+- **Places Natural Earth puts at sea were dropped.** A city or region
+  candidate is assigned to a country by sampling points against Natural
+  Earth, and a polygon with no sample on Natural Earth's land was dropped
+  as "no country" in Pass 1 (8,027 of them). Natural Earth's 10m coastline
+  runs inland of whole coastal villages (Ter Heijde, see Netherlands),
+  misses small islands and atolls, and puts reclaimed land (Cotai) at sea.
+  Its `-99` features are discarded, so South Nicosia's municipality, whose
+  samples fell in Natural Earth's buffer zone and Northern Cyprus, went
+  too. Fixed (2026-10-12): such a polygon is sampled again against the
+  country outlines `prepare-world.ts` draws (overlaps already resolved, so
+  the Tuamotus are French Polynesia's and not France's, Åland not
+  Finland's), leaving 7 without a country. Only then: Natural Earth's land
+  still decides every polygon that has any, so a coastal region's sea
+  samples can't outvote its land near a border.
+
+  It came with one filter: an admin relation also tagged `natural=coastline`
+  is an island's coastline multipolygon with admin tags added, never a real
+  unit, and is no longer a candidate. Worldwide that was 143 named region
+  candidates and 1,103 city candidates, all islands, islets or skerries by
+  name. As regions they were provinces of their country: Taiwan's 中央嶼, 牛母件嶼,
+  草嶼 and 雞籠嶼 are gone, and without the filter the fallback would have
+  added 127 more in Penghu alone. `place=island` is no such signal: it is on
+  Tobago, Tristan da Cunha, East and Middle Caicos and Kerkennah too.
+
+  Measured on `world-high-res.bin` over every cities500 point (235,895):
+  174 gained a city and 155 a region (Micronesia 48 regions, the Maldives
+  26, Somaliland 20, Palau 17, Tonga 10, Lakshadweep, French Polynesia's
+  Tuamotu-Gambier, Kuwait; cities in the Philippines, Japan, Norway,
+  Australia, Croatia), 1 changed country, 3 lost their city, and 133
+  changed city or region. The city layer gains 728 cities and loses 61:
+  57 are the coastline-tagged islets, 4 are gap-fill places on Corn Island
+  (Nicaragua), now inside the island's own municipality, which Natural
+  Earth placed nowhere. Of the changes, Ter Heijde (Monster ->
+  Ter Heijde), Rab, Atrani and Keansburg are newly kept cities, and
+  Kabupaten Kepulauan Talaud wins where two islets were removed by the
+  filter. The rest is "A city inside two
+  overlapping regions gets whichever the R-tree returns first" below: the
+  region set changed, so the tree's order did. That moved 63 points between
+  regions, both ways (Fujimi to Nagano, Alfaro to La Rioja, Koshekhabl to
+  Adygea are right now; Beşiri to Siirt, Villa Dolores to San Luis,
+  Calimete to Cienfuegos, gmina Tarnów to the city of Tarnów are wrong
+  now). It cost Taipa (Macau) and Trachóni (Akrotiri) their city, and
+  flipped 38 Crimean points and 21 in An Giang between two duplicate
+  polygons for the same area. The country change is Loyada, on the
+  Djibouti border: Somalia's newly kept Awdal region, simplified to
+  ~1.1 km, overshoots into Djibouti by a sliver `cutCountriesOutOfForeignRegions`
+  samples too rarely to cut. Verify: 142 pass, 0 fail; Ter Heijde and
+  Nicosia now pass. Cost: `prepare-world.ts` took 32.5 min against 17.7 min
+  in the last recorded run; the fallback samples only the ~8,000 polygons
+  Natural Earth drops, so most of that gap is probably not this change, but
+  no baseline was rerun on the same machine state to show it.
+- **Islets tagged as admin regions.** *(human error)* Some islets and rocks
+  carry `boundary=administrative` + `admin_level=4` without
+  `natural=coastline`, so the filter above keeps them, and the fallback now
+  keeps them too when Natural Earth has them at sea. On `world-high-res.bin`:
+  Mexico's region list has Isla Cerro Blanco, Isla Choyita, Isla San Cosme,
+  Isla San Damian, Islote el Raicito, Islote la Lobera and Islote Montalvá
+  (`place=islet`), Taiwan's has 香爐礁 (`natural=stone`). The fix is in OSM:
+  the admin tags don't belong on these relations.
 - **Border artifacts.** The same 10m outline problem on ordinary borders,
   always seen as one country's outline overshooting its neighbour's
   (resolved with `region -`, `city -`, since the overshooting country had
@@ -298,11 +360,12 @@ below).
   in the hierarchy. Their *country* answer is fixed: the outlines are OSM's
   now, and OSM draws Northern Cyprus inside Cyprus and Somaliland inside
   Somalia (the internationally recognised borders; see Cyprus and Somalia).
-  What is still missing is their regions and cities: city/region candidates
-  are assigned to a country through Natural Earth, which puts these areas
-  in no country, so they are dropped and a lookup there answers the country
-  only. Mapping `CYN`/`SOL` onto `CY`/`SO` in `prepare-world.ts` would keep
-  them, consistent with the outline.
+  Their candidates now get their country from those outlines too (see
+  "Places Natural Earth puts at sea were dropped"), which fixed Somaliland
+  outright: its regions and cities resolve. Northern Cyprus still answers
+  the country only: its 247 municipalities now get Cyprus, but no Cyprus
+  region polygon (level 6) covers the north, so `emitCity` drops each one
+  for having no region.
 - **Countries with a thin city tier.** The generated table lists every
   country whose chosen city level covers under 20% of it:
   AO 9.1, AZ 4.2, BB 19.6, BH 0.6, BW 18.1, BZ 5.3, CF 0.2, CV 6.3, DM 0.9,
@@ -315,7 +378,7 @@ below).
 - **Capitals.** *(open)* `verify/test/world-queries.test.ts` looks up
   the capital of every country and dependency GeoNames lists one for
   (232; `verify/src/cases.ts`'s `CAPITALS` and `OPEN_CAPITALS` tables carry the
-  coordinates and the exact rule) and measured 77 resolving and 155
+  coordinates and the exact rule) and measured 78 resolving and 154
   not, on `world-high-res.bin` (built 2026-10-12). A capital resolves when
   the country is right and the **city** tier is named for the capital. The
   goal is a city answer: "all photos in the city of Beijing" is a city
@@ -327,7 +390,7 @@ below).
   fifth, **no country or the wrong one**, is gone since the OSM country
   outlines: Vatican City and Monaco resolve, and Gibraltar and the three
   atolls get their country; see "Natural Earth's outlines are too coarse".)
-  - **Country only** (29): neither a region nor a city covers the point.
+  - **Country only** (28): neither a region nor a city covers the point.
     Microstates and small territories, and also Manila (Philippines),
     Tbilisi (Georgia) and Skopje (North Macedonia), which have their own
     sections. `CITY_STATES` (Monaco, Vatican) is the mechanism for the
@@ -336,14 +399,14 @@ below).
     Nassau (Bahamas); George Town (Cayman Is.); Willemstad (Curaçao);
     Stanley (Falkland Is.); Port-aux-Français (Fr. S. Antarctic Lands);
     Tbilisi (Georgia); Gibraltar (Gibraltar); Bissau (Guinea-Bissau); Saint
-    Helier (Jersey); Tarawa (Kiribati); Kuwait City (Kuwait); Valletta
+    Helier (Jersey); Tarawa (Kiribati); Valletta
     (Malta); Majuro (Marshall Is.); Alofi (Niue); Skopje (North Macedonia);
     Manila (Philippines); Adamstown (Pitcairn Is.); Grytviken (S. Geo. and
     the Is.); Jamestown (Saint Helena); San Marino (San Marino); Philipsburg
     (Sint Maarten); Gustavia (St-Barthélemy); Marigot (St-Martin);
     Saint-Pierre (St. Pierre and Miquelon); Funafuti (Tuvalu); Mata-Utu
     (Wallis and Futuna Is.)
-  - **The capital is only a region** (40): the region carries the
+  - **The capital is only a region** (39): the region carries the
     capital's name and no city covers the point. This is the previous
     entry ("Capitals that are their own region"), which has the untried
     mechanism for it; Kyiv, Prague and Bremen are tracked by their own
@@ -351,7 +414,7 @@ below).
     Vienna (Austria); Baku (Azerbaijan); Minsk (Belarus); Hamilton
     (Bermuda); Thimphu (Bhutan); Gaborone (Botswana); Gitega (Burundi);
     Praia (Cabo Verde); Bangui (Central African Rep.); Yamoussoukro (Côte
-    d'Ivoire); Nicosia (Cyprus); Prague (Czechia); Kinshasa (Dem. Rep.
+    d'Ivoire); Prague (Czechia); Kinshasa (Dem. Rep.
     Congo); Djibouti (Djibouti); Mbabane (eSwatini); Banjul (Gambia);
     Berlin (Germany); Conakry (Guinea); Pristina (Kosovo); Riga (Latvia);
     Maseru (Lesotho); Monrovia (Liberia); Vilnius (Lithuania); Lilongwe
@@ -361,7 +424,7 @@ below).
     Bratislava (Slovakia); Ljubljana (Slovenia); Honiara (Solomon Is.);
     Basseterre (St. Kitts and Nevis); Dushanbe (Tajikistan); Port of Spain
     (Trinidad and Tobago); Kyiv (Ukraine)
-  - **A region around it, no city** (26): the region is a province,
+  - **A region around it, no city** (25): the region is a province,
     parish or federal district (Washington is "District of Columbia", New
     Delhi is "Delhi", Brasília is "Distrito Federal"), and no city covers
     the point. Washington, New Delhi and Brasília are the capital's own
@@ -373,10 +436,10 @@ below).
     (Guernsey); New Delhi (India); Macau (Macao); Antananarivo
     (Madagascar); Plymouth (Montserrat); Ngerulmud (Palau); Kigali
     (Rwanda); Apia (Samoa); Victoria (Seychelles); Kingstown (St. Vin. and
-    Gren.); Khartoum (Sudan); Lomé (Togo); Nuku‘alofa (Tonga); Tunis
+    Gren.); Khartoum (Sudan); Lomé (Togo); Tunis
     (Tunisia); Cockburn Town (Turks and Caicos Is.); Washington (United
     States of America); Port-Vila (Vanuatu)
-  - **A district, ward or parish instead of the capital** (60): the
+  - **A district, ward or parish instead of the capital** (62): the
     country's city tier is finer than its capital (Beijing, Tokyo, Seoul,
     Bangkok, Lisbon, London and many more). The capital's own boundary
     exists in OSM for most of these, usually a level above the one the
@@ -390,7 +453,7 @@ below).
     Rica); Havana (Cuba); Tallinn (Estonia); Accra (Ghana); Port-au-Prince
     (Haiti); Tegucigalpa (Honduras); Hong Kong (Hong Kong); Baghdad
     (Iraq); Kingston (Jamaica); Tokyo (Japan); Amman (Jordan); Astana
-    (Kazakhstan); Nairobi (Kenya); Bishkek (Kyrgyzstan); Vientiane (Laos);
+    (Kazakhstan); Nairobi (Kenya); Kuwait City (Kuwait); Bishkek (Kyrgyzstan); Vientiane (Laos);
     Beirut (Lebanon); Nouakchott (Mauritania); Mexico City (Mexico);
     Palikir (Micronesia); Ulan Bator (Mongolia); Maputo (Mozambique); Nay
     Pyi Taw (Myanmar); Abuja (Nigeria); Kingston (Norfolk Island);
@@ -399,7 +462,7 @@ below).
     (Portugal); Dakar (Senegal); Freetown (Sierra Leone); Singapore
     (Singapore); Mogadishu (Somalia); Pretoria (South Africa); Seoul
     (South Korea); Paramaribo (Suriname); Taipei (Taiwan); Bangkok
-    (Thailand); Dili (Timor-Leste); Ankara (Turkey); Charlotte Amalie
+    (Thailand); Dili (Timor-Leste); Nuku‘alofa (Tonga); Ankara (Turkey); Charlotte Amalie
     (U.S. Virgin Is.); Abu Dhabi (United Arab Emirates); London (United
     Kingdom); Tashkent (Uzbekistan); Caracas (Venezuela); Hanoi (Vietnam);
     Sanaa (Yemen)
@@ -602,7 +665,9 @@ tessellates its country, so the bug was always grain, not coverage.
   (`CNM`) have `ISO_A2_EH` `-99`, so they were dropped. Fixed by the OSM
   country outlines (see "Natural Earth's outlines are too coarse"), whose
   Cyprus relation covers the whole island: it now answers `Cyprus`, with no
-  region or city yet (see "Countries without an ISO code").
+  region or city yet (see "Countries without an ISO code"). Its
+  municipalities now get Cyprus, and are dropped for having no region
+  instead.
 
 ## Czechia (CZ)
 
@@ -977,22 +1042,20 @@ worldwide resolved data (`make netherlands`) and
     because its ~300 m cell is mostly 3104 and a cell holds one answer.
     That is ordinary border resolution, and harmless here since the names
     are identical.
-- **Ter Heijde is missing; its coast resolves to Monster.** *(open)*
-  52.030172, 4.168013 resolves to Monster (Westland, Zuid-Holland) but should
-  be Ter Heijde. Found 2026-10-12, thought to be an enclave ordering problem
-  that worked before. Measured:
-  - Ter Heijde is an enclave. In `planet-latest-admin.geojson` it is
-    `a2721331` (`admin_level=10`, `source=BAG`, woonplaatscode 2663), one
-    ring that is exactly the only hole in Monster's `a2721333` (both
-    1.56e-5 deg²). The point is inside Ter Heijde, not Monster.
-  - It never reaches the compressor. Ter Heijde is in the extracted data but
-    not in `cities-filtered.geojsonseq` (built 2026-10-12), and so not in the
-    place table: `search heijde` only finds Terheijden (Noord-Brabant). The
-    same holds for every `.bin` here, including the 2026-09-28
-    `zuid-holland.bin` and 2026-10-09 `world-e7-d10.bin`. So whatever
-    "worked before" did, it predates those builds, and the cause is in
-    `prepare-world.ts`, not the compressor's candidate order. Not looked
-    into yet.
+- **Ter Heijde was missing; its coast resolved to Monster.**
+  52.030172, 4.168013 resolved to Monster (Westland, Zuid-Holland) instead
+  of Ter Heijde. Found 2026-10-12; it was missing from every build still
+  around (the oldest 2026-09-22). Ter Heijde is an enclave: in
+  `planet-latest-admin.geojson` it is `a2721331` (`admin_level=10`,
+  `source=BAG`, woonplaatscode 2663), one ring that is exactly the only hole
+  in Monster's `a2721333`. That was not the problem, though. It never
+  reached the compressor: Natural Earth's coastline runs inland of the
+  whole village, so all 20 interior samples were at sea and Pass 1 dropped
+  it as "no country". Fixed by sampling such polygons against the drawn
+  country outlines (see "Places Natural Earth puts at sea were dropped").
+  Resolves on `world-high-res.bin` and `zuid-holland.bin`; on `world.bin`,
+  whose ~1.8 x 1.2 km cells are larger than the village (0.12 km²), it
+  still answers Monster, like Monaco and the Vatican there.
 
 ## Nicaragua (NI)
 
@@ -1152,8 +1215,10 @@ worldwide resolved data (`make netherlands`) and
 - **Somaliland resolves to no country.** 10.611344, 47.369614 returned
   `country -`: Natural Earth's `Somaliland` (`SOL`) has `ISO_A2_EH` `-99`
   and is dropped. Fixed by the OSM country outlines, whose Somalia relation
-  includes Somaliland: it now answers `Somalia`, with no region or city yet
-  (see "Countries without an ISO code").
+  includes Somaliland: it now answers `Somalia`. Its regions and cities
+  resolve since candidates Natural Earth places nowhere get their country
+  from the outlines: 10.611344, 47.369614 is `Sanaag` / `Ceerigaabo` (see
+  "Places Natural Earth puts at sea were dropped").
 
 ## Sudan (SD)
 
