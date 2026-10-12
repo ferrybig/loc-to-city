@@ -255,14 +255,12 @@ format and search work.
   local-name field at all -- its `NAME`/`NAME_EN` properties are both
   already the English name (confirmed for `NL`: `NAME` = `NAME_EN` =
   `"Netherlands"`, not `"Nederland"`), so a genuine `Nederland|The
-  Netherlands` pair would need country geometry/names to come from OSM's
-  own `admin_level=2` relations instead of (or alongside) Natural Earth --
-  those relations are already extracted (unfiltered) into
-  `data/01-extracted/world/*-admin.geojson` by `extract-boundaries.sh`, but
-  discarded by `adminBoundaryIndex.ts`'s `PLAUSIBLE_ADMIN_LEVELS` prefilter
-  (levels 4-11 only). This and countries.md's "Natural Earth's outlines
-  are too coarse" and "Border artifacts" items all want the same new OSM
-  `admin_level=2` country source, so they're natural to tackle together.
+  Netherlands` pair would need country names to come from OSM's own
+  `admin_level=2` relations instead of (or alongside) Natural Earth.
+  Country *outlines* already do (`loadOsmCountryRelations`, see
+  countries.md's "Natural Earth's outlines are too coarse"), and those
+  relations carry `name` and `name:en`, so the names are the remaining
+  half; the hierarchy's country list and names are still Natural Earth's.
 - **Search ranks equal matches by area, which is size, not fame.** With
   a locate index, `search({ sort: true })` breaks ties by area
   (`reader/binary-format.md` Appendix B.5.1, see history.md's "Issues fixed along the way"), which

@@ -94,14 +94,19 @@ country (see "Capitals" under Cross-cutting patterns).
 
 ## How a place gets its country, region and city
 
-- **Country** comes from Natural Earth's 10m `admin_0` outlines
-  (`data/00-raw/natural-earth/ne_10m_admin_0_countries.geojson`), keyed by
-  `ISO_A2_EH`. Cities and regions are assigned to a country by sampling a
-  point against that index, corrected by OSM's own `admin_level=2` borders
-  where the two disagree (`osmCountryBorders.ts`; fixed Baarle-Hertog's
-  Belgian enclaves). The correction applies to *assigning candidates to a
-  country* only. The country *polygons* the compressor draws are still
-  Natural Earth's, unsimplified (`COUNTRY_SIMPLIFY_TOLERANCE` is `0`).
+- **Country** list and names come from Natural Earth's 10m `admin_0`
+  countries (`data/00-raw/natural-earth/ne_10m_admin_0_countries.geojson`),
+  keyed by `ISO_A2_EH`. Cities and regions are assigned to a country by
+  sampling a point against Natural Earth's outlines, corrected by OSM's own
+  `admin_level=2` borders where the two disagree (`osmCountryBorders.ts`;
+  fixed Baarle-Hertog's Belgian enclaves). The country *polygons* the
+  compressor draws are OSM's (`loadOsmCountryRelations`): each code's
+  `admin_level=2` relation, or a dependency's own ISO-tagged relation
+  (Hong Kong at level 3, Puerto Rico at 4), territorial waters included,
+  with overlaps between them cut by `countryOutlines.ts`. Natural Earth's
+  outline is used only for the three codes OSM has no relation for:
+  Palestine, Antarctica, U.S. Minor Outlying Islands. See "Natural Earth's
+  outlines are too coarse".
 - **Region** and **city** are OSM `admin_level` tiers chosen per country in
   `COUNTRY_ADMIN_LEVELS` (`{ region: [...], city: [...] }`). The 3-pass
   detection in `adminLevelDetection.ts` picks the finest level that covers
@@ -163,28 +168,66 @@ below).
 ## Cross-cutting patterns
 
 - **Natural Earth's outlines are too coarse for small territories and for
-  borders.** *(open)* Jersey (9 km across) is a 47-vertex ring and Guernsey
-  59 in `ne_10m_admin_0_countries.geojson`, confirmed by direct inspection
-  and unmodified by this pipeline. At `--max-depth 8` this mostly hides: the
-  max-depth tie-break in `quadtree.ts` picks *some* winner for an ambiguous
-  leaf cell even at sample score `0`, as long as one candidate is the sole
-  one still touching that branch, which papers over the gap between the
-  crude outline and the real coastline. At `--max-depth 11` (an earlier
-  `world_high_res.bin`) subdivision reaches cells the real boundary never
-  touches, which correctly resolve to nothing and look like data loss
-  instead. Baarle-Hertog/Baarle-Nassau likely shares the root cause,
-  compounded by its enclave topology. The fix would be to source outlines
-  from OSM's own `admin_level=2` relations (already extracted) as an
-  override for territories under some area threshold. Not a
-  `quadtree.ts`/`geometry.ts` bug: both builds classify the same coarse
-  polygon correctly. It also blocks pushing `--max-depth` further, since
-  finer subdivision only exposes it more. See "Border artifacts" for the
-  large-country form of the same thing, and Monaco and Vatican for the
-  micro-state form.
-- **Border artifacts** *(open)*. The same 10m outline problem on ordinary
-  borders, always seen as one country's outline overshooting its neighbour's
-  (resolved with `region -`, `city -`, since the overshooting country has no
-  candidates there). Reported on `world-high-res.bin`:
+  borders.** Jersey (9 km across) is a 47-vertex ring and Guernsey 59 in
+  `ne_10m_admin_0_countries.geojson`; the Vatican is a 7-vertex polygon of
+  about 110 m by 130 m, and Monaco a 12-vertex shape shifted west over
+  French land. At `--max-depth 8` this mostly hid behind the max-depth
+  tie-break; at `--max-depth 11` (an earlier `world_high_res.bin`)
+  subdivision reached cells the real boundary never touches, which looked
+  like data loss. Fixed (2026-10-12) by drawing OSM's own country relations
+  instead (`loadOsmCountryRelations`, see "How a place gets its country"):
+  215 countries from their `admin_level=2` relation, 21 dependencies from
+  their own ISO-tagged relation at level 3 or 4 (Hong Kong, Puerto Rico,
+  Aruba, Åland, New Caledonia, ...), Natural Earth only for Palestine,
+  Antarctica and the U.S. Minor Outlying Islands. They include territorial
+  waters, so a photo from a boat near a coast answers that country (5 km off
+  Scheveningen: Netherlands).
+
+  Two things had to come with it, each measured as a regression without it:
+  - **Overlapping outlines get one owner** (`resolveCountryOverlaps`). OSM
+    draws a dependency inside its parent (Puerto Rico inside the United
+    States), and both sides claim a disputed area. Left overlapping, the
+    compressor's max-depth "largest share" rule gives every cell a
+    dependency's small cities split to the parent: on `world.bin`, 543
+    cities500 points changed country, 195 of them Puerto Rico's and 184 Hong
+    Kong's. Each of the 39 overlaps now goes to the country the city/region
+    lookup names there (so Crimea stays Russia, Western Sahara Morocco,
+    Abyei Sudan, as before; Kafia Kingi, which Natural Earth's outline gave
+    to South Sudan, now answers Sudan, which administers it), at sea to the smaller country, and a Natural
+    Earth outline loses every overlap with an OSM one (Palestine's
+    overshoot took Bāqa el Gharbīya and Zemer from Israel, and Egyptian
+    Rafah from Egypt). The U.S. Minor Outlying Islands now answer United
+    States: OSM's US relation includes them and their own outline is
+    Natural Earth's.
+  - **A country is cut out of a foreign region that covers its land**
+    (`cutCountriesOutOfForeignRegions`). Region polygons are simplified
+    (~1.1 km), which drops a small hole: Lazio covered the Vatican,
+    Provence-Alpes-Côte d'Azur Monaco (Mareterra, outside Monaco's older
+    city polygon, answered France), Guangdong Macau, Noord-Brabant the
+    Baarle-Hertog enclaves. 304 regions are cut, most by a sliver where a
+    simplified region overshot a land border.
+
+  Cost: the outline step takes about 45 s and 3 GB in `prepare-world.ts`,
+  the region cut about 2.5 minutes. `country-polygons.geojson` grows from
+  12 MB to 136 MB (5.7M vertices). The compressor took 56 s -> 58 s wall
+  (367 s -> 432 s CPU) for `world.bin`, 3:44 -> 4:21 for
+  `world-high-res.bin`, and both files grew about 1.5-2% (more of the sea
+  is a country now).
+
+  Measured against the Natural Earth build on `world-high-res.bin`, over
+  every cities500 point: 284 went from no country to one (small islands
+  Natural Earth misses: Micronesia, the Maldives, the Marshall Islands,
+  Kiribati, ...) and about 40 changed country, nearly all to the right one
+  (San Marino, Andorra's Pas de la Casa, Campione, Gibraltar, Monaco,
+  Vatican City, Taba, Neu-Moresnet, St-Martin/Sint Maarten). The wrong-
+  looking ones are false positives: Liberland (see Croatia), Lake Malawi
+  (see Tanzania). About 40 points flip between two overlapping duplicate
+  city polygons ("Village of Alix" / "Alix"), because the candidate order
+  the compressor's tie-break follows changed; neither name is wrong.
+- **Border artifacts.** The same 10m outline problem on ordinary borders,
+  always seen as one country's outline overshooting its neighbour's
+  (resolved with `region -`, `city -`, since the overshooting country had
+  no candidates there). Reported on `world-high-res.bin`:
   - 52.441101, 6.848860: expected Netherlands, got Germany.
   - 50.710482, 6.090031: expected Belgium, got Germany.
   - 49.947409, 6.159039: expected Luxembourg, got Germany.
@@ -192,29 +235,23 @@ below).
   - 49.533439, 5.691605: expected France, got Belgium.
   - 50.264491, 12.187872: expected Czechia, got Germany.
 
-  Germany is on the wrong side in four of six. Hypothesis (not verified):
-  the OSM correction (`withOsmCountryBorders`) only changes which country
-  a *candidate city or region* is assigned to; it never touches
-  `country-polygons.geojson`, which is Natural Earth as shipped, so a
-  strip along the border is a country-level answer for the wrong country.
-  Check by comparing NE's Germany ring to OSM's `admin_level=2` Germany at
-  these points. The same fix as the item above (OSM outlines) would cover
-  it; the build-time cost of full-precision OSM outlines needs measuring
-  (history.md's "How much precision these tolerances cost" has the NE
-  numbers).
-
-  **Research item:** before committing to it, measure whether OSM's
-  `admin_level=2` borders are actually more accurate than Natural Earth's
-  10m outlines. Sample the six points above plus a few dozen random border
-  points per neighbouring pair, and compare each source against a trusted
-  reference (a known border marker, or the cities500 points on either side).
-  OSM is not automatically better: its country relations include territorial
-  waters and dependencies folded into the parent country (the reason
-  `osmCountryBorders.ts` only uses it for the narrow enclave correction), and
-  disputed borders are tagged by local consensus. If OSM wins, it may also
-  answer the Somaliland and Northern Cyprus cases below, since OSM carries
-  those as their own `admin_level=2` relations (needs checking: whether they
-  have an `ISO3166-1` tag at all).
+  The hypothesis held: the OSM correction only changed which country a
+  candidate city or region was assigned to, never the country polygons,
+  which were Natural Earth's. All six are fixed by the OSM outlines (item
+  above), on `world-high-res.bin` and on `world.bin`.
+- **A city inside two overlapping regions gets whichever the R-tree returns
+  first.** *(open)* `assignCityRegion` (`regionPolygons.ts`) returns the
+  first region in `regionIndex`'s R-tree order whose polygon contains the
+  city's representative point, and simplified region polygons overlap
+  along their borders. The order depends on the whole tree: adding two
+  regions (Monaco's and the Vatican's) moved 593 cities500 points to
+  another region, Ninghe District from Tianjin to Hebei among them, and
+  cost Taipa (Macau) its city. The city-states are kept out of the tree for
+  that reason, so the order is as before, but any other change to the
+  region set reshuffles it. A deterministic rule (the region containing
+  most of the city's own polygon, or the smallest containing region) would
+  end this; it changes the region of every such border city, so it needs
+  its own measurement.
 - **Surrounding rural unit named after its town** *(open)*. Poland, Belarus,
   Canada, the US (Michigan), Russia (Crimea): a town or city polygon sits as
   a hole in a larger rural unit that carries the same name (`Kościan` inside
@@ -256,16 +293,16 @@ below).
   change, not a level pick. The same shape explains Angola and Namibia
   below, where the Voronoi fallback is the lever instead.
 - **Countries without an ISO code in Natural Earth are dropped.**
-  *(open)* The country polygons keep `ISO_A2_EH` codes; features whose code
-  is `-99` (Northern Cyprus `CYN`, Somaliland `SOL`, the Cyprus UN buffer
-  zone `CNM`) have none, so they never reach `country-polygons.geojson` and
-  their area is "no country". See Cyprus and Somalia. Natural Earth gives
-  each of them a `SOVEREIGNT` / `ADM0_A3`, so mapping them onto an existing
-  code is a small change in `prepare-world.ts`, but it is a political choice
-  (Northern Cyprus under Cyprus or Turkey; Somaliland under Somalia) that
-  should be made on purpose.
-  The OSM-borders research item under "Border artifacts" may cover these
-  too, but the sovereignty choice remains either way.
+  *(open)* Natural Earth's features whose `ISO_A2_EH` is `-99` (Northern
+  Cyprus `CYN`, Somaliland `SOL`, the Cyprus UN buffer zone `CNM`) are not
+  in the hierarchy. Their *country* answer is fixed: the outlines are OSM's
+  now, and OSM draws Northern Cyprus inside Cyprus and Somaliland inside
+  Somalia (the internationally recognised borders; see Cyprus and Somalia).
+  What is still missing is their regions and cities: city/region candidates
+  are assigned to a country through Natural Earth, which puts these areas
+  in no country, so they are dropped and a lookup there answers the country
+  only. Mapping `CYN`/`SOL` onto `CY`/`SO` in `prepare-world.ts` would keep
+  them, consistent with the outline.
 - **Countries with a thin city tier.** The generated table lists every
   country whose chosen city level covers under 20% of it:
   AO 9.1, AZ 4.2, BB 19.6, BH 0.6, BW 18.1, BZ 5.3, CF 0.2, CV 6.3, DM 0.9,
@@ -278,35 +315,34 @@ below).
 - **Capitals.** *(open)* `verify/test/world-queries.test.ts` looks up
   the capital of every country and dependency GeoNames lists one for
   (232; `verify/src/cases.ts`'s `CAPITALS` and `OPEN_CAPITALS` tables carry the
-  coordinates and the exact rule) and measured 75 resolving and 157
-  not, on `world-high-res.bin` (built 2026-10-10). A capital resolves when
+  coordinates and the exact rule) and measured 77 resolving and 155
+  not, on `world-high-res.bin` (built 2026-10-12). A capital resolves when
   the country is right and the **city** tier is named for the capital. The
   goal is a city answer: "all photos in the city of Beijing" is a city
   query, so a capital must not answer with a district inside it (Beijing
   as "Dongcheng District", Tokyo as "Shinjuku", London as "City of
   Westminster") nor only as a region (Berlin, Prague and Kyiv are in the
   region selector and never in the city one; see "What each tier is for"
-  above). Each miss is one of five shapes, which are different work:
-  - **No country, or the wrong one** (5): the point is outside every
-    outline. Vatican and Gibraltar answer Italy and Spain; the three atolls
-    answer nothing. See "Natural Earth's outlines are too coarse" above and
-    the Vatican section.
-    Gibraltar (Gibraltar); Tarawa (Kiribati); Majuro (Marshall Is.);
-    Funafuti (Tuvalu); Vatican City (Vatican)
-  - **Country only** (26): neither a region nor a city covers the point.
+  above). Each miss is one of four shapes, which are different work. (A
+  fifth, **no country or the wrong one**, is gone since the OSM country
+  outlines: Vatican City and Monaco resolve, and Gibraltar and the three
+  atolls get their country; see "Natural Earth's outlines are too coarse".)
+  - **Country only** (29): neither a region nor a city covers the point.
     Microstates and small territories, and also Manila (Philippines),
     Tbilisi (Georgia) and Skopje (North Macedonia), which have their own
-    sections.
+    sections. `CITY_STATES` (Monaco, Vatican) is the mechanism for the
+    microstates among them.
     Andorra la Vella (Andorra); The Valley (Anguilla); Oranjestad (Aruba);
     Nassau (Bahamas); George Town (Cayman Is.); Willemstad (Curaçao);
     Stanley (Falkland Is.); Port-aux-Français (Fr. S. Antarctic Lands);
-    Tbilisi (Georgia); Bissau (Guinea-Bissau); Saint Helier (Jersey);
-    Kuwait City (Kuwait); Valletta (Malta); Monaco (Monaco); Alofi (Niue);
-    Skopje (North Macedonia); Manila (Philippines); Adamstown (Pitcairn
-    Is.); Grytviken (S. Geo. and the Is.); Jamestown (Saint Helena); San
-    Marino (San Marino); Philipsburg (Sint Maarten); Gustavia (St-
-    Barthélemy); Marigot (St-Martin); Saint-Pierre (St. Pierre and
-    Miquelon); Mata-Utu (Wallis and Futuna Is.)
+    Tbilisi (Georgia); Gibraltar (Gibraltar); Bissau (Guinea-Bissau); Saint
+    Helier (Jersey); Tarawa (Kiribati); Kuwait City (Kuwait); Valletta
+    (Malta); Majuro (Marshall Is.); Alofi (Niue); Skopje (North Macedonia);
+    Manila (Philippines); Adamstown (Pitcairn Is.); Grytviken (S. Geo. and
+    the Is.); Jamestown (Saint Helena); San Marino (San Marino); Philipsburg
+    (Sint Maarten); Gustavia (St-Barthélemy); Marigot (St-Martin);
+    Saint-Pierre (St. Pierre and Miquelon); Funafuti (Tuvalu); Mata-Utu
+    (Wallis and Futuna Is.)
   - **The capital is only a region** (40): the region carries the
     capital's name and no city covers the point. This is the previous
     entry ("Capitals that are their own region"), which has the untried
@@ -538,6 +574,15 @@ tessellates its country, so the bug was always grain, not coverage.
   one region holding its 5 cities) before the region-seeding fix in the
   README; all 23 regions are there now.
 
+## Croatia (HR)
+
+- **Liberpolis resolves to no country.** *(false positive)* 45.77468,
+  18.88007 (GeoNames' `Liberpolis`, the "capital" of Liberland) answered
+  `Croatia` with Natural Earth's outline. It is Gornja Siga, a strip on the
+  west bank of the Danube that neither Croatia nor Serbia claims: OSM's
+  `admin_level=2` relations leave it out of both, so with OSM outlines it
+  is in no country. Same shape as Bir Tawil (Egypt).
+
 ## Cuba (CU)
 
 `region [4]`, `city [6, 8]` (97.7% at 6, gap-fill 8).
@@ -552,11 +597,12 @@ tessellates its country, so the bug was always grain, not coverage.
 
 `region [6]`, `city [8]`.
 
-- **Northern Cyprus resolves to no country.** *(open)* 35.257394,
-  33.731461 returns `country -`. Natural Earth's `N. Cyprus` (`CYN`) and
-  the UN buffer zone (`CNM`) have `ISO_A2_EH` `-99`, so they are dropped.
-  Expected: Cyprus or Turkey (the user's call: it is a political choice, see
-  "Countries without an ISO code").
+- **Northern Cyprus resolves to no country.** 35.257394, 33.731461 returned
+  `country -`: Natural Earth's `N. Cyprus` (`CYN`) and the UN buffer zone
+  (`CNM`) have `ISO_A2_EH` `-99`, so they were dropped. Fixed by the OSM
+  country outlines (see "Natural Earth's outlines are too coarse"), whose
+  Cyprus relation covers the whole island: it now answers `Cyprus`, with no
+  region or city yet (see "Countries without an ISO code").
 
 ## Czechia (CZ)
 
@@ -687,8 +733,8 @@ tessellates its country, so the bug was always grain, not coverage.
   13.404954 and 53.551086, 9.993682. Confirmed: neither has a second,
   lower-level relation anywhere in the German extract, unlike Bremen. See
   "Capitals that are their own region".
-- **Border artifacts** *(open)* on the Dutch, Belgian, Luxembourg and Czech
-  borders: see "Border artifacts".
+- **Border artifacts** on the Dutch, Belgian, Luxembourg and Czech borders.
+  Fixed by the OSM country outlines: see "Border artifacts".
 
 ## Indonesia (ID)
 
@@ -722,8 +768,10 @@ tessellates its country, so the bug was always grain, not coverage.
 
 ## Jersey and Guernsey (JE, GG)
 
-- **Natural Earth's outlines are 47 and 59 vertices.** *(open)* See
-  "Natural Earth's outlines are too coarse".
+- **Natural Earth's outlines are 47 and 59 vertices.** Fixed: the country
+  outlines are OSM's now (see "Natural Earth's outlines are too coarse").
+  Saint Helier still answers `Jersey` with no region or city, one of the
+  "Country only" capitals.
 
 ## Kazakhstan (KZ)
 
@@ -825,15 +873,22 @@ tessellates its country, so the bug was always grain, not coverage.
 
 `region []`, `city [8]` (78.2%).
 
-- **Monaco resolves to France.** *(open)* 43.730840, 7.421372 (inside the
-  principality) returns `France / Provence-Alpes-Côte d'Azur`, `city -`.
-  Monaco's polygon is in `country-polygons.geojson`, so it is in the
-  build, but at the leaf cell that contains this point France wins. Same
-  family as Vatican and the Jersey/Guernsey item: a tiny country, a coarse
-  Natural Earth outline, ambiguous leaf cells decided by share. Expected: the
-  country Monaco and its city (a micro-state's city is the state; see
-  "Capitals that are their own region" for the mechanism that would give it
-  one).
+- **Monaco resolves to France.** 43.730840, 7.421372 (inside the
+  principality) returned `France / Provence-Alpes-Côte d'Azur`, `city -`.
+  Natural Earth's Monaco is a 12-vertex shape shifted west: it covered
+  French land around Cap-d'Ail and La Turbie and missed this point, which
+  no country polygon contained at all. Fixed in two steps. The OSM country
+  outlines (see "Natural Earth's outlines are too coarse") draw Monaco
+  where it is, and Cap-d'Ail and La Turbie went back to France. Monaco is
+  then in `CITY_STATES` (`countryAdminLevels.ts`): a city-state gets a
+  region covering its whole outline, so the point reads `Monaco / Monaco /
+  Monaco` -- someone filtering on the city field looks for Monaco there.
+  The city is OSM's own `admin_level=8` "Monaco" relation (`place=city`),
+  which was dropped before for having no region to sit in. All of that is on
+  `world-high-res.bin`; on `world.bin` a leaf cell (about 1.8 km by 1.2 km)
+  is the size of Monaco, and the capital's point answers Beausoleil, whose
+  city polygon covers more of that cell (the Vatican answers Rome there for
+  the same reason).
 
 ## Namibia (NA)
 
@@ -869,10 +924,12 @@ worldwide resolved data (`make netherlands`) and
   in the "unusually sized records" search, and is not a bug.
 - **Baarle-Hertog's Belgian enclaves resolved to NL and were dropped.**
   Fixed by `withOsmCountryBorders` (Natural Earth's 10m outline has no
-  enclaves). The country *polygon* layer is still Natural Earth, so the
-  enclaves' own country answer may still be coarse; see Natural Earth item.
-- **Border artifact against Germany.** *(open)* 52.441101, 6.848860 returns
-  Germany. See "Border artifacts".
+  enclaves). The country polygons are OSM's now, enclaves included, and
+  the enclaves are cut out of Noord-Brabant's simplified region polygon
+  (and Baarle-Nassau's out of Vlaanderen); see "Natural Earth's outlines
+  are too coarse".
+- **Border artifact against Germany.** 52.441101, 6.848860 returned
+  Germany. Fixed by the OSM country outlines: see "Border artifacts".
 - **A village that crosses a municipal border is two places.**
   *(false positive)* `search ansen` lists Ansen (Drenthe) twice, as ids
   179687 and 179692; Alteveer (Drenthe) too, 52.6829, 6.4778 (De Wolden,
@@ -1076,9 +1133,11 @@ worldwide resolved data (`make netherlands`) and
 
 ## Somalia (SO)
 
-- **Somaliland resolves to no country.** *(open)* 10.611344, 47.369614
-  returns `country -`. Natural Earth's `Somaliland` (`SOL`) has `ISO_A2_EH`
-  `-99` and is dropped, see "Countries without an ISO code".
+- **Somaliland resolves to no country.** 10.611344, 47.369614 returned
+  `country -`: Natural Earth's `Somaliland` (`SOL`) has `ISO_A2_EH` `-99`
+  and is dropped. Fixed by the OSM country outlines, whose Somalia relation
+  includes Somaliland: it now answers `Somalia`, with no region or city yet
+  (see "Countries without an ISO code").
 
 ## Sudan (SD)
 
@@ -1103,6 +1162,19 @@ worldwide resolved data (`make netherlands`) and
   Now `[7, 8]`: townships (level 8) are primary, and the level-7 districts
   (inside special municipalities) gap-fill: Taipei -> `Taipei City / Xinyi
   District`, Kaohsiung -> `Kaohsiung City / Xinxing District`.
+
+## Tanzania (TZ)
+
+- **Mbamba Bay and Liuli resolve to Malawi.** *(false positive)* Their
+  GeoNames points (-11.28333, 34.76667 and -11.08333, 34.63333) answered
+  Tanzania with Natural Earth's outline and Malawi with OSM's. The points
+  are given to the whole minute (11°17′S 34°46′E), so up to about a
+  kilometre off. OSM's Tanzanian shore at Mbamba Bay's latitude is at
+  34.81°E, about 4 km east of that point, so the point is in the lake; Liuli's is on
+  the shoreline. OSM draws all of Lake Malawi in Malawi, as it is
+  administered (Tanzania claims the median line). A photo taken on
+  Tanzanian land answers Tanzania; one from a boat on the lake answers
+  Malawi, the same rule as territorial waters elsewhere.
 
 ## Turkmenistan (TM)
 
@@ -1262,12 +1334,19 @@ for Scotland and Northern Ireland.
 No `COUNTRY_ADMIN_LEVELS` entry (no region or city tier).
 
 - **Vatican resolves to Italy, or to a country with no region or city.**
-  *(open)* 41.903323, 12.454001 returns `Vatican`, `region -`, `city -`;
-  41.903786, 12.451823 returns `Italy`, `region -`, `city -` (not even Rome's
-  region, so the leaf cell is lost to a country-only record). Expected both
-  to be the country Vatican with a region and city. Same family as Monaco.
-  The mechanism for "a country that is its own city" is the one described in
-  "Capitals that are their own region".
+  41.903323, 12.454001 returned `Vatican`, `region -`, `city -`; 41.903786,
+  12.451823 returned `Italy`, `region -`, `city -`. Natural Earth's Vatican
+  is a 7-vertex polygon about 110 m by 130 m, a few percent of the real
+  state (about 1 km by 0.85 km); the second point was outside it and inside
+  Italy, and Rome's OSM polygon correctly leaves the Vatican out, so only
+  the country Italy covered it. Fixed by the OSM country outlines (see
+  "Natural Earth's outlines are too coarse") and `CITY_STATES`: the Vatican
+  gets a region `Vatican` and a city `Vatican City`, both covering its
+  whole outline, since OSM has nothing below its `admin_level=2` relation.
+  Both points read `Vatican / Vatican / Vatican City` on
+  `world-high-res.bin`. On `world.bin` a leaf cell (about 1.8 km by 1.2 km)
+  is bigger than the Vatican, so it answers Rome there: the grid cannot
+  draw it without giving it a few km² of Rome.
 
 ## Venezuela (VE)
 

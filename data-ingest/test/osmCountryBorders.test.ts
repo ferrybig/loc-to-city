@@ -7,7 +7,12 @@ import type { MultiPolygon, Polygon, Position } from "geojson";
 import type { CountryIndex } from "../src/lib/countryIndex.ts";
 import { CountryPolygonIndex } from "../src/lib/countryIndex.ts";
 import type { LonLat } from "../src/lib/geo.ts";
-import { loadOsmCountryBorders, packPolygons, withOsmCountryBorders } from "../src/lib/osmCountryBorders.ts";
+import {
+  loadOsmCountryBorders,
+  loadOsmCountryRelations,
+  packPolygons,
+  withOsmCountryBorders,
+} from "../src/lib/osmCountryBorders.ts";
 
 function ring(minX: number, minY: number, maxX: number, maxY: number): Position[] {
   return [
@@ -116,4 +121,28 @@ test("loadOsmCountryBorders: admin_level=2 relations of known codes only", async
   assert.equal(borders.first(2.5, 0.5), "NL");
   assert.equal(borders.first(4.5, 0.5), null);
   assert.equal(borders.first(6.5, 0.5), null);
+});
+
+test("loadOsmCountryRelations: admin_level=2 outline, else a dependency's lowest-level relation", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "osm-outlines-"));
+  const file = path.join(dir, "planet-admin.geojson");
+  const record = (id: string, coordinates: Position[][], properties: Record<string, string>) =>
+    `\x1e{"type":"Feature","id":"${id}","geometry":${JSON.stringify({ type: "Polygon", coordinates })},"properties":${JSON.stringify(properties)}}\n`;
+  const administrative = { boundary: "administrative" };
+  writeFileSync(
+    file,
+    record("a1", [ring(0, 0, 9, 9)], { ...administrative, admin_level: "2", "ISO3166-1:alpha2": "CN" }) +
+      record("a2", [ring(1, 1, 2, 2)], { ...administrative, admin_level: "4", "ISO3166-1:alpha2": "HK" }) +
+      record("a3", [ring(1, 1, 3, 3)], { ...administrative, admin_level: "3", "ISO3166-1:alpha2": "HK" }) +
+      record("a4", [ring(5, 5, 6, 6)], { ...administrative, admin_level: "4", "ISO3166-1:alpha2": "CN" }) +
+      record("a5", [ring(7, 7, 8, 8)], { ...administrative, "ISO3166-1:alpha2": "EH" }) +
+      record("a6", [ring(7, 7, 8, 8)], { boundary: "maritime", admin_level: "3", "ISO3166-1:alpha2": "MO" }),
+  );
+  const { borders, outlineJsonByCode } = await loadOsmCountryRelations([file], new Set(["CN", "HK", "EH", "MO"]));
+  assert.deepEqual([...borders.codes], ["CN"], "only admin_level=2 corrects Natural Earth");
+  const outline = (code: string) => outlineJsonByCode.get(code)?.map((json) => JSON.parse(json).coordinates);
+  assert.deepEqual(outline("CN"), [[ring(0, 0, 9, 9)]], "a country's own lower-level relation is not its outline");
+  assert.deepEqual(outline("HK"), [[ring(1, 1, 3, 3)]], "the lowest admin_level wins");
+  assert.deepEqual(outline("EH"), [[ring(7, 7, 8, 8)]], "no admin_level at all still counts");
+  assert.equal(outline("MO"), undefined, "not boundary=administrative");
 });

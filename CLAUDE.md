@@ -475,7 +475,25 @@ contain the point while another country's does. That fixes enclaves
 Natural Earth's 10m outlines don't have (Baarle-Hertog's Belgian enclaves
 inside NL resolved to NL and were dropped) without letting OSM's
 territorial waters or its folding of dependencies into a parent country
-change anything else.
+change anything else. That is which country a *city or region* belongs
+to. The country *outlines* the compressor draws are OSM's own
+(`loadOsmCountryRelations`): the `admin_level=2` relation, or a
+dependency's own ISO-tagged relation (Hong Kong, Puerto Rico), territorial
+waters included. Where two outlines overlap (a dependency inside its
+parent's, Crimea, Western Sahara), `countryOutlines.ts` cuts the overlap
+out of one of them, the owner being whichever the city/region lookup above
+names there -- the compressor has no rule that makes an unrelated nested
+country win a cell, so an overlap left in place loses the smaller one's
+cities. Natural Earth is the outline only for codes OSM has no relation
+for (Palestine, Antarctica, U.S. Minor Outlying Islands). The same rule
+cuts a country out of a *foreign region* that covers land the lookup gives
+to the country (`cutCountriesOutOfForeignRegions`): simplified regions lose
+small holes, so Lazio covered the Vatican and Provence-Alpes-Côte d'Azur
+Monaco. City-states (`CITY_STATES`) get a region (and if OSM has none, a
+city) covering the whole country; their cities get that region by country
+code, not through `assignCityRegion`, whose answer for a point inside two
+overlapping regions is the first in R-tree order -- adding regions to that
+tree moves cities elsewhere.
 
 **Multi-file country handling.** OSM relations for a single country (e.g.
 Russia, Turkey) can be split across multiple continent extract files with

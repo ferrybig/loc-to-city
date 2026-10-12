@@ -13,7 +13,8 @@
 // auto-detection (area-accumulate by (country,level) -> pick the finest
 // level covering >=60% of the country as primary -> gap-fill by
 // representative-point containment) to assemble the city layer, plus a
-// region layer and a country layer (Natural Earth, already worldwide).
+// region layer and a country layer (OSM's own country relations, with
+// overlaps between them resolved -- see countryOutlines.ts).
 // The region layer's own admin_level is auto-detected per country too
 // (selectRegionLevels), not assumed to always be 4 -- see
 // adminLevelDetection.ts's doc comment for why that matters.
@@ -31,7 +32,9 @@ import type { Feature, FeatureCollection, MultiPolygon, Polygon } from "geojson"
 import type { CityProperties, HierarchyCountry } from "@loc-to-city/compressor";
 import { discoverAdminGeoJsonFiles } from "./lib/osmFiles.ts";
 import { loadCountryIndex } from "./lib/countryIndex.ts";
-import { loadOsmCountryBorders, withOsmCountryBorders } from "./lib/osmCountryBorders.ts";
+import { loadOsmCountryRelations, withOsmCountryBorders } from "./lib/osmCountryBorders.ts";
+import { cutCountriesOutOfForeignRegions, type Outline, resolveCountryOverlaps } from "./lib/countryOutlines.ts";
+import { bboxAndPointOnFeature } from "./lib/pointOnFeature.ts";
 import { buildAdminBoundaryIndex } from "./lib/adminBoundaryIndex.ts";
 import type { CityCandidateMeta } from "./lib/adminBoundaryIndex.ts";
 import {
@@ -48,6 +51,7 @@ import type { Cities500Row } from "./lib/cities500.ts";
 import { loadAdmin1Names } from "./lib/admin1Codes.ts";
 import { buildCityFallback, buildContainerFallback, buildRegionFallback } from "./lib/voronoiFallback.ts";
 import {
+  CITY_STATES,
   VORONOI_CITY_FALLBACK,
   VORONOI_CITY_FALLBACK_WITHIN_REGIONS,
   VORONOI_REGION_FALLBACK,
@@ -82,11 +86,48 @@ async function main(): Promise<void> {
   // Natural Earth has no room for enclaves (Baarle-Hertog) and only
   // approximates land borders; OSM's own country borders, already in the
   // corpus, correct it where the two disagree (see withOsmCountryBorders).
-  console.error("Loading OSM country borders (admin_level=2)...");
-  const countries = withOsmCountryBorders(
-    naturalEarth,
-    await loadOsmCountryBorders(files, new Set(naturalEarth.nameByCode.keys())),
+  console.error("Loading OSM country relations...");
+  const osmCountries = await loadOsmCountryRelations(files, new Set(naturalEarth.nameByCode.keys()));
+  const countries = withOsmCountryBorders(naturalEarth, osmCountries.borders);
+
+  // The country layer the compressor draws is OSM's own outlines, not
+  // Natural Earth's: Natural Earth's 10m outlines miss most of the Vatican
+  // and put Monaco's over France, and overshoot land borders by hundreds of
+  // metres (countries.md, "Natural Earth's outlines are too coarse" and
+  // "Border artifacts"). They include territorial waters, so a photo taken
+  // from a boat near a coast answers that country. Natural Earth still
+  // decides which country each city and region belongs to (above), and
+  // gives the outline of a country OSM has no relation for.
+  console.error("Country outlines: OSM, with overlaps resolved...");
+  const outlines = new Map<string, Outline>();
+  const naturalEarthOutlines: string[] = [];
+  for (const [code, feature] of countries.simplifiedFeatureByCode) {
+    const osm = osmCountries.outlineJsonByCode.get(code);
+    if (!osm) naturalEarthOutlines.push(code);
+    const geometries = osm ? osm.map((json) => JSON.parse(json) as Polygon | MultiPolygon) : [feature.geometry];
+    outlines.set(
+      code,
+      geometries.flatMap((g) => (g.type === "Polygon" ? [g.coordinates] : g.coordinates)),
+    );
+  }
+  osmCountries.outlineJsonByCode.clear();
+  const resolved = resolveCountryOverlaps(outlines, countries.lookup, new Set(naturalEarthOutlines));
+  for (const cut of resolved.cuts) {
+    console.error(`  ${cut.owner} cut out of ${cut.from} (sampled: ${JSON.stringify(cut.votes)})`);
+  }
+  console.error(
+    `  ${resolved.cuts.length} overlaps cut; Natural Earth outline (no OSM relation): ${naturalEarthOutlines.join(", ")}`,
   );
+  // Held as text for the output; the geometry itself is only kept until
+  // the regions are cut (below), and for the city-states.
+  const countryFeatureJson: string[] = [];
+  const cityStateGeometry = new Map<string, MultiPolygon>();
+  for (const [code, coordinates] of resolved.outlines) {
+    const geometry: MultiPolygon = { type: "MultiPolygon", coordinates };
+    countryFeatureJson.push(JSON.stringify({ type: "Feature", properties: { code }, geometry }));
+    if (CITY_STATES.has(code)) cityStateGeometry.set(code, geometry);
+  }
+  outlines.clear();
 
   console.error("Pass 1/4: scanning merged corpus for city/region candidates...");
   const index = await buildAdminBoundaryIndex(files, countries);
@@ -151,15 +192,58 @@ async function main(): Promise<void> {
     console.error(`Voronoi fallback: ${voronoiRegionCount.toLocaleString()} synthesized regions added`);
   }
 
+  // A small country inside a neighbour's simplified region polygon (Monaco
+  // in Provence-Alpes-Côte d'Azur) is cut out of it -- see
+  // cutCountriesOutOfForeignRegions. Each region keeps its original bbox:
+  // it is only a prefilter, and changing it would reorder regionIndex,
+  // which assignCityRegion is sensitive to (see the city-states below).
+  const regionCut = cutCountriesOutOfForeignRegions(
+    new Map([...finalRegions].map(([key, r]) => [key, { country: r.country, geometry: r.feature.geometry }])),
+    resolved.outlines,
+    countries.lookup,
+  );
+  for (const cut of regionCut.cuts) {
+    console.error(`  ${cut.country} cut out of region ${cut.region} (sampled: ${JSON.stringify(cut.votes)})`);
+  }
+  for (const [key, coordinates] of regionCut.geometryByRegion) {
+    const region = finalRegions.get(key)!;
+    finalRegions.set(key, { ...region, feature: { ...region.feature, geometry: { type: "MultiPolygon", coordinates } } });
+  }
+  resolved.outlines.clear();
+
   console.error("Pass 2/4: selecting primary admin levels...");
   const regionIndex = buildRegionIndex(finalRegions);
+  // City-states (CITY_STATES' doc comment): one region covering the whole
+  // country, which every city of it belongs to. Kept out of regionIndex on
+  // purpose: assignCityRegion answers with the first containing region in
+  // R-tree order, so adding two regions to the tree moved 593 cities500
+  // points elsewhere in the world to a neighbouring, overlapping region
+  // (Ninghe District from Tianjin to Hebei).
+  const cityStateRegion = new Map<string, string>();
+  for (const [code, { region }] of CITY_STATES) {
+    const geometry = cityStateGeometry.get(code);
+    if (!geometry) continue;
+    const feature: Feature<MultiPolygon, { name: string }> = { type: "Feature", properties: { name: region }, geometry };
+    finalRegions.set(`${code} city-state ${region}`, {
+      id: `city-state:${code}`,
+      name: region,
+      nameEn: undefined,
+      country: code,
+      level: -1, // not a real OSM admin_level -- never matched against COUNTRY_ADMIN_LEVELS
+      bbox: bbox(feature),
+      feature,
+    });
+    cityStateRegion.set(code, region);
+  }
+  const regionOf = (repPoint: LonLat, country: string): string | null =>
+    cityStateRegion.get(country) ?? assignCityRegion(repPoint, country, regionIndex);
   // Only needed to route a region-override candidate (see
   // COUNTRY_ADMIN_LEVELS.overrides) to its region's own level instead of
   // the country-wide one -- resolves the same way emitCity's own region
   // assignment does later, just early enough for selectPrimaryLevels to
   // use it.
   const resolveCandidateRegion = (candidate: CityCandidateMeta): string | null =>
-    assignCityRegion(candidate.repPoint, candidate.country, regionIndex);
+    regionOf(candidate.repPoint, candidate.country);
   const primary = selectPrimaryLevels(index, countries, undefined, resolveCandidateRegion);
 
   // Cities stream straight to disk as a GeoJSON Text Sequence (one
@@ -311,6 +395,16 @@ async function main(): Promise<void> {
     console.error(`Voronoi fallback: ${voronoiCount.toLocaleString()} synthesized cities emitted`);
   }
 
+  // A city-state with no city polygon of its own gets one covering it all.
+  for (const [code, { city }] of CITY_STATES) {
+    const geometry = cityStateGeometry.get(code);
+    if (!city || !geometry) continue;
+    const { repPoint } = bboxAndPointOnFeature(geometry);
+    if (await emitCity({ id: `city-state:${code}`, name: city, country: code, repPoint }, JSON.stringify(geometry))) {
+      cityCount++;
+    }
+  }
+
   await new Promise<void>((resolve, reject) => cityOut.end((err?: Error | null) => (err ? reject(err) : resolve())));
 
   // Structural, not CityCandidateMeta itself, so a synthesized Voronoi
@@ -332,7 +426,7 @@ async function main(): Promise<void> {
       skippedNoName++;
       return false;
     }
-    const region = assignCityRegion(candidate.repPoint, candidate.country, regionIndex);
+    const region = regionOf(candidate.repPoint, candidate.country);
     if (!region) {
       skippedNoRegionByCountry.set(candidate.country, (skippedNoRegionByCountry.get(candidate.country) ?? 0) + 1);
       return false;
@@ -392,12 +486,8 @@ async function main(): Promise<void> {
     `wrote ${HIERARCHY_OUT} (${hierarchy.length} countries, ${hierarchy.reduce((n, c) => n + c.regions.length, 0)} regions) and ${CITIES_OUT} (${cityCount} cities)`,
   );
 
-  const countryCollection: FeatureCollection<Polygon | MultiPolygon, { code: string }> = {
-    type: "FeatureCollection",
-    features: [...countries.simplifiedFeatureByCode.values()],
-  };
-  writeFileSync(COUNTRIES_OUT, JSON.stringify(countryCollection));
-  console.error(`wrote ${COUNTRIES_OUT} (${countryCollection.features.length} countries)`);
+  writeFileSync(COUNTRIES_OUT, `{"type":"FeatureCollection","features":[${countryFeatureJson.join(",")}]}`);
+  console.error(`wrote ${COUNTRIES_OUT} (${countryFeatureJson.length} countries)`);
 
   const regionCollection: FeatureCollection<
     Polygon | MultiPolygon,
