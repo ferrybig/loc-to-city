@@ -190,8 +190,8 @@ it and can be built where it's used.
 
 - **Cache**: decoded chunks and names are kept in a least-recently-used
   cache, by default up to 64 MiB (`open(input, { cacheBytes })`). A
-  worldwide file decodes to about 2 GB in all and its largest chunk to
-  about 5 MB. Lookups in a few regions fit easily. Lookups scattered over
+  worldwide file decodes to about 1 GB in all and its largest chunk to
+  about 3 MB. Lookups in a few regions fit easily. Lookups scattered over
   a whole continent re-decode chunks unless you give the cache more room.
   `0` turns caching off.
 - **Event loop**: every read is asynchronous, and decodes take turns, one
