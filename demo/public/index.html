@@ -611,6 +611,9 @@
 			}).addTo(chunkGridLayer);
 			chunkGridToggle.disabled = false;
 			document.getElementById("chunk-grid-hint").hidden = false;
+			// A box the browser kept checked across a reload was handled before
+			// the grid was known, with nothing to label yet.
+			renderChunkLabels();
 		}
 
 		async function loadChunkLengths() {

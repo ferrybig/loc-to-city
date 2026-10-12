@@ -194,6 +194,34 @@ test("the chunk grid labels chunks with their compressed size", async ({
 	await expect(labels).toHaveCount(0);
 });
 
+test("a chunk grid checked before the grid is known is labelled once it is", async ({
+	page,
+}) => {
+	// A browser that keeps the box checked across a reload runs its handler
+	// at load, before /api/about has said what the grid is. Headless
+	// Chromium doesn't restore form state, so hold /api/about back and check
+	// the box in that window instead.
+	let releaseAbout = () => {};
+	const aboutHeld = new Promise<void>((resolve) => {
+		releaseAbout = resolve;
+	});
+	await page.route("**/api/about", async (route) => {
+		await aboutHeld;
+		await route.continue();
+	});
+	await page.goto("/");
+	const sizes = page.waitForResponse("**/api/chunk-sizes");
+	await page.locator("#chunk-grid-toggle").evaluate((el: HTMLInputElement) => {
+		el.checked = true;
+		el.dispatchEvent(new Event("change"));
+	});
+	await sizes;
+
+	// The page's default view is inside chunk 3; nothing moves the map.
+	releaseAbout();
+	await expect(page.locator(".chunk-label")).toHaveCount(1);
+});
+
 test("the base map is off in tests, and fetches OSM's tiles once on", async ({
 	page,
 }) => {
