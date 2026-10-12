@@ -346,6 +346,21 @@ for staged verification, run `data-ingest/scripts/extract-boundaries.sh
 <basename>...` directly, which still scopes extraction to a subset of
 `.osm.pbf` basenames.
 
+**What the Makefile treats as out of date.** `node_modules` is an
+order-only prerequisite (`| node_modules`): make still runs `npm install`
+when `package.json` or the lockfile changed, but a newer `node_modules` never
+rebuilds anything, so an `npm install` does not restart the worldwide
+resolve. Only the cheap sidecars (the two indexes, `.checks.json`) list
+source files (`reader/src`, `verify/src`) as prerequisites. The resolve and
+the `.bin` do not depend on `data-ingest/` or `compressor/` sources, so
+after changing those, delete the output you want rebuilt. `make -n` always
+shows the `.bin` rebuilding (its `.args` file is a `FORCE` target); add
+`-o data/03-final/<name>.bin.args` to see what would really run. The
+Dockerfile's `sidecars` stage builds the indexes from `reader/src` and the
+`.bin` alone (no `npm ci`), so a lockfile change from another workspace
+does not rebuild them; keep it free of anything that changes with the
+lockfile.
+
 ## Architecture notes that span multiple files
 
 **Format is meta-chunked.** The world is sharded into a `width_exp` ×

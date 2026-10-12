@@ -1,5 +1,35 @@
 # syntax=docker/dockerfile:1
+
+# Which data/03-final/<DATASET>.bin to serve, copied in as world.bin:
+#   docker build --build-arg DATASET=world .
+ARG DATASET=world-high-res
+
+# ---- sidecars ----
+# Sidecar indexes next to world.bin, which the demo picks up by name:
+# /api/search checks only the cities the search index leaves over, and
+# /api/locate reads one entry instead of scanning every chunk. The demo
+# also offers all three as downloads, under these names.
+#
+# A stage of its own, with no `npm ci`: the reader has no runtime
+# dependencies and Node runs its TypeScript directly (as the Makefile does),
+# so the only inputs are reader/ and the .bin. Adding a package to another
+# workspace changes the lockfile and rebuilds the builder stage below, but
+# not this one, whose locate index alone takes a minute or more.
+FROM node:26-alpine AS sidecars
+ARG DATASET
+WORKDIR /app
+COPY reader/package.json reader/
+COPY reader/src reader/src
+COPY data/03-final/${DATASET}.bin data/world.bin
+# The locate index first: build-search-index ranks its short-query table by
+# area when one is next to the .bin, as the reader then ranks searches, and
+# the reader only uses a table ranked its own way.
+RUN node reader/src/cli.ts build-locate-index data/world.bin --output data/world.locate-index.bin \
+ && node reader/src/cli.ts build-search-index data/world.bin --output data/world.search-index.bin
+
+# ---- builder ----
 FROM node:26-alpine AS builder
+ARG DATASET
 WORKDIR /app
 
 # Copy manifests first for layer caching
@@ -24,17 +54,8 @@ COPY demo/public demo/public
 # reader/docs: the API reference the demo serves under /docs/.
 RUN npm run build -w reader && npm run build -w demo && npm run build -w verify && npm run docs -w reader
 
-# Which data/03-final/<DATASET>.bin to serve, copied in as world.bin:
-#   docker build --build-arg DATASET=world .
-ARG DATASET=world-high-res
-
-# Sidecar indexes next to world.bin, which the demo picks up by name:
-# /api/search checks only the cities the search index leaves over, and
-# /api/locate reads one entry instead of scanning every chunk. The demo
-# also offers all three as downloads, under these names.
 COPY data/03-final/${DATASET}.bin data/world.bin
-RUN node reader/dist/cli.js build-search-index data/world.bin --output data/world.search-index.bin \
- && node reader/dist/cli.js build-locate-index data/world.bin --output data/world.locate-index.bin
+COPY --from=sidecars /app/data/world.locate-index.bin /app/data/world.search-index.bin data/
 
 # The spot-checks from countries.md, run against this very dataset, which the
 # page draws as map markers (the demo picks the file up next to world.bin, and
