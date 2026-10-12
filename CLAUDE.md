@@ -104,7 +104,7 @@ npm run docs -w reader                     # TypeDoc API reference -> reader/doc
 npm run bench -w reader -- <file.bin>      # performance baseline; compare before/after reader I/O or API changes
 npm test -w compressor                     # synthetic-dataset unit tests + real-data tests
 npm test -w demo                           # unit tests (not e2e)
-npm test -w verify                         # world spot-checks against the newest worldwide .bin (skipped without one) + ledger consistency
+npm test -w verify                         # world spot-checks against world-high-res.bin, else world.bin; CGEODATA_WORLD_BIN overrides (skipped without one) + ledger consistency
 node verify/src/export.ts data/03-final/world-high-res.bin --out data/03-final/world-high-res.checks.json
                                            # the same checks as JSON; the demo draws them as markers
 ```

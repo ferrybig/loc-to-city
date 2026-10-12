@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,15 +12,22 @@ export const RESOLVED_INPUT = path.join(
 );
 
 /**
- * The worldwide .bin to check: CGEODATA_WORLD_BIN if set, else the most
- * recently built of data/03-final/world.bin and world-high-res.bin (they
- * are built at different times, and a stale one would report fixes as
- * broken). Undefined when there is none.
+ * The worldwide .bin to check: CGEODATA_WORLD_BIN if set, else
+ * data/03-final/world-high-res.bin, else world.bin. Undefined when there is
+ * none.
+ *
+ * High-res first, not the newest: its cells are about 300 m instead of
+ * 2.4 km, and the cases (and countries.md) were measured on it. world.bin is
+ * the faster build for iterating on a whole country's regions, where fine
+ * detail does not matter; check it with
+ * `CGEODATA_WORLD_BIN=data/03-final/world.bin`, and expect the cases that
+ * need the finer cells (small places, borders, microstates) to differ.
  */
-export function pickWorldBin(): string | undefined {
+export function pickWorldBin(dir = FINAL): string | undefined {
 	const fromEnv = process.env.CGEODATA_WORLD_BIN;
 	if (fromEnv !== undefined) return existsSync(fromEnv) ? fromEnv : undefined;
-	return [path.join(FINAL, "world.bin"), path.join(FINAL, "world-high-res.bin")]
-		.filter((candidate) => existsSync(candidate))
-		.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+	return [
+		path.join(dir, "world-high-res.bin"),
+		path.join(dir, "world.bin"),
+	].find((candidate) => existsSync(candidate));
 }

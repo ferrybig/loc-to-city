@@ -38,7 +38,10 @@ them, because the same mistake gets proposed again.
 Spot-check coordinates are `lat, lon` and were looked up on
 `data/03-final/world-high-res.bin` (built 2026-10-10) unless stated
 otherwise. `verify/test/world-queries.test.ts` turns the coordinates in
-this file into a test against whichever worldwide `.bin` exists: places that
+this file into a test against the worldwide `.bin` (`world-high-res.bin`, or
+`world.bin` when that is all there is; `CGEODATA_WORLD_BIN` picks one, e.g.
+the faster `world.bin` for rough work, where small places and borders will
+differ): places that
 resolve correctly (including *(false positive)* ones) are plain tests,
 *(open)*, *(unsolvable)* and *(human error)* places with a known expected
 answer are `todo` tests (they run, a failure is reported as todo, and one

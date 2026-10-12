@@ -9,7 +9,8 @@ import { pickWorldBin, RESOLVED_INPUT } from "../src/pickBin.ts";
 // Spot-checks against the worldwide build, the counterpart of
 // compressor/test/zuid-holland-queries.test.ts for everything `countries.md`
 // documents. The cases live in src/cases.ts. Skipped unless a worldwide .bin
-// exists (see pickWorldBin). The last test below says which file ran and
+// exists (see pickWorldBin: CGEODATA_WORLD_BIN, else the high-res
+// build, else world.bin). The last test below says which file ran and
 // warns when it is older than the resolved input it was built from.
 //
 // Two kinds of case:

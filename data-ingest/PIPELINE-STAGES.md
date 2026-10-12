@@ -164,8 +164,8 @@ data/03-final/ (sidecars)      optional, gitignored, reader-only -- never
 CONSUMERS (read-only, not part of the build):
 ├── demo/src/server.ts, demo/playwright.config.ts   default to data/03-final/zuid-holland.bin
 ├── compressor/test/zuid-holland*.test.ts           skip if the .bin is absent
-└── verify/test/world-queries.test.ts               the worldwide .bin (newest of world.bin /
-                                                    world-high-res.bin); skip if absent
+└── verify/test/world-queries.test.ts               the worldwide .bin (world-high-res.bin, else
+                                                    world.bin); skip if absent
 
 OUTSIDE ALL PIPELINES:
 └── data/03-final/appendix-a-example.bin   hand-extracted from reader/binary-format.md's
