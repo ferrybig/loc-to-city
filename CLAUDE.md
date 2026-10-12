@@ -164,6 +164,17 @@ dominates); decodes take turns one macrotask each (`turns.ts`), or
 concurrent lookups block the event loop for the whole batch; hot loops
 use `lookupCached() ?? await lookup()` so a cache hit never awaits.
 
+How much slowdown a reader change may cost: a change that buys something
+(a non-blocking event loop, browser support, bounded memory) may cost
+~10-15%; "everything 2x as slow" is not acceptable. A cold single lookup up
+to ~50 ms is fine now that it is awaited instead of blocking. **The demo's
+tile burst is the metric that matters most** (see the comment above the
+worker pool in `demo/src/server.ts`): run `npm run bench -w reader --
+<file.bin>` (burst section first) before and after, put the numbers in the
+commit message, and if a change costs more than ~15% on bursts, find a
+cheaper variant or ask before keeping it. Async zlib (+15-40%) was dropped
+on this rule, async file reads (+~10%) kept.
+
 ```bash
 node reader/src/cli.ts help                              # or help <command>
 node reader/src/cli.ts info   data/03-final/world.bin             # header, counts, byte split, largest chunks
@@ -240,10 +251,11 @@ per-axis median of the cells of the place *and everything under it*
 (a country's regions and cities count), moved to the nearest cell inside
 that area if the median falls outside it -- so `query()` at the point
 always resolves to the place or a descendant. Computing it decodes every
-chunk (~1.6s on `data/03-final/world.bin`); a locate index (Appendix C,
+chunk (one place: ~0.5s on `data/03-final/world.bin`, ~3.5s on
+`world-high-res.bin`); a locate index (Appendix C,
 `build-locate-index <file.bin> --output data/<name>.locate-index.bin`,
-~11s, one fixed-width entry per place id plus one area byte each, Section
-C.3's `1 + floor(4 log2 cells)` of the subtree, which `locate()` returns as
+~7s for `world.bin`, ~90-100s for `world-high-res.bin`, one fixed-width
+entry per place id plus one area byte each, Section C.3's `1 + floor(4 log2 cells)` of the subtree, which `locate()` returns as
 `area` in square degrees) makes it one small read, and
 is picked up next to the `.bin` and overridden (`useLocateIndex()`,
 `--index`/`--no-index`) exactly like the search index. Index and scan

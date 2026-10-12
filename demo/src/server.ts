@@ -71,6 +71,12 @@ async function main(): Promise<void> {
 	}
 
 	console.error(`Loading ${datasetPath}...`);
+	// minThreads 0 + idleTimeout 6000 is deliberate, don't "fix" it: the
+	// production box (2 cores, 4GB) sees a page open as a burst of ~30-40 tile
+	// requests, then silence, and the workers exiting between bursts lets the
+	// process sleep at low memory. A ~500ms cold worker boot is negligible
+	// over a burst, so benchmark cold bursts (`taskset -c 0,1`, after >6s
+	// idle), not warm per-tile latency.
 	const pool = new Piscina({
 		filename: path.resolve(
 			__dirname,
