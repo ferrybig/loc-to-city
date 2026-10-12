@@ -554,12 +554,15 @@
 		}
 
 		overlayToggle.addEventListener("change", rebuildTileLayer);
-		opacityRange.addEventListener("input", () => {
+		rebuildTileLayer();
+
+		const opacityRangeHandler = () => {
 			opacityValue.textContent = `${opacityRange.value}%`;
 			if (tileLayer) tileLayer.setOpacity(opacityRange.value / 100);
-		});
+		}
+		opacityRange.addEventListener("input", opacityRangeHandler);
+		opacityRangeHandler();
 
-		rebuildTileLayer();
 
 		// ---- chunk grid ----
 		// The file's chunk grid (Section 6.1 of the format), and on each chunk
@@ -621,7 +624,7 @@
 			const lonStep = 360 / width;
 			const latStep = 180 / height;
 			const x0 = map.project([0, 0]).x;
-			if (map.project([0, lonStep]).x - x0 < CHUNK_LABEL_SIZE.x) return;
+			if (map.project([0, lonStep]).x - x0 < CHUNK_LABEL_SIZE.x/2) return;
 			const bounds = map.getBounds();
 			const clamp = (v, max) => Math.min(Math.max(v, 0), max);
 			const c0 = clamp(
@@ -644,7 +647,7 @@
 				const south = -90 + r * latStep;
 				const rowHeight =
 					map.project([south, 0]).y - map.project([south + latStep, 0]).y;
-				if (rowHeight < CHUNK_LABEL_SIZE.y) continue;
+				if (rowHeight < CHUNK_LABEL_SIZE.y/2) continue;
 				for (let c = c0; c <= c1; c++) {
 					const index = r * width + c;
 					const bytes = chunkLengths[index];
@@ -662,7 +665,7 @@
 			}
 		}
 
-		chunkGridToggle.addEventListener("change", async () => {
+		const chunkGridToggleHandler = async () => {
 			if (!chunkGridToggle.checked) {
 				map.removeLayer(chunkGridLayer);
 				return;
@@ -674,7 +677,9 @@
 				chunkLengthsLoading = null;
 			}
 			renderChunkLabels();
-		});
+		}
+		chunkGridToggle.addEventListener("change", chunkGridToggleHandler);
+		chunkGridToggleHandler();
 		map.on("moveend", renderChunkLabels);
 
 		// ---- spot checks ----
