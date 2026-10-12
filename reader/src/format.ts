@@ -11,7 +11,11 @@ export {
 	cellBoundingBox,
 	chunkBoundingBox,
 } from "./cellBounds.ts";
-export { type ChunkRecords, parseChunk } from "./chunk.ts";
+export {
+	type ChunkRecords,
+	MAX_SUPPORTED_DEPTH,
+	parseChunk,
+} from "./chunk.ts";
 export { readHeaderAndDirectory } from "./container.ts";
 export { type CGeoDataDirectory, parseDirectory } from "./directory.ts";
 export { type CGeoDataHeader, parseHeader } from "./header.ts";

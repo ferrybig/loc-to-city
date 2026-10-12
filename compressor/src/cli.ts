@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
+import { MAX_SUPPORTED_DEPTH } from "@ferrybig/cgeodata-reader/format";
 import type { FeatureCollection, MultiPolygon, Polygon } from "geojson";
 import { buildCGeoDataFileParallel } from "./buildParallel.ts";
 import { parseChunkSelection } from "./chunkSelection.ts";
@@ -18,14 +19,25 @@ const KNOWN_FLAGS = new Set([
   "workers",
   "only-chunks",
 ]);
+/** Flags that take no value. */
+const SWITCHES = new Set(["unlock-depth-limit"]);
 
-function parseArgs(argv: string[]): { positional: string[]; flags: Record<string, string> } {
+function parseArgs(argv: string[]): {
+  positional: string[];
+  flags: Record<string, string>;
+  switches: Set<string>;
+} {
   const positional: string[] = [];
   const flags: Record<string, string> = {};
+  const switches = new Set<string>();
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg.startsWith("--")) {
       const key = arg.slice(2);
+      if (SWITCHES.has(key)) {
+        switches.add(key);
+        continue;
+      }
       // A misspelt flag (--max_depth) would otherwise be dropped silently
       // and the build run, possibly for an hour, with the default instead.
       if (!KNOWN_FLAGS.has(key)) throw new Error(`unknown flag --${key}`);
@@ -37,7 +49,7 @@ function parseArgs(argv: string[]): { positional: string[]; flags: Record<string
       positional.push(arg);
     }
   }
-  return { positional, flags };
+  return { positional, flags, switches };
 }
 
 /** A header field (reader/binary-format.md Section 5): a whole number in
@@ -58,16 +70,18 @@ function formatBytes(bytes: number): string {
 }
 
 async function main(): Promise<void> {
-  const { positional, flags } = parseArgs(process.argv.slice(2));
+  const { positional, flags, switches } = parseArgs(process.argv.slice(2));
   const [hierarchyPath, citiesPath, outPath] = positional;
   if (!hierarchyPath || !citiesPath || !outPath) {
     console.error(
       "usage: cgeodata-compress <hierarchy.json> <cities.geojson|.geojsonseq> <out.bin> " +
         "[--regions regions.geojson] [--countries countries.geojson] " +
         "[--width-exp N] [--height-exp N] [--max-depth N] [--keyframe-exp N] [--attribution TEXT] " +
-        "[--workers N] [--only-chunks LIST]\n" +
+        "[--workers N] [--only-chunks LIST] [--unlock-depth-limit]\n" +
         "  --only-chunks takes indices and inclusive ranges (e.g. '200' or '200,300-500'); " +
-        "every other chunk is left empty. '' builds no chunks at all, just the place table.",
+        "every other chunk is left empty. '' builds no chunks at all, just the place table.\n" +
+        `  --unlock-depth-limit allows --max-depth past ${MAX_SUPPORTED_DEPTH} (up to the format's 26), ` +
+        "for a file the reader will refuse to open.",
     );
     process.exitCode = 1;
     return;
@@ -84,6 +98,16 @@ async function main(): Promise<void> {
   const widthExp = headerFlag(flags, "width-exp", 6, 15);
   const heightExp = headerFlag(flags, "height-exp", 6, 15);
   const maxDepth = headerFlag(flags, "max-depth", 12, 26);
+  if (maxDepth > MAX_SUPPORTED_DEPTH && !switches.has("unlock-depth-limit")) {
+    throw new Error(
+      `--max-depth ${maxDepth} is past ${MAX_SUPPORTED_DEPTH}, the deepest the reader opens. ` +
+        "Each chunk is one zlib block a lookup inflates whole, and a chunk spans up to " +
+        `4^max_depth cells (already ${4 ** MAX_SUPPORTED_DEPTH} at ${MAX_SUPPORTED_DEPTH}), ` +
+        "so deeper chunks make lookups slower: for finer cells, raise --width-exp and " +
+        "--height-exp instead (reader/binary-format.md Section 10). To build a deeper file " +
+        "anyway, for transfer or archiving rather than lookups, pass --unlock-depth-limit.",
+    );
+  }
   const keyframeExp = headerFlag(flags, "keyframe-exp", 7, 255); // reader/binary-format.md Section 7.3
   const chunkCount = 2 ** widthExp * 2 ** heightExp;
 

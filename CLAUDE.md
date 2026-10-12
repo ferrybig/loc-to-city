@@ -272,7 +272,7 @@ hierarchy JSON, a cities GeoJSON/`.geojsonseq`, an output path, and
 node compressor/src/cli.ts <hierarchy.json> <cities.geojson|.geojsonseq> <out.bin> \
   --regions <regions.geojson> --countries <countries.geojson> \
   --width-exp 6 --height-exp 6 --max-depth N --keyframe-exp 7 \
-  --attribution "..." --workers N [--only-chunks LIST]
+  --attribution "..." --workers N [--only-chunks LIST] [--unlock-depth-limit]
 ```
 
 - `--only-chunks` takes indices/ranges (`200` or `200,300-500`) and leaves
@@ -284,6 +284,10 @@ node compressor/src/cli.ts <hierarchy.json> <cities.geojson|.geojsonseq> <out.bi
   gitignored, regenerate-on-demand artifact, not committed, since it goes
   stale the moment `world-hierarchy.json`/cities/regions change and costs
   nothing to rebuild).
+- `--max-depth` above 16 is an error unless `--unlock-depth-limit` is
+  given: the reader refuses such files (`MAX_SUPPORTED_DEPTH`), since a
+  lookup inflates a whole chunk and deeper chunks only make that slower.
+  For finer cells, raise `--width-exp`/`--height-exp` instead.
 - `--workers N` spreads chunk work across `node:worker_threads` (`0` = the
   original sequential path, kept as the byte-identity oracle parallel
   output is checked against; `1` still spawns a real worker, isolating
