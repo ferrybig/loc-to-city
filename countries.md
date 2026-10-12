@@ -977,6 +977,22 @@ worldwide resolved data (`make netherlands`) and
     because its ~300 m cell is mostly 3104 and a cell holds one answer.
     That is ordinary border resolution, and harmless here since the names
     are identical.
+- **Ter Heijde is missing; its coast resolves to Monster.** *(open)*
+  52.030172, 4.168013 resolves to Monster (Westland, Zuid-Holland) but should
+  be Ter Heijde. Found 2026-10-12, thought to be an enclave ordering problem
+  that worked before. Measured:
+  - Ter Heijde is an enclave. In `planet-latest-admin.geojson` it is
+    `a2721331` (`admin_level=10`, `source=BAG`, woonplaatscode 2663), one
+    ring that is exactly the only hole in Monster's `a2721333` (both
+    1.56e-5 deg²). The point is inside Ter Heijde, not Monster.
+  - It never reaches the compressor. Ter Heijde is in the extracted data but
+    not in `cities-filtered.geojsonseq` (built 2026-10-12), and so not in the
+    place table: `search heijde` only finds Terheijden (Noord-Brabant). The
+    same holds for every `.bin` here, including the 2026-09-28
+    `zuid-holland.bin` and 2026-10-09 `world-e7-d10.bin`. So whatever
+    "worked before" did, it predates those builds, and the cause is in
+    `prepare-world.ts`, not the compressor's candidate order. Not looked
+    into yet.
 
 ## Nicaragua (NI)
 

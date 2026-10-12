@@ -255,6 +255,16 @@ export const CASES: Case[] = [
 		entry: "A village that crosses a municipal border is two places.",
 	},
 	{
+		name: "Ter Heijde, an enclave inside Monster",
+		at: [52.030172, 4.168013],
+		country: "Netherlands",
+		region: "South Holland",
+		city: "Ter Heijde",
+		status: "open",
+		section: "Netherlands",
+		entry: "Ter Heijde is missing; its coast resolves to Monster.",
+	},
+	{
 		name: "Amsterdam",
 		at: [52.3676, 4.9041],
 		region: "North Holland",
