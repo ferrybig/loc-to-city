@@ -410,10 +410,56 @@
 
 		<script src="/vendor/leaflet/leaflet.js"></script>
 		<script>
+		// ---- view in the URL ----
+		// The view as openstreetmap.org writes it, `#map=zoom/lat/lon`, so a
+		// URL can be shared. Kept current with replaceState, so moving the map
+		// adds no history entries, a second after the map stops moving: Safari
+		// throws past 100 replaceState calls in 30 seconds.
+		const DEFAULT_VIEW = { zoom: 10, lat: 52.05, lon: 4.3 };
+		const VIEW_HASH_DELAY_MS = 1000;
+		let viewHashTimeout = null;
+
+		/** The view a `#map=zoom/lat/lon` hash names, or null. */
+		function parseViewHash(hash) {
+			const match = /^#map=([^/]+)\/([^/]+)\/([^/]+)$/.exec(hash);
+			if (!match) return null;
+			const [zoom, lat, lon] = match.slice(1).map(Number);
+			if (![zoom, lat, lon].every(Number.isFinite)) return null;
+			if (zoom < 0 || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+			return { zoom, lat, lon };
+		}
+
+		/** The map's current view as a hash, with enough decimals to place
+		 * its centre to about a pixel. */
+		function viewHash() {
+			const zoom = map.getZoom();
+			const { lat, lng } = map.getCenter().wrap();
+			const digits = Math.max(0, Math.ceil(Math.log2(zoom)));
+			return `#map=${zoom}/${lat.toFixed(digits)}/${lng.toFixed(digits)}`;
+		}
+
 		const map = L.map("map", {
 			zoomControl: false,
-		}).setView([52.05, 4.3], 10);
+		});
 		window.map = map; // exposed for e2e tests, which drive the map via setView + a center click
+		{
+			const { lat, lon, zoom } = parseViewHash(location.hash) ?? DEFAULT_VIEW;
+			map.setView([lat, lon], zoom);
+		}
+		map.on("moveend", () => {
+			clearTimeout(viewHashTimeout);
+			viewHashTimeout = setTimeout(() => {
+				const hash = viewHash();
+				if (hash !== location.hash) {
+					history.replaceState(history.state, "", hash);
+				}
+			}, VIEW_HASH_DELAY_MS);
+		});
+		// A hash edited by hand (or reached with Back, after one was).
+		window.addEventListener("hashchange", () => {
+			const view = parseViewHash(location.hash);
+			if (view) map.setView([view.lat, view.lon], view.zoom);
+		});
 
 		L.control
 			.zoom({

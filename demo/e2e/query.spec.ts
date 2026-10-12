@@ -86,6 +86,83 @@ test("a point in a gap resolves to nothing", async ({ page }) => {
 	await expect(popup(page)).toContainText("Place id: none");
 });
 
+/** The map's zoom and centre, rounded to the hash's own precision. */
+function mapView(page: Page): Promise<[number, number, number]> {
+	return page.evaluate(() => {
+		const { map } = window as unknown as {
+			map: { getZoom(): number; getCenter(): { lat: number; lng: number } };
+		};
+		const { lat, lng } = map.getCenter();
+		return [
+			map.getZoom(),
+			Math.round(lat * 100) / 100,
+			Math.round(lng * 100) / 100,
+		];
+	});
+}
+
+test("a shared URL opens the map at the view in its hash", async ({ page }) => {
+	await page.goto("/#map=6/20.000/100.000");
+	await page.waitForFunction(() => "map" in window);
+	expect(await mapView(page)).toEqual([6, 20, 100]);
+
+	const box = await page.locator("#map").boundingBox();
+	if (!box) throw new Error("#map has no bounding box");
+	await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+	await expect(row(page, "City")).toContainText("Zaandam");
+});
+
+test("moving the map updates the hash without adding history entries", async ({
+	page,
+}) => {
+	await page.goto("/");
+	const entries = await page.evaluate(() => history.length);
+
+	await setView(page, 20, 100, 4);
+	await expect
+		.poll(() => page.evaluate(() => location.hash))
+		.toBe("#map=4/20.00/100.00");
+	await setView(page, 40, 30, 5);
+	await expect
+		.poll(() => page.evaluate(() => location.hash))
+		.toBe("#map=5/40.000/30.000");
+	expect(await page.evaluate(() => history.length)).toBe(entries);
+});
+
+test("the hash is written once the map stops moving, not on every move", async ({
+	page,
+}) => {
+	await page.addInitScript(() => {
+		const counted = window as unknown as { replaceStates: number };
+		counted.replaceStates = 0;
+		const replaceState = history.replaceState.bind(history);
+		history.replaceState = (...args) => {
+			counted.replaceStates++;
+			replaceState(...args);
+		};
+	});
+	await page.goto("/");
+	for (let zoom = 3; zoom <= 8; zoom++) await setView(page, 20, 100, zoom);
+
+	await expect
+		.poll(() => page.evaluate(() => location.hash))
+		.toBe("#map=8/20.000/100.000");
+	expect(
+		await page.evaluate(
+			() => (window as unknown as { replaceStates: number }).replaceStates,
+		),
+	).toBe(1);
+});
+
+test("editing the hash moves the map", async ({ page }) => {
+	await page.goto("/");
+	await page.waitForFunction(() => "map" in window);
+	await page.evaluate(() => {
+		location.hash = "#map=5/40.000/30.000";
+	});
+	await expect.poll(() => mapView(page)).toEqual([5, 40, 30]);
+});
+
 test("search results come back when the search box is focused again", async ({
 	page,
 }) => {
