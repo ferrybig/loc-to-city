@@ -437,6 +437,12 @@
 			} catch (_) {}
 		}
 
+		// The tile layers' stacking order, whatever order they're switched on
+		// in: Leaflet otherwise puts the last one added on top. (The chunk
+		// grid is vector lines and markers, in panes above every tile layer.)
+		const Z_BASE_MAP = 1;
+		const Z_GRID_OVERLAY = 2;
+
 		// ---- base map ----
 		// OpenStreetMap's own tiles, on unless switched off. The choice is
 		// remembered, and the e2e tests start with it off (playwright.config.ts)
@@ -446,6 +452,7 @@
 			"https://tile.openstreetmap.org/{z}/{x}/{y}.png",
 			{
 				maxZoom: 19,
+				zIndex: Z_BASE_MAP,
 				attribution:
 					'Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
 			},
@@ -545,6 +552,7 @@
 
 			tileLayer = L.tileLayer("/tiles/{z}/{x}/{y}.png", {
 				tileSize: 256,
+				zIndex: Z_GRID_OVERLAY,
 				minZoom: 4,
 				maxZoom: 24,
 				opacity: opacityRange.value / 100,
@@ -559,10 +567,9 @@
 		const opacityRangeHandler = () => {
 			opacityValue.textContent = `${opacityRange.value}%`;
 			if (tileLayer) tileLayer.setOpacity(opacityRange.value / 100);
-		}
+		};
 		opacityRange.addEventListener("input", opacityRangeHandler);
 		opacityRangeHandler();
-
 
 		// ---- chunk grid ----
 		// The file's chunk grid (Section 6.1 of the format), and on each chunk
@@ -624,7 +631,7 @@
 			const lonStep = 360 / width;
 			const latStep = 180 / height;
 			const x0 = map.project([0, 0]).x;
-			if (map.project([0, lonStep]).x - x0 < CHUNK_LABEL_SIZE.x/2) return;
+			if (map.project([0, lonStep]).x - x0 < CHUNK_LABEL_SIZE.x / 2) return;
 			const bounds = map.getBounds();
 			const clamp = (v, max) => Math.min(Math.max(v, 0), max);
 			const c0 = clamp(
@@ -647,7 +654,7 @@
 				const south = -90 + r * latStep;
 				const rowHeight =
 					map.project([south, 0]).y - map.project([south + latStep, 0]).y;
-				if (rowHeight < CHUNK_LABEL_SIZE.y/2) continue;
+				if (rowHeight < CHUNK_LABEL_SIZE.y / 2) continue;
 				for (let c = c0; c <= c1; c++) {
 					const index = r * width + c;
 					const bytes = chunkLengths[index];
@@ -677,7 +684,7 @@
 				chunkLengthsLoading = null;
 			}
 			renderChunkLabels();
-		}
+		};
 		chunkGridToggle.addEventListener("change", chunkGridToggleHandler);
 		chunkGridToggleHandler();
 		map.on("moveend", renderChunkLabels);

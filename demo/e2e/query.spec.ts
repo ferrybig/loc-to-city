@@ -221,6 +221,47 @@ test("the base map is off in tests, and fetches OSM's tiles once on", async ({
 	await expect(toggle).toBeChecked();
 });
 
+/** The tile layers that have tiles, bottom to top as drawn: "osm" for
+ * the base map, "grid" for the city grid overlay. */
+function tileLayerStack(page: Page): Promise<string[]> {
+	return page.evaluate(() =>
+		[...document.querySelectorAll<HTMLElement>(".leaflet-tile-pane > *")]
+			.map((el, order) => ({
+				z: Number(getComputedStyle(el).zIndex) || 0,
+				order,
+				name: el.querySelector('img[src*="openstreetmap"]')
+					? "osm"
+					: el.querySelector('img[src*="/tiles/"]')
+						? "grid"
+						: null,
+			}))
+			.filter((layer) => layer.name)
+			.sort((a, b) => a.z - b.z || a.order - b.order)
+			.map((layer) => layer.name as string),
+	);
+}
+
+test("the base map stays under the grid overlay, whichever is switched on last", async ({
+	page,
+}) => {
+	await page.route("https://tile.openstreetmap.org/**", (route) =>
+		route.abort(),
+	);
+	await page.goto("/");
+	const baseMap = page.getByRole("checkbox", {
+		name: "Show OpenStreetMap base map",
+	});
+	const grid = page.getByRole("checkbox", { name: "Show grid overlay" });
+
+	// Tests start with the base map off, so this adds it after the grid.
+	await baseMap.check();
+	await expect.poll(() => tileLayerStack(page)).toEqual(["osm", "grid"]);
+
+	await grid.uncheck();
+	await grid.check();
+	await expect.poll(() => tileLayerStack(page)).toEqual(["osm", "grid"]);
+});
+
 test("the dataset can be downloaded from the page", async ({ page }) => {
 	await page.goto("/");
 	await page.locator("#downloads summary").click();
