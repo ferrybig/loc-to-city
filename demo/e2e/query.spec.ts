@@ -1,4 +1,35 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
+
+// The dataset is reader/binary-format.md's Appendix A example (see
+// playwright.config.ts). Of its seven places, only Noord-Holland (id 2),
+// Zaandam (id 5) and their country Nederland have cells; Amsterdam,
+// België and Antwerpen are names only. Section A.5 works out the
+// lookups used here.
+
+interface TestMap {
+	setView(
+		center: [number, number],
+		zoom: number,
+		options?: { animate: boolean },
+	): void;
+}
+
+/** Moves the map without animating, so it is already there on return. */
+async function setView(
+	page: Page,
+	lat: number,
+	lon: number,
+	zoom: number,
+): Promise<void> {
+	await page.waitForFunction(() => "map" in window);
+	await page.evaluate(
+		([lat, lon, zoom]) => {
+			const { map } = window as unknown as { map: TestMap };
+			map.setView([lat, lon], zoom, { animate: false });
+		},
+		[lat, lon, zoom] as const,
+	);
+}
 
 /**
  * Drives the map to center exactly on (lat, lon) via Leaflet's own
@@ -10,44 +41,49 @@ async function clickLatLng(
 	lat: number,
 	lon: number,
 ): Promise<void> {
-	await page.evaluate(
-		([lat, lon]) => {
-			const { map } = window as unknown as {
-				map: { setView(center: [number, number], zoom: number): void };
-			};
-			map.setView([lat, lon], 13);
-		},
-		[lat, lon] as const,
-	);
+	await setView(page, lat, lon, 6);
 	const box = await page.locator("#map").boundingBox();
 	if (!box) throw new Error("#map has no bounding box");
 	await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 }
 
-test("clicking Den Haag's coordinate shows Den Haag, not Nootdorp", async ({
+/** The newest popup: a closing one can linger while it fades out. */
+function popup(page: Page): Locator {
+	return page.locator(".leaflet-popup-content").last();
+}
+
+/** One level's row of the lookup popup's table. */
+function row(page: Page, level: "Country" | "Region" | "City"): Locator {
+	return popup(page).getByRole("row", { name: level });
+}
+
+test("clicking a city shows it, its region, country and place id", async ({
 	page,
 }) => {
 	await page.goto("/");
-	await page.waitForFunction(() => "map" in window);
+	await clickLatLng(page, 20, 100);
 
-	await clickLatLng(page, 52.034656, 4.388124);
-
-	const popup = page.locator(".leaflet-popup-content");
-	await expect(popup).toContainText("Den Haag");
-	await expect(popup).not.toContainText("Nootdorp");
+	await expect(row(page, "City")).toContainText("Zaandam");
+	await expect(row(page, "Region")).toContainText("Noord-Holland");
+	await expect(row(page, "Country")).toContainText("Nederland");
+	await expect(popup(page)).toContainText("Place id: 5");
 });
 
-test("clicking Europoort's coordinate shows Europoort, not Hoek van Holland", async ({
-	page,
-}) => {
+test("a point only a region covers shows no city", async ({ page }) => {
 	await page.goto("/");
-	await page.waitForFunction(() => "map" in window);
+	await clickLatLng(page, 40, 30);
 
-	await clickLatLng(page, 51.970738, 4.123725);
+	await expect(row(page, "Region")).toContainText("Noord-Holland");
+	await expect(row(page, "City")).toContainText("unknown");
+	await expect(popup(page)).toContainText("Place id: 2");
+});
 
-	const popup = page.locator(".leaflet-popup-content");
-	await expect(popup).toContainText("Europoort");
-	await expect(popup).not.toContainText("Hoek van Holland");
+test("a point in a gap resolves to nothing", async ({ page }) => {
+	await page.goto("/");
+	await clickLatLng(page, 30, 100);
+
+	await expect(row(page, "Country")).toContainText("unknown");
+	await expect(popup(page)).toContainText("Place id: none");
 });
 
 test("search results come back when the search box is focused again", async ({
@@ -57,33 +93,143 @@ test("search results come back when the search box is focused again", async ({
 	const input = page.getByRole("combobox", { name: "Search places" });
 	const options = page.getByRole("option");
 
-	await input.fill("Delft");
-	await expect(options.first()).toContainText("Delft");
+	await input.fill("Zaandam");
+	await expect(options.first()).toContainText("Zaandam");
 
 	// Closing the list, by leaving the box, keeps the query...
 	await input.blur();
 	await expect(options).toHaveCount(0);
-	await expect(input).toHaveValue("Delft");
+	await expect(input).toHaveValue("Zaandam");
 
 	// ...and coming back to it shows its results again.
 	await input.focus();
-	await expect(options.first()).toContainText("Delft");
+	await expect(options.first()).toContainText("Zaandam");
 
 	// Picking one with the keyboard goes there and closes the list.
 	await input.press("ArrowDown");
 	await expect(options.first()).toHaveAttribute("aria-selected", "true");
 	await input.press("Enter");
 	await expect(options).toHaveCount(0);
-	await expect(page.locator(".leaflet-popup-content")).toContainText("Delft");
+	await expect(row(page, "City")).toContainText("Zaandam");
+});
+
+test("Enter pressed before the results come in goes to the first one", async ({
+	page,
+}) => {
+	await page.goto("/");
+	const input = page.getByRole("combobox", { name: "Search places" });
+
+	await input.fill("Zaandam");
+	await input.press("Enter");
+
+	await expect(row(page, "City")).toContainText("Zaandam");
+	await expect(page.getByRole("option")).toHaveCount(0);
+});
+
+test("Enter after a search that found nothing goes nowhere", async ({
+	page,
+}) => {
+	await page.goto("/");
+	const input = page.getByRole("combobox", { name: "Search places" });
+	const status = page.locator("#search-status");
+
+	await input.fill("Zaandam");
+	await expect(page.getByRole("option").first()).toContainText("Zaandam");
+
+	// Zaandam's results are still on screen until the new query's come in.
+	await input.fill("wwwww");
+	await expect(status).toHaveText("Searching…");
+	await input.press("Enter");
+
+	await expect(status).toHaveText("No places found");
+	await expect(status).toBeVisible();
+	await expect(page.getByRole("option")).toHaveCount(0);
+	await expect(page.locator(".leaflet-popup-content")).toHaveCount(0);
+});
+
+test("a place found by name but without cells says so", async ({ page }) => {
+	await page.goto("/");
+	const input = page.getByRole("combobox", { name: "Search places" });
+
+	await input.fill("Amsterdam");
+	await expect(page.getByRole("option").first()).toContainText("Amsterdam");
+	await input.press("Enter");
+
+	await expect(page.locator("#search-status")).toHaveText(
+		"Amsterdam has no location in this dataset",
+	);
+	await expect(page.locator(".leaflet-popup-content")).toHaveCount(0);
+});
+
+test("a lat, lon in the search box goes to that point", async ({ page }) => {
+	await page.goto("/");
+	const input = page.getByRole("combobox", { name: "Search places" });
+
+	await input.fill("20, 100");
+	await expect(page.getByRole("option")).toHaveCount(1);
+	await expect(page.getByRole("option")).toContainText("Coordinates");
+	await input.press("Enter");
+
+	await expect(popup(page)).toContainText("20.000000, 100.000000");
+	await expect(row(page, "City")).toContainText("Zaandam");
+});
+
+test("the chunk grid labels chunks with their compressed size", async ({
+	page,
+}) => {
+	await page.goto("/");
+	const toggle = page.getByRole("checkbox", { name: "Show chunk grid" });
+	await expect(toggle).toBeEnabled();
+	await expect(toggle).not.toBeChecked();
+
+	await setView(page, 45, 90, 2);
+	await toggle.check();
+	// Section A.2: chunk 3 is the only one with data, 26 bytes of it.
+	const labels = page.locator(".chunk-label");
+	await expect(labels).toHaveCount(1);
+	await expect(labels).toContainText("26 B");
+	await expect(labels).toContainText("#3");
+
+	await toggle.uncheck();
+	await expect(labels).toHaveCount(0);
+});
+
+test("the base map is off in tests, and fetches OSM's tiles once on", async ({
+	page,
+}) => {
+	const osmTiles: string[] = [];
+	// Never reach OSM from a test, even with the base map switched on.
+	await page.route("https://tile.openstreetmap.org/**", (route) => {
+		osmTiles.push(route.request().url());
+		return route.abort();
+	});
+	await page.goto("/");
+	const toggle = page.getByRole("checkbox", {
+		name: "Show OpenStreetMap base map",
+	});
+	await expect(toggle).not.toBeChecked();
+	const attribution = page.locator(".leaflet-control-attribution");
+	await expect(attribution).toBeVisible();
+	await expect(attribution).not.toContainText("Map data");
+
+	await toggle.check();
+	await expect.poll(() => osmTiles.length).toBeGreaterThan(0);
+	await expect(attribution).toContainText("Map data");
+
+	// The choice is remembered.
+	await page.reload();
+	await expect(toggle).toBeChecked();
 });
 
 test("the dataset can be downloaded from the page", async ({ page }) => {
 	await page.goto("/");
 	await page.locator("#downloads summary").click();
-	const link = page.getByRole("link", { name: "zuid-holland.bin" });
+	const link = page.getByRole("link", { name: "appendix-a-example.bin" });
 	await expect(link).toBeVisible();
 	const resp = await page.request.get((await link.getAttribute("href"))!);
 	expect(resp.status()).toBe(200);
-	expect(resp.headers()["content-disposition"]).toContain("zuid-holland.bin");
+	expect(resp.headers()["content-disposition"]).toContain(
+		"appendix-a-example.bin",
+	);
 	expect((await resp.body()).subarray(0, 4).toString("latin1")).toBe("CGEO");
 });

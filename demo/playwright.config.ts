@@ -1,31 +1,37 @@
-import { existsSync } from "node:fs";
 import { defineConfig, devices } from "@playwright/test";
 
-// The e2e tests click real places in Zuid-Holland, so they need the
-// Netherlands build (`make netherlands`, see README), which isn't
-// committed.
-const DATASET = "../data/03-final/zuid-holland.bin";
-// The spot-checks the page draws as markers: only the Dutch ones, which this
-// dataset can answer (the markers' own results don't matter here). Written
-// under test-results/, not next to the dataset, so a server started by hand
-// on zuid-holland.bin doesn't show them.
-const CHECKS = "test-results/zuid-holland.checks.json";
-if (!existsSync(new URL(DATASET, import.meta.url))) {
-	throw new Error(
-		`${DATASET} not found: build it with \`make netherlands\` from the repo root first`,
-	);
-}
+// The e2e tests run against the format spec's own worked example
+// (reader/binary-format.md Appendix A): a committed 157-byte file of seven
+// places on a 2 x 2 chunk grid, so they need no build. Its one non-empty
+// chunk spans latitudes [0, 90) and longitudes [0, 180), nowhere near
+// where its places really are.
+const DATASET = "../data/03-final/appendix-a-example.bin";
+// Hand-written spot-checks for that file, for the page to draw as markers.
+const CHECKS = "e2e/fixtures/appendix-a-example.checks.json";
+const BASE_URL = "http://127.0.0.1:8767";
 
 export default defineConfig({
 	testDir: "./e2e",
 	fullyParallel: true,
 	reporter: "list",
 	use: {
-		baseURL: "http://127.0.0.1:8767",
+		baseURL: BASE_URL,
+		// The page remembers whether its OpenStreetMap base map is on; start
+		// with it off, so a browser with an empty cache doesn't fetch OSM's
+		// tiles on every test. The example's places aren't on that map anyway.
+		storageState: {
+			cookies: [],
+			origins: [
+				{
+					origin: BASE_URL,
+					localStorage: [{ name: "basemap", value: "off" }],
+				},
+			],
+		},
 	},
 	webServer: {
-		command: `node ../verify/src/export.ts ${DATASET} --section Netherlands --out ${CHECKS} && node src/server.ts 8767 ${DATASET} ${CHECKS}`,
-		url: "http://127.0.0.1:8767",
+		command: `node src/server.ts 8767 ${DATASET} ${CHECKS}`,
+		url: BASE_URL,
 		reuseExistingServer: !process.env.CI,
 		timeout: 30_000,
 	},

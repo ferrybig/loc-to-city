@@ -82,14 +82,22 @@ const indexStatus = [
 ];
 
 /** The dataset's attribution notice, the size of its finest cell in
- * degrees, and whether each sidecar index is in use. Every worker opens the
- * same files, so any one worker's answer holds for all. */
+ * degrees, its chunk grid, and whether each sidecar index is in use. Every
+ * worker opens the same files, so any one worker's answer holds for all. */
 export function info(): {
 	attribution: string;
 	cellDegrees: { lon: number; lat: number };
+	/** The chunk grid (Section 6.1): `width` columns of 360 / width degrees
+	 * eastward from longitude -180, `height` rows of 180 / height degrees
+	 * northward from latitude -90; chunk `r * width + c`. */
+	chunkGrid: { width: number; height: number };
+	/** Each chunk's compressed length in bytes (0 for an empty one), by
+	 * chunk index. */
+	chunkLengths: number[];
 	indexes: IndexStatus[];
 } {
-	const { attribution, widthExp, heightExp, maxDepth } = reader.header;
+	const { attribution, width, height, widthExp, heightExp, maxDepth } =
+		reader.header;
 	return {
 		attribution,
 		// Section 6.1: the grid spans 360 x 180 degrees, and each of the
@@ -98,6 +106,8 @@ export function info(): {
 			lon: 360 / 2 ** (widthExp + maxDepth),
 			lat: 180 / 2 ** (heightExp + maxDepth),
 		},
+		chunkGrid: { width, height },
+		chunkLengths: reader.directory.chunkLengths,
 		indexes: indexStatus,
 	};
 }
@@ -169,8 +179,8 @@ export const locate = skipIfCancelled(
 		id,
 	}: {
 		id: number;
-	}): Promise<{ lat: number; lon: number } | null> => {
+	}): Promise<{ lat: number; lon: number; area: number } | null> => {
 		const pos = await reader.locate(id);
-		return pos && { lat: pos.lat, lon: pos.lon };
+		return pos && { lat: pos.lat, lon: pos.lon, area: pos.area };
 	},
 );

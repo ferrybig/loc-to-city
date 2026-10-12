@@ -124,15 +124,19 @@ node --test compressor/test/geometry.test.ts
 no test coverage — validate those by running a scoped build (see below)
 and reading their diagnostic output.
 
-Demo e2e (spins up its own server against `data/03-final/zuid-holland.bin` on
-:8767, per `demo/playwright.config.ts`). That file isn't committed: build it
-with `make netherlands` first, which needs the worldwide build and runs it
-if it's missing (the from-scratch pipeline is slow, see below). Without it
-the Playwright config refuses to start, saying so. `demo/test/tiles.test.ts`'s real-data case
-skips without it too.
+Demo e2e (spins up its own server on :8767, per
+`demo/playwright.config.ts`) runs against the committed
+`data/03-final/appendix-a-example.bin`, the spec's Appendix A worked
+example, so it needs no build: seven places on a 2x2 chunk grid, of which
+only Nederland, Noord-Holland and Zaandam have cells (Section A.5 works
+out the lookups the tests click). Its spot-check markers come from the
+hand-written `demo/e2e/fixtures/appendix-a-example.checks.json`. The config
+starts the browser with the page's OpenStreetMap base map switched off
+(a `localStorage` setting), so cacheless test browsers never fetch OSM's
+tiles. `demo/test/tiles.test.ts`'s real-data case still needs
+`data/03-final/zuid-holland.bin` (`make netherlands`) and skips without it.
 
 ```bash
-make netherlands                        # once: data/03-final/zuid-holland.bin
 cd demo && npx playwright install chromium && npx playwright test
 ```
 

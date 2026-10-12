@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-// The server is started with the Dutch spot-checks (playwright.config.ts).
+// The server is started with e2e/fixtures/appendix-a-example.checks.json
+// (playwright.config.ts): two spot-checks, Zaandam and Amsterdam, placed
+// away from the points query.spec.ts clicks so their pins don't catch the
+// clicks.
 
 test("the spot-check markers are drawn, with a legend and a popup", async ({
 	page,
@@ -12,7 +15,7 @@ test("the spot-check markers are drawn, with a legend and a popup", async ({
 		const { map } = window as unknown as {
 			map: { setView(center: [number, number], zoom: number): void };
 		};
-		map.setView([52.3, 5], 8);
+		map.setView([30, 65], 3);
 	});
 
 	const pins = page.locator(".check-pin");
@@ -38,10 +41,10 @@ test("the markers can be switched off; a group the dataset has none of is not of
 		const { map } = window as unknown as {
 			map: { setView(center: [number, number], zoom: number): void };
 		};
-		map.setView([52.3, 5], 8);
+		map.setView([30, 65], 3);
 	});
 	await expect(page.locator(".check-pin").first()).toBeVisible();
-	// The Dutch checks include no capitals.
+	// The fixture has no capitals.
 	await expect(page.locator("#checks-capital-toggle")).toBeHidden();
 
 	await page.locator("#checks-spot-toggle").uncheck();

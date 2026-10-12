@@ -91,6 +91,21 @@
 		#search-results:empty {
 			display: none;
 		}
+		#search-results.stale {
+			opacity: 0.5;
+		}
+		.search-message {
+			margin-top: 4px;
+			padding: 8px 12px;
+			background: white;
+			border-radius: 8px;
+			box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+			font-size: 13px;
+			color: #666;
+		}
+		.search-message:empty {
+			display: none;
+		}
 		.search-result-item {
 			padding: 8px 12px;
 			cursor: pointer;
@@ -162,6 +177,25 @@
 			color: #666;
 			margin-top: 8px;
 			line-height: 1.4;
+		}
+
+		/* Chunk grid labels: centred on their chunk, legible over any map. */
+		.chunk-label {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			color: #a61e4d;
+			font: 11px / 1.2 sans-serif;
+			text-align: center;
+			white-space: nowrap;
+			text-shadow:
+				0 0 2px white,
+				0 0 2px white,
+				0 0 2px white;
+		}
+		.chunk-label b {
+			font-size: 12px;
 		}
 
 		/* Spot-check markers: a coloured disc with a glyph, so the outcome is
@@ -279,7 +313,12 @@
 
 		<div id="right-panels">
 			<section id="layer-panel" aria-labelledby="layer-panel-heading">
-				<h2 id="layer-panel-heading">Grid overlay</h2>
+				<h2 id="layer-panel-heading">Layers</h2>
+
+				<label>
+					<input type="checkbox" id="basemap-toggle" checked>
+					Show OpenStreetMap base map
+				</label>
 
 				<label>
 					<input type="checkbox" id="overlay-toggle" checked>
@@ -307,6 +346,15 @@
 					block of pixels to keep tiles fast, so borders get blockier there.
 					From level 8 in, lines mark where places meet: darker between regions,
 					darkest between countries.
+				</div>
+
+				<label>
+					<input type="checkbox" id="chunk-grid-toggle" disabled>
+					Show chunk grid
+				</label>
+				<div class="hint" id="chunk-grid-hint" hidden>
+					A lookup decompresses the one chunk its point is in. Zoomed in far
+					enough, each chunk shows its compressed size and index.
 				</div>
 			</section>
 
@@ -372,11 +420,48 @@
 				position: "bottomright",
 			})
 			.addTo(map);
-		L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-			maxZoom: 19,
-			attribution:
-				'Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-		}).addTo(map);
+
+		/** A per-browser setting from localStorage, or null where there is
+		 * none or storage is off limits. */
+		function readSetting(name) {
+			try {
+				return localStorage.getItem(name);
+			} catch (_) {
+				return null;
+			}
+		}
+
+		function writeSetting(name, value) {
+			try {
+				localStorage.setItem(name, value);
+			} catch (_) {}
+		}
+
+		// ---- base map ----
+		// OpenStreetMap's own tiles, on unless switched off. The choice is
+		// remembered, and the e2e tests start with it off (playwright.config.ts)
+		// so a cacheless browser doesn't fetch from OSM's tile servers.
+		const baseMapToggle = document.getElementById("basemap-toggle");
+		const baseMap = L.tileLayer(
+			"https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+			{
+				maxZoom: 19,
+				attribution:
+					'Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+			},
+		);
+
+		function syncBaseMap() {
+			if (baseMapToggle.checked) baseMap.addTo(map);
+			else map.removeLayer(baseMap);
+		}
+
+		baseMapToggle.checked = readSetting("basemap") !== "off";
+		baseMapToggle.addEventListener("change", () => {
+			writeSetting("basemap", baseMapToggle.checked ? "on" : "off");
+			syncBaseMap();
+		});
+		syncBaseMap();
 
 		let marker = null;
 
@@ -401,7 +486,7 @@
 		<tr><th scope="row">Region</th><td>${fmtPlace(data.region?.names)}</td></tr>
 		<tr><th scope="row">City</th><td>${fmtPlace(data.city?.names)}</td></tr>
 	`;
-			const header = `<p>Location: ${lat.toFixed(6)}, ${lon.toFixed(6)} &middot; ${data.query_time_us.toFixed(1)}&micro;s</p>`;
+			const header = `<p>Location: ${lat.toFixed(6)}, ${lon.toFixed(6)} &middot; ${data.query_time_us.toFixed(1)}&micro;s<br>Place id: ${data.placeId ?? '<span class="null-result">none</span>'}</p>`;
 			return `${header}<table class="result-table">${rows}</table>`;
 		}
 
@@ -475,6 +560,122 @@
 		});
 
 		rebuildTileLayer();
+
+		// ---- chunk grid ----
+		// The file's chunk grid (Section 6.1 of the format), and on each chunk
+		// big enough on screen, its compressed size and index. The grid comes
+		// from /api/about; the sizes, one per chunk, are only fetched once the
+		// grid is turned on.
+		const chunkGridToggle = document.getElementById("chunk-grid-toggle");
+		const chunkGridLayer = L.layerGroup();
+		const chunkLabelLayer = L.layerGroup().addTo(chunkGridLayer);
+		let chunkGrid = null;
+		let chunkLengths = null;
+		let chunkLengthsLoading = null;
+		// Smallest on-screen chunk a label fits in, in pixels.
+		const CHUNK_LABEL_SIZE = { x: 72, y: 32 };
+
+		function setupChunkGrid(grid) {
+			chunkGrid = grid;
+			const { width, height } = grid;
+			const lines = [];
+			for (let c = 0; c <= width; c++) {
+				const lon = -180 + (c * 360) / width;
+				lines.push([
+					[-90, lon],
+					[90, lon],
+				]);
+			}
+			for (let r = 0; r <= height; r++) {
+				const lat = -90 + (r * 180) / height;
+				lines.push([
+					[lat, -180],
+					[lat, 180],
+				]);
+			}
+			L.polyline(lines, {
+				color: "#a61e4d",
+				weight: 1,
+				opacity: 0.7,
+				interactive: false,
+			}).addTo(chunkGridLayer);
+			chunkGridToggle.disabled = false;
+			document.getElementById("chunk-grid-hint").hidden = false;
+		}
+
+		async function loadChunkLengths() {
+			chunkLengthsLoading ??= (async () => {
+				const resp = await fetch("/api/chunk-sizes");
+				if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+				chunkLengths = (await resp.json()).lengths;
+			})();
+			return chunkLengthsLoading;
+		}
+
+		/** Labels the non-empty chunks in view that are big enough on screen
+		 * to hold one. */
+		function renderChunkLabels() {
+			chunkLabelLayer.clearLayers();
+			if (!chunkGrid || !chunkLengths || !map.hasLayer(chunkGridLayer)) return;
+			const { width, height } = chunkGrid;
+			const lonStep = 360 / width;
+			const latStep = 180 / height;
+			const x0 = map.project([0, 0]).x;
+			if (map.project([0, lonStep]).x - x0 < CHUNK_LABEL_SIZE.x) return;
+			const bounds = map.getBounds();
+			const clamp = (v, max) => Math.min(Math.max(v, 0), max);
+			const c0 = clamp(
+				Math.floor((bounds.getWest() + 180) / lonStep),
+				width - 1,
+			);
+			const c1 = clamp(
+				Math.floor((bounds.getEast() + 180) / lonStep),
+				width - 1,
+			);
+			const r0 = clamp(
+				Math.floor((bounds.getSouth() + 90) / latStep),
+				height - 1,
+			);
+			const r1 = clamp(
+				Math.floor((bounds.getNorth() + 90) / latStep),
+				height - 1,
+			);
+			for (let r = r0; r <= r1; r++) {
+				const south = -90 + r * latStep;
+				const rowHeight =
+					map.project([south, 0]).y - map.project([south + latStep, 0]).y;
+				if (rowHeight < CHUNK_LABEL_SIZE.y) continue;
+				for (let c = c0; c <= c1; c++) {
+					const index = r * width + c;
+					const bytes = chunkLengths[index];
+					if (!bytes) continue;
+					L.marker([south + latStep / 2, -180 + (c + 0.5) * lonStep], {
+						interactive: false,
+						keyboard: false,
+						icon: L.divIcon({
+							className: "chunk-label",
+							iconSize: [CHUNK_LABEL_SIZE.x, CHUNK_LABEL_SIZE.y],
+							html: `<b>${fmtBytes(bytes)}</b><span>#${index}</span>`,
+						}),
+					}).addTo(chunkLabelLayer);
+				}
+			}
+		}
+
+		chunkGridToggle.addEventListener("change", async () => {
+			if (!chunkGridToggle.checked) {
+				map.removeLayer(chunkGridLayer);
+				return;
+			}
+			chunkGridLayer.addTo(map);
+			try {
+				await loadChunkLengths();
+			} catch (_) {
+				chunkLengthsLoading = null;
+			}
+			renderChunkLabels();
+		});
+		map.on("moveend", renderChunkLabels);
 
 		// ---- spot checks ----
 		// Places the country notes (countries.md) have an opinion about, looked
@@ -673,20 +874,35 @@
 		// can't overwrite the results of a newer one.
 		let searchSeq = 0;
 		// The latest results, and the query they're for: reopening the list for
-		// the same query shows them again without asking the server.
+		// the same query shows them again without asking the server. While the
+		// input holds anything else, the list on screen is out of date.
 		let results = [];
 		let resultsFor = null;
+		// The query a search is waiting out its debounce or in flight for.
+		let loadingFor = null;
+		// Enter was pressed before the input's results came in: go to the
+		// first one once they do.
+		let pickWhenLoaded = false;
 		let activeIndex = -1;
 
 		function isOpen() {
 			return searchInput.getAttribute("aria-expanded") === "true";
 		}
 
+		/** Announces `text` to screen readers, and with `visible` also shows
+		 * it under the input (searching, nothing found, failed). */
+		function setStatus(text, visible) {
+			searchStatusEl.textContent = text;
+			searchStatusEl.className = visible ? "search-message" : "visually-hidden";
+		}
+
 		function closeResults() {
 			searchResultsEl.innerHTML = "";
+			searchResultsEl.classList.remove("stale");
 			searchInput.setAttribute("aria-expanded", "false");
 			searchInput.removeAttribute("aria-activedescendant");
 			activeIndex = -1;
+			setStatus("", false);
 		}
 
 		function setActive(index) {
@@ -704,19 +920,22 @@
 		function renderResults() {
 			activeIndex = -1;
 			searchInput.removeAttribute("aria-activedescendant");
+			searchResultsEl.classList.remove("stale");
 			if (!results.length) {
 				closeResults();
-				searchStatusEl.textContent = "No places found";
+				setStatus("No places found", true);
 				return;
 			}
 			searchResultsEl.innerHTML = results
 				.map((r, i) => {
-					const meta = [
-						r.level !== "city" ? null : (r.region?.join(" / ") ?? null),
-						r.country.join(" / "),
-					]
-						.filter(Boolean)
-						.join(", ");
+					const meta = r.coordinates
+						? "Coordinates"
+						: [
+								r.level !== "city" ? null : (r.region?.join(" / ") ?? null),
+								r.country.join(" / "),
+							]
+								.filter(Boolean)
+								.join(", ");
 					return `<div class="search-result-item" role="option" id="search-result-${i}" aria-selected="false" data-index="${i}">
 			<div class="search-result-name">${escapeHtml(r.names.join(" / "))}</div>
 			${meta ? `<div class="search-result-meta">${escapeHtml(meta)}</div>` : ""}
@@ -724,20 +943,62 @@
 				})
 				.join("");
 			searchInput.setAttribute("aria-expanded", "true");
-			searchStatusEl.textContent = `${results.length} place${results.length === 1 ? "" : "s"} found`;
+			setStatus(
+				`${results.length} place${results.length === 1 ? "" : "s"} found`,
+				false,
+			);
+		}
+
+		/** Makes `list` the results for `q`: goes to the first one if Enter
+		 * is waiting for them, else shows them (once the input has focus,
+		 * if it has gone). */
+		function showResults(q, list) {
+			results = list;
+			resultsFor = q;
+			loadingFor = null;
+			if (pickWhenLoaded) {
+				pickWhenLoaded = false;
+				if (results.length) {
+					pick(0);
+					return;
+				}
+			}
+			if (document.activeElement === searchInput) renderResults();
+		}
+
+		/** A "lat, lon" (or "lat lon") query as a result of its own, which
+		 * goes to that point; null for anything else. */
+		function coordinatesResult(q) {
+			const num = String.raw`([-+]?(?:\d+(?:\.\d*)?|\.\d+))`;
+			const match = new RegExp(String.raw`^${num}\s*(?:,|\s)\s*${num}$`).exec(
+				q,
+			);
+			if (!match) return null;
+			const lat = Number(match[1]);
+			const lon = Number(match[2]);
+			if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+			return { coordinates: true, lat, lon, names: [`${lat}, ${lon}`] };
 		}
 
 		async function doSearch(q) {
+			clearTimeout(searchTimeout);
+			searchTimeout = null;
+			loadingFor = q;
 			const seq = searchSeq;
 			try {
 				const resp = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
 				const data = await resp.json();
 				if (seq !== searchSeq) return;
-				results = data.results ?? [];
-				resultsFor = q;
-				renderResults();
-			} catch (_) {
-				if (seq === searchSeq) closeResults();
+				if (!resp.ok) throw new Error(data.error ?? `HTTP ${resp.status}`);
+				showResults(q, data.results ?? []);
+			} catch (e) {
+				if (seq !== searchSeq) return;
+				loadingFor = null;
+				pickWhenLoaded = false;
+				closeResults();
+				if (document.activeElement === searchInput) {
+					setStatus(`Search failed: ${e.message}`, true);
+				}
 			}
 		}
 
@@ -749,8 +1010,10 @@
 			if (!q || isOpen()) return;
 			if (q === resultsFor) {
 				renderResults();
+			} else if (q === loadingFor) {
+				setStatus("Searching…", true);
 			} else {
-				clearTimeout(searchTimeout);
+				setStatus("Searching…", true);
 				doSearch(q);
 			}
 		}
@@ -763,18 +1026,37 @@
 
 		searchInput.addEventListener("input", () => {
 			clearTimeout(searchTimeout);
+			searchTimeout = null;
 			searchSeq++;
+			loadingFor = null;
+			pickWhenLoaded = false;
 			const q = searchInput.value.trim();
 			if (!q) {
 				closeResults();
 				return;
 			}
+			if (q === resultsFor) {
+				renderResults();
+				return;
+			}
+			const point = coordinatesResult(q);
+			if (point) {
+				showResults(q, [point]);
+				return;
+			}
+			// Until the new results come in, the list shows the old query's.
+			searchResultsEl.classList.add("stale");
+			setStatus("Searching…", true);
+			loadingFor = q;
 			searchTimeout = setTimeout(() => doSearch(q), 250);
 		});
 
 		searchInput.addEventListener("focus", reopenResults);
 		searchInput.addEventListener("click", reopenResults);
-		searchInput.addEventListener("blur", closeResults);
+		searchInput.addEventListener("blur", () => {
+			pickWhenLoaded = false;
+			closeResults();
+		});
 
 		searchInput.addEventListener("keydown", (e) => {
 			if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -785,16 +1067,33 @@
 				}
 				setActive(activeIndex + (e.key === "ArrowDown" ? 1 : -1));
 			} else if (e.key === "Enter") {
-				if (!isOpen()) return;
+				const q = searchInput.value.trim();
+				if (!q) return;
 				e.preventDefault();
-				pick(activeIndex === -1 ? 0 : activeIndex);
+				if (q === resultsFor) {
+					// Nothing found picks nothing.
+					if (results.length)
+						pick(isOpen() && activeIndex !== -1 ? activeIndex : 0);
+					return;
+				}
+				// The list on screen (if any) is an older query's: wait for this
+				// one's, without the rest of the debounce.
+				pickWhenLoaded = true;
+				if (searchTimeout !== null || q !== loadingFor) {
+					setStatus("Searching…", true);
+					doSearch(q);
+				}
 			} else if (e.key === "Escape") {
 				if (isOpen()) {
 					closeResults();
 				} else {
 					searchSeq++;
 					clearTimeout(searchTimeout);
+					searchTimeout = null;
+					loadingFor = null;
+					pickWhenLoaded = false;
 					searchInput.value = "";
+					closeResults();
 				}
 			}
 		});
@@ -809,6 +1108,7 @@
 
 		// ---- docs and downloads ----
 		function fmtBytes(bytes) {
+			if (bytes < 1024) return `${bytes} B`;
 			if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
 			return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 		}
@@ -816,7 +1116,8 @@
 		/** A length in metres as "305 m" or "2.4 km". */
 		function fmtLength(metres) {
 			if (metres < 1000) return `${Math.round(metres)} m`;
-			return `${(metres / 1000).toPrecision(2)} km`;
+			if (metres < 100_000) return `${(metres / 1000).toPrecision(2)} km`;
+			return `${Math.round(metres / 1000)} km`;
 		}
 
 		/** The finest cell's size at the equator, where a degree of
@@ -859,18 +1160,52 @@
 			document.getElementById("data-attribution").innerHTML =
 				`Data: ${fmtAttribution(about.attribution)}`;
 			document.getElementById("about-panel").hidden = false;
+			if (about.chunkGrid) setupChunkGrid(about.chunkGrid);
 			if (about.checks) setupChecks(about.checks);
 		}
 		loadAbout().catch(() => {});
 
+		/** The zoom that fits a place of `area` square degrees (locate()'s
+		 * estimate, everything under the place included) around (lat, lon),
+		 * or the current zoom when its area is unknown. */
+		function zoomForArea(lat, lon, area) {
+			if (!(area > 0)) return map.getZoom();
+			// Taken as a square on the ground: in degrees, wider than tall by
+			// 1 / cos(lat). The located point is inside the place but not
+			// necessarily its middle, hence the margin.
+			const side = Math.sqrt(area) * 1.5;
+			const squash = Math.sqrt(Math.max(Math.cos((lat * Math.PI) / 180), 0.01));
+			const bounds = L.latLngBounds(
+				[lat - (side * squash) / 2, lon - side / squash / 2],
+				[lat + (side * squash) / 2, lon + side / squash / 2],
+			);
+			return Math.max(2, Math.min(map.getBoundsZoom(bounds), 16));
+		}
+
 		async function goToPlace(place) {
+			if (place.coordinates) {
+				map.setView([place.lat, place.lon], map.getZoom());
+				queryAndPopup(place.lat, place.lon);
+				return;
+			}
 			try {
 				const resp = await fetch(`/api/locate?id=${place.id}`);
 				const data = await resp.json();
-				if (data.error || data.lat === undefined) return;
-				map.setView([data.lat, data.lon], map.getZoom());
+				if (resp.status === 404) {
+					// Smaller than the dataset's finest cell: found by name, but
+					// every cell went to a neighbour.
+					setStatus(`${place.names[0]} has no location in this dataset`, true);
+					return;
+				}
+				if (!resp.ok) throw new Error(data.error ?? `HTTP ${resp.status}`);
+				map.setView(
+					[data.lat, data.lon],
+					zoomForArea(data.lat, data.lon, data.area),
+				);
 				queryAndPopup(data.lat, data.lon);
-			} catch (_) {}
+			} catch (e) {
+				setStatus(`Locating ${place.names[0]} failed: ${e.message}`, true);
+			}
 		}
 		</script>
 	</body>

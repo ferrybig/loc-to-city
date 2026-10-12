@@ -1,0 +1,46 @@
+{
+	"version": 1,
+	"generatedAt": "2026-10-12T00:00:00.000Z",
+	"dataset": {
+		"file": "appendix-a-example.bin",
+		"bytes": 157,
+		"attribution": "OSM",
+		"builtAt": "2026-10-12T00:00:00.000Z",
+		"olderThanResolvedInput": false
+	},
+	"summary": { "verified": 1, "open": 1 },
+	"checks": [
+		{
+			"id": "Netherlands/Zaandam",
+			"group": "spot",
+			"name": "Zaandam",
+			"lat": 10,
+			"lon": 120,
+			"outcome": "verified",
+			"status": "fixed",
+			"section": "Netherlands",
+			"expected": "Nederland / Noord-Holland / Zaandam",
+			"actual": {
+				"country": ["Nederland", "The Netherlands"],
+				"region": ["Noord-Holland"],
+				"city": ["Zaandam"]
+			}
+		},
+		{
+			"id": "Netherlands/Amsterdam",
+			"group": "spot",
+			"name": "Amsterdam",
+			"lat": 60,
+			"lon": 45,
+			"outcome": "open",
+			"status": "open",
+			"section": "Netherlands",
+			"expected": "Nederland / Noord-Holland / Amsterdam",
+			"actual": {
+				"country": ["Nederland", "The Netherlands"],
+				"region": ["Noord-Holland"],
+				"city": []
+			}
+		}
+	]
+}

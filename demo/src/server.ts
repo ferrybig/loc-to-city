@@ -158,6 +158,7 @@ async function main(): Promise<void> {
 		res.json({
 			attribution: info.attribution,
 			cellDegrees: info.cellDegrees,
+			chunkGrid: info.chunkGrid,
 			docs: docs ? "/docs/" : null,
 			checks: describeChecks(checks),
 			downloads: await Promise.all(
@@ -177,6 +178,13 @@ async function main(): Promise<void> {
 			return;
 		}
 		res.json(checks);
+	});
+
+	// The chunk grid overlay's labels: one number per chunk, so served apart
+	// from /api/about, which the page reads on every load, and only fetched
+	// once the overlay is turned on.
+	app.get("/api/chunk-sizes", (_req, res) => {
+		res.json({ ...info.chunkGrid, lengths: info.chunkLengths });
 	});
 
 	app.get("/api/query", async (req, res) => {
