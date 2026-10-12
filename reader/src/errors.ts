@@ -43,6 +43,14 @@ export class CGeoDataVersionError extends CGeoDataFormatError {
 	}
 }
 
+/** The file is valid, but uses something this reader doesn't support: a
+ * `max_depth` past 16 (see `MAX_SUPPORTED_DEPTH`). Rebuild it with a
+ * bigger chunk grid instead of deeper chunks. */
+export class CGeoDataUnsupportedError extends CGeoDataFormatError {
+	/** "CGeoDataUnsupportedError" */
+	override name = "CGeoDataUnsupportedError";
+}
+
 /** A search or locate index is well formed, but was built from a different
  * `.bin` file than the one it's being used with (or an older build of the
  * same one). Rebuild the index, or delete it to work without one. */

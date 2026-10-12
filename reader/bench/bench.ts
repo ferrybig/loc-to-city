@@ -10,12 +10,14 @@
  * Each section runs in its own child process so no section sees another's
  * cache or heap. Sections: open, latency, bulk, tiles, burst, eventloop,
  * search, memory. CGEODATA_BENCH_CACHE_BYTES sets the reader's cache
- * budget (`OpenOptions.cacheBytes`).
+ * budget (`OpenOptions.cacheBytes`); CGEODATA_BENCH_WASM=0 turns off
+ * the WebAssembly chunk decoder, to compare against the JavaScript one.
  */
 import { execFileSync } from "node:child_process";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { sampleTile } from "../../demo/src/tiles.ts";
+import { useWasmChunkDecoder } from "../src/chunkDecoder.ts";
 import type { CGeoDataReader } from "../src/index.ts";
 import { openFile } from "../src/node.ts";
 
@@ -31,6 +33,7 @@ const SECTIONS: Record<string, (file: string) => void | Promise<void>> = {
 };
 
 const CACHE_BYTES = process.env.CGEODATA_BENCH_CACHE_BYTES;
+if (process.env.CGEODATA_BENCH_WASM === "0") useWasmChunkDecoder(false);
 
 function openReader(file: string): Promise<CGeoDataReader> {
 	return CACHE_BYTES === undefined

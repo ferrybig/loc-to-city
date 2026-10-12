@@ -17,6 +17,7 @@ export {
 	CGeoDataError,
 	CGeoDataFormatError,
 	CGeoDataIndexMismatchError,
+	CGeoDataUnsupportedError,
 	CGeoDataVersionError,
 } from "./errors.ts";
 export type { CGeoDataHeader } from "./header.ts";

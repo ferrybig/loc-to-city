@@ -4,13 +4,14 @@ import {
 	cellBoundingBox,
 	chunkBoundingBox,
 } from "./cellBounds.ts";
-import { type ChunkRecords, parseChunk } from "./chunk.ts";
+import { type ChunkRecords, MAX_SUPPORTED_DEPTH, parseChunk } from "./chunk.ts";
 import { readHeaderAndDirectory } from "./container.ts";
 import type { CGeoDataDirectory } from "./directory.ts";
 import {
 	CGeoDataError,
 	CGeoDataFormatError,
 	CGeoDataIndexMismatchError,
+	CGeoDataUnsupportedError,
 } from "./errors.ts";
 import type { CGeoDataHeader } from "./header.ts";
 import { type Inflater, inflateBlock, streamInflater } from "./inflate.ts";
@@ -249,7 +250,7 @@ export interface OpenOptions {
 	/**
 	 * Memory budget, in bytes, for decoded chunks and name blocks; least
 	 * recently used ones are dropped past it. Default 64 MiB. A worldwide
-	 * file decodes to about 2 GB in all, its largest chunk to about 5 MB,
+	 * file decodes to about 1 GB in all, its largest chunk to about 3 MB,
 	 * so a budget much below that makes lookups scattered across the
 	 * world re-decode often. 0 disables caching, except for the one most
 	 * recently used chunk.
@@ -382,6 +383,11 @@ export class CGeoDataReader {
 		const source = toSource(input);
 		try {
 			const { header, directory } = await readHeaderAndDirectory(source);
+			if (header.maxDepth > MAX_SUPPORTED_DEPTH) {
+				throw new CGeoDataUnsupportedError(
+					`max_depth ${header.maxDepth} is past the ${MAX_SUPPORTED_DEPTH} this reader supports: rebuild the file with a bigger chunk grid instead`,
+				);
+			}
 			const placeTable = await parsePlaceTable(
 				source,
 				directory.placeTableStart,
