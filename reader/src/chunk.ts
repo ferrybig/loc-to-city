@@ -1,3 +1,4 @@
+import { decodeChunkCodes, WASM_MIN_RECORDS } from "./chunkDecoder.ts";
 import { CGeoDataFormatError } from "./errors.ts";
 import {
 	readDeltaVarintList,
@@ -44,6 +45,11 @@ function paletteIndexWidth(paletteCount: number): number {
 	return 4;
 }
 
+/** Whether typed arrays here are little-endian, as the file's integers
+ * are (true on every mainstream platform), so 2- and 4-byte palette
+ * indices can be copied in rather than assembled byte by byte. */
+const LITTLE_ENDIAN = new Uint8Array(Uint16Array.of(1).buffer)[0] === 1;
+
 /** `n` unsigned `width`-byte little-endian integers (Section 8.3's
  * palette indices) from `buf` at `offset`, in the narrowest typed array
  * that holds `width` bytes. Always a copy, so the inflated block can be
@@ -61,6 +67,10 @@ function readLittleEndian(
 			return new Uint8Array(buf.subarray(offset, offset + n));
 		case 2: {
 			const out = new Uint16Array(n);
+			if (LITTLE_ENDIAN) {
+				new Uint8Array(out.buffer).set(buf.subarray(offset, offset + 2 * n));
+				return out;
+			}
 			for (let i = 0, b = offset; i < n; i++, b += 2)
 				out[i] = buf[b]! | (buf[b + 1]! << 8);
 			return out;
@@ -74,6 +84,10 @@ function readLittleEndian(
 		}
 		default: {
 			const out = new Uint32Array(n);
+			if (LITTLE_ENDIAN) {
+				new Uint8Array(out.buffer).set(buf.subarray(offset, offset + 4 * n));
+				return out;
+			}
 			for (let i = 0, b = offset; i < n; i++, b += 4) {
 				out[i] =
 					buf[b]! |
@@ -124,6 +138,41 @@ export function parseChunk(buf: Uint8Array, maxDepth: number): ChunkRecords {
 		throw new CGeoDataFormatError("chunk codes run past end of block");
 	}
 	const codesStart = offset;
+	const indexWidth = paletteIndexWidth(paletteCount);
+	const depthsStart = codesStart + codesLength;
+	if (
+		recordCount >= WASM_MIN_RECORDS &&
+		paletteCount < 2 ** 32 &&
+		depthsStart + recordCount * (1 + indexWidth) === buf.length
+	) {
+		// The fast path (./chunkDecoder.ts) for a block whose size adds up;
+		// a declined block falls through to be parsed below.
+		const codes = decodeChunkCodes(
+			buf,
+			codesStart,
+			codesLength,
+			recordCount,
+			maxDepth,
+			paletteCount,
+			indexWidth,
+		);
+		if (codes) {
+			return {
+				palette,
+				codes,
+				depths: new Uint8Array(
+					buf.subarray(depthsStart, depthsStart + recordCount),
+				),
+				paletteIndices: readLittleEndian(
+					buf,
+					depthsStart + recordCount,
+					indexWidth,
+					recordCount,
+				),
+			};
+		}
+	}
+
 	const codes = new Uint32Array(recordCount);
 	const codesBytesRead =
 		readDeltaVarints32Into(buf, codesStart, codes) - codesStart;
@@ -142,7 +191,6 @@ export function parseChunk(buf: Uint8Array, maxDepth: number): ChunkRecords {
 	const depths = new Uint8Array(buf.subarray(offset, offset + recordCount));
 	offset += recordCount;
 
-	const indexWidth = paletteIndexWidth(paletteCount);
 	const indicesBytes = recordCount * indexWidth;
 	if (offset + indicesBytes > buf.length) {
 		throw new CGeoDataFormatError(

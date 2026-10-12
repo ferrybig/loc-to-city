@@ -59,6 +59,7 @@
 		"typecheck": "tsc -p tsconfig.test.json",
 		"bench": "node --expose-gc bench/bench.ts",
 		"docs": "typedoc",
+		"build:wasm": "node scripts/build-wasm.ts",
 		"prepack": "npm run build"
 	},
 	"devDependencies": {
@@ -66,6 +67,7 @@
 		"@playwright/test": "^1.48.0",
 		"@types/node": "^24.0.0",
 		"typedoc": "0.28.20",
-		"typescript": "^5.7.0"
+		"typescript": "^5.7.0",
+		"wabt": "1.0.36"
 	}
 }

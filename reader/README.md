@@ -8,6 +8,9 @@ in-process against a single CGEODATA file (a worldwide one is about
 needs.
 
 - No runtime dependencies. Works in Node.js (24 or newer) and in browsers.
+  Chunks decode with WebAssembly SIMD where the platform allows it, and
+  in plain JavaScript (about twice as slow) where it doesn't, such as a
+  page whose Content Security Policy lacks `'wasm-unsafe-eval'`.
 - Async throughout: reads never block, and the event loop is never held
   for more than one chunk's decode.
 - Includes place search (diacritic-insensitive, all alternative names)
@@ -197,7 +200,12 @@ it and can be built where it's used.
 - **Event loop**: every read is asynchronous, and decodes take turns, one
   per macrotask, even when many lookups run at once. The longest the
   reader holds the event loop is one chunk's decode: under 1 ms for most
-  chunks, about 25 ms for the largest chunk of a worldwide file.
+  chunks, about 6 ms for the largest chunk of a worldwide file (12 ms
+  without WebAssembly SIMD).
+- **Decoding**: the WebAssembly decoder keeps one block of memory, as
+  big as the largest chunk it has decoded (about 3 MB for a worldwide
+  file), while decodes follow each other, and frees it once none has run
+  for a second. An idle reader holds only its cache.
 - **Synchronous methods** answer from memory only: `lookupCached()`,
   `placeIds()`, `chunkIndexAt()`, `subtreeIdRanges()`, `placeCounts`,
   `header`.

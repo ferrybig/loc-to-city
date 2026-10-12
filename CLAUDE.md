@@ -156,6 +156,21 @@ one zlib block a lookup inflates whole, so deeper chunks only make
 lookups slower (finer cells should come from a bigger chunk grid), and
 32-bit codes depend on it.
 
+Chunks of 64+ records decode through a WebAssembly
+SIMD fast path (`reader/wasm/chunkDecoder.wat`, ~5x the JavaScript
+parser): `npm run build:wasm -w reader` compiles it into the committed
+`src/chunkDecoderWasm.ts` (wabt is a devDependency only), and
+`test/chunkDecoder.test.ts` fails when that file is stale. The `.wat`
+never reports an error: it accepts a block or declines it, and a
+declined one is parsed again by `parseChunk`'s JavaScript path, which
+stays the oracle (like the compressor's `--workers 0`) and the only
+source of errors. So the `.wat` must never accept a block JavaScript
+rejects; the test checks that against thousands of corrupted chunks,
+and every check in the `.wat` is one that test fails without (break
+it, rebuild, rerun to see). Its memory is reused while decodes follow
+each other and dropped after a second idle (`chunkDecoder.ts`), so an
+idle reader holds none. `CGEODATA_BENCH_WASM=0` benches without it.
+
 ```bash
 node reader/src/cli.ts help                              # or help <command>
 node reader/src/cli.ts info   data/03-final/world.bin             # header, counts, byte split, largest chunks
