@@ -1,0 +1,23 @@
+{
+	"name": "@loc-to-city/verify",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Spot-checks of the worldwide dataset against countries.md, and their JSON export for the demo",
+	"type": "module",
+	"bin": {
+		"cgeodata-verify": "./dist/export.js"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.json",
+		"test": "node --test test/*.test.ts",
+		"typecheck": "tsc -p tsconfig.test.json",
+		"export": "node src/export.ts"
+	},
+	"dependencies": {
+		"@ferrybig/cgeodata-reader": "*"
+	},
+	"devDependencies": {
+		"@types/node": "^24.0.0",
+		"typescript": "^5.7.0"
+	}
+}

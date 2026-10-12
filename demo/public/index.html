@@ -114,11 +114,17 @@
 			margin-top: 1px;
 		}
 
-		#layer-panel {
+		#right-panels {
 			position: absolute;
 			top: 12px;
 			right: 12px;
 			z-index: 1000;
+			display: flex;
+			flex-direction: column;
+			gap: 12px;
+		}
+		#layer-panel,
+		#checks-panel {
 			background: white;
 			padding: 10px 14px;
 			border-radius: 8px;
@@ -126,29 +132,79 @@
 			font-size: 12px;
 			width: 210px;
 		}
-		#layer-panel h2 {
+		#layer-panel h2,
+		#checks-panel h2 {
 			font-size: 13px;
 			margin: 0 0 8px;
 		}
-		#layer-panel label {
+		#layer-panel label,
+		#checks-panel label {
 			display: block;
 			margin-top: 8px;
 			color: #333;
+		}
+		#checks-panel [hidden] {
+			display: none;
 		}
 		#layer-panel input[type="range"] {
 			width: 100%;
 			margin-top: 2px;
 		}
-		#layer-panel .row-value {
+		#layer-panel .row-value,
+		#checks-panel .row-value {
 			float: right;
 			color: #666;
 			font-weight: normal;
 		}
 		#layer-panel .hint,
+		#checks-panel .hint,
 		#about-panel .hint {
 			color: #666;
 			margin-top: 8px;
 			line-height: 1.4;
+		}
+
+		/* Spot-check markers: a coloured disc with a glyph, so the outcome is
+		 * not told by colour alone. The colour is set inline from OUTCOMES. */
+		.check-key,
+		.check-pin {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			box-sizing: border-box;
+			width: 22px;
+			height: 22px;
+			border-radius: 50%;
+			border: 2px solid white;
+			box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+			color: white;
+			font: bold 13px / 1 sans-serif;
+		}
+		.check-key {
+			width: 18px;
+			height: 18px;
+			font-size: 11px;
+			margin-right: 6px;
+			vertical-align: middle;
+			box-shadow: none;
+		}
+		#check-legend {
+			margin: 8px 0 0;
+			padding: 0;
+			list-style: none;
+		}
+		#check-legend li {
+			margin-top: 4px;
+		}
+		.check-popup {
+			font-size: 13px;
+		}
+		.check-popup .check-badge {
+			margin: 4px 0;
+			font-weight: 600;
+		}
+		.check-popup button {
+			margin-top: 6px;
 		}
 
 		#about-panel {
@@ -221,35 +277,60 @@
 			></div>
 		</search>
 
-		<section id="layer-panel" aria-labelledby="layer-panel-heading">
-			<h2 id="layer-panel-heading">Grid overlay</h2>
+		<div id="right-panels">
+			<section id="layer-panel" aria-labelledby="layer-panel-heading">
+				<h2 id="layer-panel-heading">Grid overlay</h2>
 
-			<label>
-				<input type="checkbox" id="overlay-toggle" checked>
-				Show grid overlay
-			</label>
+				<label>
+					<input type="checkbox" id="overlay-toggle" checked>
+					Show grid overlay
+				</label>
 
-			<label
-				>Overlay opacity
-				<span class="row-value" id="opacity-value" aria-hidden="true">65%</span>
-				<input
-					type="range"
-					id="opacity-range"
-					min="10"
-					max="100"
-					step="5"
-					value="65"
-				>
-			</label>
+				<label
+					>Overlay opacity
+					<span class="row-value" id="opacity-value" aria-hidden="true"
+						>65%</span
+					>
+					<input
+						type="range"
+						id="opacity-range"
+						min="10"
+						max="100"
+						step="5"
+						value="65"
+					>
+				</label>
 
-			<div class="hint">
-				Each pixel is one query against the CGEODATA file, colored by a hash of
-				the resolved place. Zoomed out past level 7, one query covers a block of
-				pixels to keep tiles fast, so borders get blockier there. From level 8
-				in, lines mark where places meet: darker between regions, darkest
-				between countries.
-			</div>
-		</section>
+				<div class="hint">
+					Each pixel is one query against the CGEODATA file, colored by a hash
+					of the resolved place. Zoomed out past level 7, one query covers a
+					block of pixels to keep tiles fast, so borders get blockier there.
+					From level 8 in, lines mark where places meet: darker between regions,
+					darkest between countries.
+				</div>
+			</section>
+
+			<section id="checks-panel" aria-labelledby="checks-panel-heading" hidden>
+				<h2 id="checks-panel-heading">Spot checks</h2>
+
+				<label>
+					<input type="checkbox" id="checks-spot-toggle" checked>
+					Show checked places
+					<span class="row-value" id="checks-spot-count"></span>
+				</label>
+				<label>
+					<input type="checkbox" id="checks-capital-toggle">
+					Show capitals
+					<span class="row-value" id="checks-capital-count"></span>
+				</label>
+
+				<ul id="check-legend" aria-label="Marker legend"></ul>
+
+				<div class="hint" id="checks-hint">
+					Places from the country notes, looked up when this dataset was built.
+				</div>
+			</section>
+		</div>
 
 		<section id="about-panel" aria-labelledby="about-panel-heading" hidden>
 			<h2 id="about-panel-heading">Using the data:</h2>
@@ -394,6 +475,190 @@
 		});
 
 		rebuildTileLayer();
+
+		// ---- spot checks ----
+		// Places the country notes (countries.md) have an opinion about, looked
+		// up when the dataset was built: what each should resolve to, and
+		// whether it does. Only offered when the server has them for this
+		// dataset (/api/about says so).
+		const OUTCOMES = {
+			verified: {
+				glyph: "\u2713",
+				color: "#1a7f37",
+				label: "Verified correct",
+			},
+			regression: {
+				glyph: "!",
+				color: "#cf222e",
+				label: "Regression: should be right, is not",
+			},
+			open: {
+				glyph: "\u2717",
+				color: "#bc4c00",
+				label: "Known wrong, fixable",
+			},
+			"known-wrong": {
+				glyph: "\u2298",
+				color: "#57606a",
+				label: "Known wrong, not fixable",
+			},
+			"report-upstream": {
+				glyph: "\u2691",
+				color: "#8250df",
+				label: "Source data is wrong: report upstream",
+			},
+			"now-passing": {
+				glyph: "\u2605",
+				color: "#0969da",
+				label: "Now correct: close the note",
+			},
+		};
+		// Above the rest, the more there is to do about it.
+		const OUTCOME_RANK = [
+			"verified",
+			"known-wrong",
+			"now-passing",
+			"open",
+			"report-upstream",
+			"regression",
+		];
+
+		const checkToggles = {
+			spot: document.getElementById("checks-spot-toggle"),
+			capital: document.getElementById("checks-capital-toggle"),
+		};
+		const checkLayers = { spot: L.layerGroup(), capital: L.layerGroup() };
+		let checkEntries = null;
+		let checksLoading = null;
+
+		function outcomeOf(check) {
+			return OUTCOMES[check.outcome] ?? OUTCOMES.open;
+		}
+
+		function fmtActual(actual) {
+			return ["country", "region", "city"]
+				.map((tier) => actual[tier]?.[0] ?? "-")
+				.join(" / ");
+		}
+
+		function buildCheckPopup(check) {
+			const o = outcomeOf(check);
+			const el = document.createElement("div");
+			el.className = "check-popup";
+			el.innerHTML = `
+				<strong>${escapeHtml(check.name)}</strong>
+				<div class="check-badge" style="color:${o.color}">${o.glyph} ${escapeHtml(o.label)}</div>
+				<table class="result-table">
+					<tr><th scope="row">Expected</th><td>${escapeHtml(check.expected)}</td></tr>
+					<tr><th scope="row">Got</th><td>${escapeHtml(fmtActual(check.actual))}</td></tr>
+				</table>
+				<p>Country notes: ${escapeHtml(check.section)}</p>
+				<button type="button">Query this point</button>`;
+			el.querySelector("button").addEventListener("click", () => {
+				queryAndPopup(check.lat, check.lon);
+			});
+			return el;
+		}
+
+		function checkMarker(check, renderer) {
+			const o = outcomeOf(check);
+			const title = `${check.name}: ${o.label}`;
+			if (check.group === "capital") {
+				return L.circleMarker([check.lat, check.lon], {
+					renderer,
+					radius: 5,
+					weight: 1.5,
+					color: "#fff",
+					fillColor: o.color,
+					fillOpacity: 1,
+				}).bindTooltip(escapeHtml(title));
+			}
+			return L.marker([check.lat, check.lon], {
+				title,
+				zIndexOffset: OUTCOME_RANK.indexOf(check.outcome) * 100,
+				icon: L.divIcon({
+					className: "",
+					iconSize: [22, 22],
+					html: `<span class="check-pin" style="background:${o.color}" aria-hidden="true">${o.glyph}</span>`,
+				}),
+			});
+		}
+
+		function renderLegend() {
+			const counts = {};
+			for (const check of checkEntries ?? []) {
+				if (checkToggles[check.group].checked) {
+					counts[check.outcome] = (counts[check.outcome] ?? 0) + 1;
+				}
+			}
+			document.getElementById("check-legend").innerHTML =
+				OUTCOME_RANK.toReversed()
+					.filter((key) => counts[key])
+					.map((key) => {
+						const o = OUTCOMES[key];
+						return `<li><span class="check-key" style="background:${o.color}" aria-hidden="true">${o.glyph}</span>${escapeHtml(o.label)}<span class="row-value">${counts[key]}</span></li>`;
+					})
+					.join("");
+		}
+
+		function syncCheckLayers() {
+			for (const group of Object.keys(checkLayers)) {
+				const on = checkToggles[group].checked;
+				if (on && !map.hasLayer(checkLayers[group]))
+					checkLayers[group].addTo(map);
+				if (!on) map.removeLayer(checkLayers[group]);
+			}
+			renderLegend();
+		}
+
+		async function loadChecks() {
+			checksLoading ??= (async () => {
+				const resp = await fetch("/api/checks");
+				if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+				const data = await resp.json();
+				checkEntries = data.checks;
+				const renderer = L.canvas({ padding: 0.5 });
+				for (const check of checkEntries) {
+					checkMarker(check, renderer)
+						.bindPopup(() => buildCheckPopup(check))
+						.addTo(checkLayers[check.group]);
+				}
+			})();
+			return checksLoading;
+		}
+
+		async function onCheckToggle() {
+			try {
+				await loadChecks();
+			} catch (_) {
+				checksLoading = null;
+				for (const toggle of Object.values(checkToggles))
+					toggle.checked = false;
+			}
+			syncCheckLayers();
+		}
+
+		function setupChecks(about) {
+			document.getElementById("checks-spot-count").textContent = about.spot;
+			document.getElementById("checks-capital-count").textContent =
+				about.capital;
+			document.getElementById("checks-hint").textContent +=
+				` Checked ${about.generatedAt.slice(0, 10)}.`;
+			if (about.olderThanResolvedInput) {
+				document.getElementById("checks-hint").textContent +=
+					" The dataset is older than its input, so failures may already be fixed in a newer build.";
+			}
+			for (const [group, toggle] of Object.entries(checkToggles)) {
+				toggle.addEventListener("change", onCheckToggle);
+				// A dataset that covers part of the world may have none of a group.
+				if (about[group] === 0) {
+					toggle.checked = false;
+					toggle.closest("label").hidden = true;
+				}
+			}
+			document.getElementById("checks-panel").hidden = false;
+			onCheckToggle();
+		}
 
 		// ---- place search ----
 		// An ARIA combobox (https://www.w3.org/WAI/ARIA/apg/patterns/combobox/):
@@ -594,6 +859,7 @@
 			document.getElementById("data-attribution").innerHTML =
 				`Data: ${fmtAttribution(about.attribution)}`;
 			document.getElementById("about-panel").hidden = false;
+			if (about.checks) setupChecks(about.checks);
 		}
 		loadAbout().catch(() => {});
 

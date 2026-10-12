@@ -25,13 +25,20 @@ country's section there** (including attempts that were reverted). Open
 problems end their title with `*(open)*` (also `*(unsolvable)*`,
 `*(human error)*`, `*(false positive)*`), so
 `grep -n '\*(open)\*' countries.md` lists the work. Spot-check coordinates
-in it are mirrored in `compressor/test/world-queries.test.ts`: fixed places
-are plain tests, *(open)* ones are `todo` tests; move a case from `todo` to
-plain when you fix it.
+in it are mirrored in `verify/src/cases.ts` (run by
+`verify/test/world-queries.test.ts`): each case carries the ledger `status`
+(`fixed`, `false-positive`, `open`, `unsolvable`, `human-error`) and the
+`section`/`entry` it belongs to. Fixed and false-positive places are plain
+tests, the others are `todo` tests; when you fix one, change its `status`
+(a `todo` that starts passing prints `NOW PASSING`).
+`verify/test/ledger.test.ts` fails when a case's section or entry is not in
+this file, or its status disagrees with the entry's marker. The same
+results are exported as JSON and drawn as markers on the demo's map (see
+`verify/` below).
 
 ## Workspaces
 
-Four npm workspaces (Node >=26, see `.nvmrc`), all TypeScript, ESM
+Five npm workspaces (Node >=26, see `.nvmrc`), all TypeScript, ESM
 (`NodeNext`), `strict` + `noUncheckedIndexedAccess` +
 `exactOptionalPropertyTypes` in `tsconfig.base.json`:
 
@@ -52,6 +59,15 @@ Four npm workspaces (Node >=26, see `.nvmrc`), all TypeScript, ESM
   (`00-raw` → `01-extracted` → `02-resolved` → `03-final`) and file
   dependency graph. Outputs land in `data/02-resolved/`, which is what you
   point the compressor at.
+- **`verify/`** — the spot-checks of the worldwide build: `src/cases.ts`
+  is the data (every place `countries.md` documents, plus every country's
+  capital), `src/evaluate.ts` runs a case against a reader and says how it
+  turned out (`verified`, `regression`, `open`, `known-wrong`,
+  `report-upstream`, `now-passing`), `test/` asserts them and checks them
+  against `countries.md`, and `src/export.ts` writes the results as
+  `<name>.checks.json`, which the demo picks up next to the `.bin` it serves
+  and draws as markers. It reads a finished `.bin`, so it sits after
+  `data/03-final/` in the pipeline, and depends on the reader only.
 - **`demo/`** — an Express server: a click-to-query Leaflet page plus a
   grid tile overlay, the reader's TypeDoc output under `/docs/` (when
   built), and the dataset plus the sidecar indexes in use under
@@ -80,7 +96,7 @@ two-tab method body looks like the separator plus one. When copying a line into 
 ## Commands
 
 ```bash
-npm install                                # installs all four workspaces
+npm install                                # installs all five workspaces
 npm run build --workspaces                 # tsc for each package
 npm run typecheck                          # tsc over src/ + test/ for each package (needs a build first)
 npm test -w reader                         # Appendix A conformance, unit tests, and the main entry in headless Chromium
@@ -88,6 +104,9 @@ npm run docs -w reader                     # TypeDoc API reference -> reader/doc
 npm run bench -w reader -- <file.bin>      # performance baseline; compare before/after reader I/O or API changes
 npm test -w compressor                     # synthetic-dataset unit tests + real-data tests
 npm test -w demo                           # unit tests (not e2e)
+npm test -w verify                         # world spot-checks against the newest worldwide .bin (skipped without one) + ledger consistency
+node verify/src/export.ts data/03-final/world-high-res.bin --out data/03-final/world-high-res.checks.json
+                                           # the same checks as JSON; the demo draws them as markers
 ```
 
 Each workspace's test script is `node --test test/*.test.ts` (Node's built-in

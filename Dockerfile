@@ -7,6 +7,7 @@ COPY package.json package-lock.json ./
 COPY reader/package.json reader/
 COPY compressor/package.json compressor/
 COPY data-ingest/package.json data-ingest/
+COPY verify/package.json verify/
 COPY demo/package.json demo/
 
 RUN npm ci
@@ -14,12 +15,14 @@ RUN npm ci
 COPY tsconfig.base.json ./
 COPY reader/src reader/src
 COPY reader/tsconfig.json reader/typedoc.json reader/README.md reader/binary-format.md reader/
+COPY verify/src verify/src
+COPY verify/tsconfig.json verify/
 COPY demo/src demo/src
 COPY demo/tsconfig.json demo/
 COPY demo/public demo/public
 
 # reader/docs: the API reference the demo serves under /docs/.
-RUN npm run build -w reader && npm run build -w demo && npm run docs -w reader
+RUN npm run build -w reader && npm run build -w demo && npm run build -w verify && npm run docs -w reader
 
 # Which data/03-final/<DATASET>.bin to serve, copied in as world.bin:
 #   docker build --build-arg DATASET=world .
@@ -32,6 +35,11 @@ ARG DATASET=world-high-res
 COPY data/03-final/${DATASET}.bin data/world.bin
 RUN node reader/dist/cli.js build-search-index data/world.bin --output data/world.search-index.bin \
  && node reader/dist/cli.js build-locate-index data/world.bin --output data/world.locate-index.bin
+
+# The spot-checks from countries.md, run against this very dataset, which the
+# page draws as map markers (the demo picks the file up next to world.bin, and
+# ignores one made for a dataset of another size).
+RUN node verify/dist/export.js data/world.bin --out data/world.checks.json
 
 # Brotli-compress the page, Leaflet and the docs once, here, rather than per
 # request, and hash everything served (those and data/) for content ETags:
@@ -53,7 +61,7 @@ COPY --from=builder /app/reader/docs reader/docs
 COPY --from=builder /app/demo/package.json demo/
 COPY --from=builder /app/demo/dist demo/dist
 COPY --from=builder /app/demo/public demo/public
-COPY --from=builder /app/data/world.bin /app/data/world.search-index.bin /app/data/world.locate-index.bin /app/data/.etags.json data/
+COPY --from=builder /app/data/world.bin /app/data/world.search-index.bin /app/data/world.locate-index.bin /app/data/world.checks.json /app/data/.etags.json data/
 
 EXPOSE 8766
 ENV HOST=::

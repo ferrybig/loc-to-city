@@ -37,11 +37,19 @@ them, because the same mistake gets proposed again.
 
 Spot-check coordinates are `lat, lon` and were looked up on
 `data/03-final/world-high-res.bin` (built 2026-10-10) unless stated
-otherwise. `compressor/test/world-queries.test.ts` turns the coordinates in
+otherwise. `verify/test/world-queries.test.ts` turns the coordinates in
 this file into a test against whichever worldwide `.bin` exists: places that
-resolve correctly are plain tests, *(open)* places with a known expected
+resolve correctly (including *(false positive)* ones) are plain tests,
+*(open)*, *(unsolvable)* and *(human error)* places with a known expected
 answer are `todo` tests (they run, a failure is reported as todo, and one
-that starts passing is the signal to close the entry). Keep the two in step.
+that starts passing prints `NOW PASSING`: close the entry). Keep the two in
+step: the cases are in `verify/src/cases.ts`, each with the entry's marker as
+its `status` and the entry's title as its `entry`, and
+`verify/test/ledger.test.ts` fails when they disagree with this file, so
+**do not rename an entry's title or change its marker without updating the
+case.** The same results, as `<name>.checks.json`, are drawn as markers on the
+demo's map (green check: verified; orange: open; purple: report upstream), so
+people can see which places are covered and which artifacts need reporting.
 
 Section order is alphabetical by English country name, with the ISO code
 and the current config in the first line of each. Coverage percentages come
@@ -78,7 +86,7 @@ only works if the place is listed where a person looks for it. So:
 When deciding whether a lookup "resolves correctly", or whether a new
 `COUNTRY_ADMIN_LEVELS` choice is an improvement, apply this and not "the
 name looks plausible". The capitals benchmark in
-`compressor/test/world-queries.test.ts` is this rule applied to every
+`verify/test/world-queries.test.ts` is this rule applied to every
 country (see "Capitals" under Cross-cutting patterns).
 
 ## How a place gets its country, region and city
@@ -264,9 +272,9 @@ below).
   Egypt, Chad, Eritrea and Libya were handled with the Voronoi fallback;
   none of the others have been examined for whether OSM has a better level
   or whether the fallback is the right tool. *(open)*
-- **Capitals.** *(open)* `compressor/test/world-queries.test.ts` looks up
+- **Capitals.** *(open)* `verify/test/world-queries.test.ts` looks up
   the capital of every country and dependency GeoNames lists one for
-  (232; its `CAPITALS` and `OPEN_CAPITALS` tables carry the
+  (232; `verify/src/cases.ts`'s `CAPITALS` and `OPEN_CAPITALS` tables carry the
   coordinates and the exact rule) and measured 75 resolving and 157
   not, on `world-high-res.bin` (built 2026-10-10). A capital resolves when
   the country is right and the **city** tier is named for the capital. The
@@ -356,7 +364,7 @@ below).
     (U.S. Virgin Is.); Abu Dhabi (United Arab Emirates); London (United
     Kingdom); Tashkent (Uzbekistan); Caracas (Venezuela); Hanoi (Vietnam);
     Sanaa (Yemen)
-  - Work it from the test: `node --test compressor/test/world-queries.test.ts`
+  - Work it from the test: `node --test verify/test/world-queries.test.ts`
     lists every miss with what it answered. When a country's config is
     fixed, move its row from `OPEN_CAPITALS` to `CAPITALS` and edit the lists
     here. The rule is deliberately strict and is not to be relaxed to make
@@ -578,7 +586,9 @@ tessellates its country, so the bug was always grain, not coverage.
 - **21.869146, 33.739014 resolves to no country.** *(false positive)* That
   is Bir Tawil, the disputed strip that neither Egypt nor Sudan claims
   (its coordinates are 21°52′N 33°44′E). "No country" is correct. Natural
-  Earth leaves it unassigned and so do we.
+  Earth leaves it unassigned and so do we. The case in `verify/src/cases.ts`
+  expects no country (`NONE`); it used to expect Egypt or Sudan as an open
+  `todo`, which contradicted this entry.
 
 ## El Salvador (SV)
 

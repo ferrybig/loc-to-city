@@ -2,7 +2,8 @@
 world: data/03-final/world.bin
 world-high-res: data/03-final/world-high-res.bin \
 	data/03-final/world-high-res.locate-index.bin \
-	data/03-final/world-high-res.search-index.bin
+	data/03-final/world-high-res.search-index.bin \
+	data/03-final/world-high-res.checks.json
 europe: data/03-final/europe.bin
 netherlands: data/03-final/zuid-holland.bin
 
@@ -67,7 +68,7 @@ $(FINAL_BINS): %: %.args node_modules data/02-resolved/$$(SOURCE)/cities-filtere
 	$(COMPRESS_ENV) node compressor/src/cli.ts $(COMPRESS_INPUTS) $@ $(COMPRESS_OPTIONS)
 	@# A sidecar index from the previous build no longer matches, and the
 	@# reader refuses to search with a stale one.
-	rm -f $(@:.bin=.search-index.bin) $(@:.bin=.locate-index.bin)
+	rm -f $(@:.bin=.search-index.bin) $(@:.bin=.locate-index.bin) $(@:.bin=.checks.json)
 
 # <name>.bin.args records the settings <name>.bin was built with, rewritten
 # only when they change. Make compares timestamps, not recipes, so without
@@ -90,6 +91,13 @@ FORCE:
 
 %.locate-index.bin: %.bin node_modules
 	node reader/src/cli.ts build-locate-index $< --output $@
+
+# The spot-checks of verify/ run against a .bin, written for the demo's map
+# markers (it picks the file up next to the .bin it serves). A failing check
+# is a result, not an error: the export still succeeds (`npm test -w verify`
+# is the gate).
+%.checks.json: %.bin $(wildcard verify/src/*.ts) node_modules
+	node verify/src/export.ts $< --out $@
 
 data/02-resolved/eu/cities-filtered.geojsonseq: node_modules data/02-resolved/world/cities-filtered.geojsonseq
 	node data-ingest/src/filter-by-scope.ts --only-continent Europe --out-dir data/02-resolved/eu

@@ -28,7 +28,7 @@
 	},
 	"overrides": [
 		{
-			"includes": ["reader/**", "demo/**"],
+			"includes": ["reader/**", "demo/**", "verify/**"],
 			"formatter": { "enabled": true }
 		}
 	],
