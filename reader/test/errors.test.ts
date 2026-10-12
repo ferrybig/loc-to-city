@@ -8,6 +8,7 @@ import {
 	CGeoDataFormatError,
 	CGeoDataIndexMismatchError,
 	CGeoDataReader,
+	CGeoDataUnsupportedError,
 	CGeoDataVersionError,
 } from "../src/index.ts";
 import { buildLocateIndex, buildSearchIndex } from "../src/indexes.ts";
@@ -58,6 +59,19 @@ test("an unknown version is a version error carrying the version", async () => {
 			error instanceof CGeoDataFormatError &&
 			(error as CGeoDataVersionError).version === 3,
 	);
+});
+
+test("a max_depth past 16 is unsupported, though valid", async () => {
+	// Appendix A.1: signature, version, attribution "OSM", width_exp,
+	// height_exp, then max_depth at byte 15.
+	assert.equal(APPENDIX_A_BYTES[15], 2);
+	await rejectsExactly(
+		() => CGeoDataReader.open(tampered((b) => (b[15] = 17))),
+		CGeoDataUnsupportedError,
+	);
+	const deepest = await CGeoDataReader.open(tampered((b) => (b[15] = 16)));
+	assert.equal(deepest.header.maxDepth, 16);
+	await deepest.close();
 });
 
 test("a truncated file is a format error, wherever it's cut", async () => {

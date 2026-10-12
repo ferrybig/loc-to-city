@@ -35,7 +35,7 @@ function chunkBlock(
 	]);
 }
 
-test("parseChunk keeps codes in a Uint32Array up to max_depth 16", () => {
+test("parseChunk keeps codes in a Uint32Array, up to max_depth 16", () => {
 	const chunk = parseChunk(chunkBlock(1, [0, 4, 8, 12], [1, 1, 1, 1]), 2);
 	assert.ok(chunk.codes instanceof Uint32Array);
 	assert.deepEqual(Array.from(chunk.codes), [0, 4, 8, 12]);
@@ -47,11 +47,13 @@ test("parseChunk keeps codes in a Uint32Array up to max_depth 16", () => {
 	assert.deepEqual(Array.from(deep.codes), [0, last]);
 });
 
-test("parseChunk falls back to a Float64Array past max_depth 16", () => {
-	const last = 4 ** 17 - 1;
-	const chunk = parseChunk(chunkBlock(1, [0, last], [16, 17]), 17);
-	assert.ok(chunk.codes instanceof Float64Array);
-	assert.deepEqual(Array.from(chunk.codes), [0, last]);
+test("parseChunk refuses a max_depth past 16", () => {
+	// A caller's argument, so a RangeError (the reader itself refuses such
+	// a file when it opens it).
+	assert.throws(
+		() => parseChunk(chunkBlock(1, [0, 4 ** 16], [16, 17]), 17),
+		RangeError,
+	);
 });
 
 test("parseChunk rejects a code past 32 bits at max_depth 16", () => {

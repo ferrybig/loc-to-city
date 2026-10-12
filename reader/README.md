@@ -214,6 +214,7 @@ package root:
 |---|---|
 | `CGeoDataFormatError` | the `.bin` or an index file is malformed or truncated. Download it again. |
 | `CGeoDataVersionError` | (a `CGeoDataFormatError`) the file uses a format version this reader doesn't know (`error.version`). Upgrade the reader. |
+| `CGeoDataUnsupportedError` | (a `CGeoDataFormatError`) a valid file this reader won't read: `max_depth` past 16. Rebuild it with a bigger chunk grid. |
 | `CGeoDataIndexMismatchError` | a valid index, but built from a different `.bin`. Rebuild or delete it. |
 | `CGeoDataError` | base class of all of the above; also a read that returned fewer bytes than the file's size promised. |
 

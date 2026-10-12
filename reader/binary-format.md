@@ -667,14 +667,15 @@ records than the size budget allowed, while stopping at roughly 300 m
 and attributing the remaining ambiguous cells to the candidate with the
 largest share of the cell's area gave good results for geotagging.
 
-Up to `D = 16` every Morton code fits in an unsigned 32-bit integer
-(`4^16 = 2^32`), so a reader can hold a decoded chunk's codes in 32 bits
-each; from `D = 17` it needs 64. The reference reader holds them in a
-`Uint32Array` up to `16` and a `Float64Array` above it, which doubles
-what the codes of every decoded chunk cost in memory and fits fewer
-chunks in its cache. A writer SHOULD keep `D` at `16` or below unless it
-needs the precision: with a `128 × 128` chunk grid, `D = 16` is already
-a cell about 5 m wide at the equator.
+A deep `D` makes lookups slower, not just files smaller: a chunk is one
+zlib block, which a lookup inflates whole, and it spans up to `4^D`
+cells -- already over four billion at `D = 16`. Finer cells should come
+from a bigger chunk grid instead. The reference reader therefore
+rejects files with `D` above `16`, where every Morton code still fits in
+an unsigned 32-bit integer (`4^16 = 2^32`); a writer SHOULD stay at or
+below it. With a `128 × 128` chunk grid, `D = 16` is a cell about 5 m
+wide at the equator. Deeper files are valid, but only suit transfer or
+archiving, where a decoder can stream through each chunk.
 
 **Building records.** The intended construction is recursive: starting
 from the chunk as a depth-`0` cell, stop and emit a record when no place

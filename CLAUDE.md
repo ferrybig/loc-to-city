@@ -144,13 +144,17 @@ to undo by accident: file reads are async but Node's inflate is sync
 dominates); decodes take turns one macrotask each (`turns.ts`), or
 concurrent lookups block the event loop for the whole batch; hot loops
 use `lookupCached() ?? await lookup()` so a cache hit never awaits;
-decoded chunks hold codes in a `Uint32Array` up to `max_depth` 16 (a
-`Float64Array` above, `binary-format.md` Section 10) and palette indices
-only as wide as the file stores them, since decoded chunks are what
-fills the cache; and those codes decode through their own
+decoded chunks hold codes in a `Uint32Array` and palette indices only
+as wide as the file stores them, since decoded chunks are what fills
+the cache; and those codes decode through their own
 `readDeltaVarints32Into`, not a `readDeltaVarintsInto` taking either
 array (one function seeing both parsed ~8% slower than with
-`Float64Array` alone, two parse ~20% faster).
+`Float64Array` alone, two parse ~20% faster). The reader rejects files
+deeper than `max_depth` 16 (`MAX_SUPPORTED_DEPTH`, a
+`CGeoDataUnsupportedError`), though the format allows 26: a chunk is
+one zlib block a lookup inflates whole, so deeper chunks only make
+lookups slower (finer cells should come from a bigger chunk grid), and
+32-bit codes depend on it.
 
 ```bash
 node reader/src/cli.ts help                              # or help <command>

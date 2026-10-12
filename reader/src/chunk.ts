@@ -2,7 +2,6 @@ import { CGeoDataFormatError } from "./errors.ts";
 import {
 	readDeltaVarintList,
 	readDeltaVarints32Into,
-	readDeltaVarintsInto,
 	readVarint,
 } from "./varint.ts";
 
@@ -15,11 +14,9 @@ export interface ChunkRecords {
 	/** Stored Morton codes, chunk-local, strictly increasing. Typed arrays
 	 * rather than plain ones for this and the other per-record fields: a
 	 * big chunk holds over a million records, and parsing and holding them
-	 * as boxed JS arrays costs several times as much. A `Uint32Array` when
-	 * every code fits in one (`max_depth` 16 and under), else a
-	 * `Float64Array`: decoded chunks are what fills the reader's cache, so
-	 * the narrower array keeps more of them in it. */
-	codes: Float64Array | Uint32Array;
+	 * as boxed JS arrays costs several times as much. 32 bits, as every
+	 * code is below 4^`MAX_SUPPORTED_DEPTH`. */
+	codes: Uint32Array;
 	/** Each record's depth in the chunk's quadtree, 0 to `max_depth`. */
 	depths: Uint8Array;
 	/** Local palette index per record: 0 = "no place", k = palette[k-1].
@@ -27,6 +24,17 @@ export interface ChunkRecords {
 	 * up to a `Uint32Array`. */
 	paletteIndices: Uint8Array | Uint16Array | Uint32Array;
 }
+
+/**
+ * The deepest `max_depth` this reader supports, though the format allows
+ * up to 26: every code is then below 4^16 = 2^32, so a decoded chunk
+ * holds its codes in 32 bits. Deeper files aren't worth reading in
+ * place: one chunk is one zlib block that a lookup inflates whole, and
+ * at depth 16 a chunk already spans up to 4^16 cells, so a lookup could
+ * inflate gigabytes. Finer cells should come from a bigger chunk grid
+ * (`width_exp`, `height_exp`) instead (binary-format.md Section 10).
+ */
+export const MAX_SUPPORTED_DEPTH = 16;
 
 /** The index width S from Section 8.3's table. */
 function paletteIndexWidth(paletteCount: number): number {
@@ -90,6 +98,11 @@ function isMultipleOf(value: number, span: number): boolean {
  * context (place ids are validated by the caller, which has the place
  * table). */
 export function parseChunk(buf: Uint8Array, maxDepth: number): ChunkRecords {
+	if (maxDepth > MAX_SUPPORTED_DEPTH) {
+		throw new RangeError(
+			`max_depth ${maxDepth} is past the ${MAX_SUPPORTED_DEPTH} this reader supports`,
+		);
+	}
 	let offset = 0;
 	const { value: paletteCount, bytesRead: b1 } = readVarint(buf, offset);
 	offset += b1;
@@ -111,17 +124,9 @@ export function parseChunk(buf: Uint8Array, maxDepth: number): ChunkRecords {
 		throw new CGeoDataFormatError("chunk codes run past end of block");
 	}
 	const codesStart = offset;
-	// Codes are below 4^max_depth, which fits 32 bits up to max_depth 16.
-	let codes: Uint32Array | Float64Array;
-	let codesEnd: number;
-	if (maxDepth <= 16) {
-		codes = new Uint32Array(recordCount);
-		codesEnd = readDeltaVarints32Into(buf, codesStart, codes);
-	} else {
-		codes = new Float64Array(recordCount);
-		codesEnd = readDeltaVarintsInto(buf, codesStart, codes);
-	}
-	const codesBytesRead = codesEnd - codesStart;
+	const codes = new Uint32Array(recordCount);
+	const codesBytesRead =
+		readDeltaVarints32Into(buf, codesStart, codes) - codesStart;
 	if (codesBytesRead !== codesLength) {
 		throw new CGeoDataFormatError(
 			`chunk codes_length mismatch: header says ${codesLength}, decoding consumed ${codesBytesRead}`,
