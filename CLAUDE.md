@@ -25,13 +25,20 @@ country's section there** (including attempts that were reverted). Open
 problems end their title with `*(open)*` (also `*(unsolvable)*`,
 `*(human error)*`, `*(false positive)*`), so
 `grep -n '\*(open)\*' countries.md` lists the work. Spot-check coordinates
-in it are mirrored in `compressor/test/world-queries.test.ts`: fixed places
-are plain tests, *(open)* ones are `todo` tests; move a case from `todo` to
-plain when you fix it.
+in it are mirrored in `verify/src/cases.ts` (run by
+`verify/test/world-queries.test.ts`): each case carries the ledger `status`
+(`fixed`, `false-positive`, `open`, `unsolvable`, `human-error`) and the
+`section`/`entry` it belongs to. Fixed and false-positive places are plain
+tests, the others are `todo` tests; when you fix one, change its `status`
+(a `todo` that starts passing prints `NOW PASSING`).
+`verify/test/ledger.test.ts` fails when a case's section or entry is not in
+this file, or its status disagrees with the entry's marker. The same
+results are exported as JSON and drawn as markers on the demo's map (see
+`verify/` below).
 
 ## Workspaces
 
-Four npm workspaces (Node >=26, see `.nvmrc`), all TypeScript, ESM
+Five npm workspaces (Node >=26, see `.nvmrc`), all TypeScript, ESM
 (`NodeNext`), `strict` + `noUncheckedIndexedAccess` +
 `exactOptionalPropertyTypes` in `tsconfig.base.json`:
 
@@ -52,6 +59,15 @@ Four npm workspaces (Node >=26, see `.nvmrc`), all TypeScript, ESM
   (`00-raw` → `01-extracted` → `02-resolved` → `03-final`) and file
   dependency graph. Outputs land in `data/02-resolved/`, which is what you
   point the compressor at.
+- **`verify/`** — the spot-checks of the worldwide build: `src/cases.ts`
+  is the data (every place `countries.md` documents, plus every country's
+  capital), `src/evaluate.ts` runs a case against a reader and says how it
+  turned out (`verified`, `regression`, `open`, `known-wrong`,
+  `report-upstream`, `now-passing`), `test/` asserts them and checks them
+  against `countries.md`, and `src/export.ts` writes the results as
+  `<name>.checks.json`, which the demo picks up next to the `.bin` it serves
+  and draws as markers. It reads a finished `.bin`, so it sits after
+  `data/03-final/` in the pipeline, and depends on the reader only.
 - **`demo/`** — an Express server: a click-to-query Leaflet page plus a
   grid tile overlay, the reader's TypeDoc output under `/docs/` (when
   built), and the dataset plus the sidecar indexes in use under
@@ -80,7 +96,7 @@ two-tab method body looks like the separator plus one. When copying a line into 
 ## Commands
 
 ```bash
-npm install                                # installs all four workspaces
+npm install                                # installs all five workspaces
 npm run build --workspaces                 # tsc for each package
 npm run typecheck                          # tsc over src/ + test/ for each package (needs a build first)
 npm test -w reader                         # Appendix A conformance, unit tests, and the main entry in headless Chromium
@@ -88,6 +104,9 @@ npm run docs -w reader                     # TypeDoc API reference -> reader/doc
 npm run bench -w reader -- <file.bin>      # performance baseline; compare before/after reader I/O or API changes
 npm test -w compressor                     # synthetic-dataset unit tests + real-data tests
 npm test -w demo                           # unit tests (not e2e)
+npm test -w verify                         # world spot-checks against world-high-res.bin, else world.bin; CGEODATA_WORLD_BIN overrides (skipped without one) + ledger consistency
+node verify/src/export.ts data/03-final/world-high-res.bin --out data/03-final/world-high-res.checks.json
+                                           # the same checks as JSON; the demo draws them as markers
 ```
 
 Each workspace's test script is `node --test test/*.test.ts` (Node's built-in
@@ -171,6 +190,17 @@ it, rebuild, rerun to see). Its memory is reused while decodes follow
 each other and dropped after a second idle (`chunkDecoder.ts`), so an
 idle reader holds none. `CGEODATA_BENCH_WASM=0` benches without it.
 
+How much slowdown a reader change may cost: a change that buys something
+(a non-blocking event loop, browser support, bounded memory) may cost
+~10-15%; "everything 2x as slow" is not acceptable. A cold single lookup up
+to ~50 ms is fine now that it is awaited instead of blocking. **The demo's
+tile burst is the metric that matters most** (see the comment above the
+worker pool in `demo/src/server.ts`): run `npm run bench -w reader --
+<file.bin>` (burst section first) before and after, put the numbers in the
+commit message, and if a change costs more than ~15% on bursts, find a
+cheaper variant or ask before keeping it. Async zlib (+15-40%) was dropped
+on this rule, async file reads (+~10%) kept.
+
 ```bash
 node reader/src/cli.ts help                              # or help <command>
 node reader/src/cli.ts info   data/03-final/world.bin             # header, counts, byte split, largest chunks
@@ -247,10 +277,11 @@ per-axis median of the cells of the place *and everything under it*
 (a country's regions and cities count), moved to the nearest cell inside
 that area if the median falls outside it -- so `query()` at the point
 always resolves to the place or a descendant. Computing it decodes every
-chunk (~1.6s on `data/03-final/world.bin`); a locate index (Appendix C,
+chunk (one place: ~0.5s on `data/03-final/world.bin`, ~3.5s on
+`world-high-res.bin`); a locate index (Appendix C,
 `build-locate-index <file.bin> --output data/<name>.locate-index.bin`,
-~11s, one fixed-width entry per place id plus one area byte each, Section
-C.3's `1 + floor(4 log2 cells)` of the subtree, which `locate()` returns as
+~7s for `world.bin`, ~90-100s for `world-high-res.bin`, one fixed-width
+entry per place id plus one area byte each, Section C.3's `1 + floor(4 log2 cells)` of the subtree, which `locate()` returns as
 `area` in square degrees) makes it one small read, and
 is picked up next to the `.bin` and overridden (`useLocateIndex()`,
 `--index`/`--no-index`) exactly like the search index. Index and scan
@@ -357,6 +388,21 @@ for staged verification, run `data-ingest/scripts/extract-boundaries.sh
 <basename>...` directly, which still scopes extraction to a subset of
 `.osm.pbf` basenames.
 
+**What the Makefile treats as out of date.** `node_modules` is an
+order-only prerequisite (`| node_modules`): make still runs `npm install`
+when `package.json` or the lockfile changed, but a newer `node_modules` never
+rebuilds anything, so an `npm install` does not restart the worldwide
+resolve. Only the cheap sidecars (the two indexes, `.checks.json`) list
+source files (`reader/src`, `verify/src`) as prerequisites. The resolve and
+the `.bin` do not depend on `data-ingest/` or `compressor/` sources, so
+after changing those, delete the output you want rebuilt. `make -n` always
+shows the `.bin` rebuilding (its `.args` file is a `FORCE` target); add
+`-o data/03-final/<name>.bin.args` to see what would really run. The
+Dockerfile's `sidecars` stage builds the indexes from `reader/src` and the
+`.bin` alone (no `npm ci`), so a lockfile change from another workspace
+does not rebuild them; keep it free of anything that changes with the
+lockfile.
+
 ## Architecture notes that span multiple files
 
 **Format is meta-chunked.** The world is sharded into a `width_exp` ×
@@ -459,7 +505,25 @@ contain the point while another country's does. That fixes enclaves
 Natural Earth's 10m outlines don't have (Baarle-Hertog's Belgian enclaves
 inside NL resolved to NL and were dropped) without letting OSM's
 territorial waters or its folding of dependencies into a parent country
-change anything else.
+change anything else. That is which country a *city or region* belongs
+to. The country *outlines* the compressor draws are OSM's own
+(`loadOsmCountryRelations`): the `admin_level=2` relation, or a
+dependency's own ISO-tagged relation (Hong Kong, Puerto Rico), territorial
+waters included. Where two outlines overlap (a dependency inside its
+parent's, Crimea, Western Sahara), `countryOutlines.ts` cuts the overlap
+out of one of them, the owner being whichever the city/region lookup above
+names there -- the compressor has no rule that makes an unrelated nested
+country win a cell, so an overlap left in place loses the smaller one's
+cities. Natural Earth is the outline only for codes OSM has no relation
+for (Palestine, Antarctica, U.S. Minor Outlying Islands). The same rule
+cuts a country out of a *foreign region* that covers land the lookup gives
+to the country (`cutCountriesOutOfForeignRegions`): simplified regions lose
+small holes, so Lazio covered the Vatican and Provence-Alpes-Côte d'Azur
+Monaco. City-states (`CITY_STATES`) get a region (and if OSM has none, a
+city) covering the whole country; their cities get that region by country
+code, not through `assignCityRegion`, whose answer for a point inside two
+overlapping regions is the first in R-tree order -- adding regions to that
+tree moves cities elsewhere.
 
 **Multi-file country handling.** OSM relations for a single country (e.g.
 Russia, Turkey) can be split across multiple continent extract files with

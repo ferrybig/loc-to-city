@@ -146,7 +146,7 @@ keyframe-compressed name blocks so names can be recovered by id without
 decompressing the whole list. Read `reader/binary-format.md` for the actual spec;
 this section just covers the code that implements it.
 
-Four npm workspaces, all TypeScript:
+Five npm workspaces, all TypeScript:
 
 - **`reader/`** — the format's reference reader. Zero runtime dependencies
   (only Node's built-in `zlib`), matching the spec's own constraint. Tested
@@ -170,6 +170,10 @@ Four npm workspaces, all TypeScript:
   resolution pass). See `data-ingest/PIPELINE-STAGES.md` for the full
   `data/` directory layout and file dependency graph. Its outputs land in
   `data/02-resolved/`, which is what you point the compressor at.
+- **`verify/`** — spot-checks of the worldwide build against
+  `countries.md` (every documented place and every country's capital),
+  run as tests and exported as JSON, which the demo draws as markers
+  showing what is verified, what is known wrong and what to report upstream.
 - **`demo/`** — a click-to-query Leaflet page plus a grid tile overlay, the
   JS/TS successor to the deleted Python prototype's demo, but for one
   format with one lookup path instead of comparing four approaches. It
@@ -180,10 +184,11 @@ Four npm workspaces, all TypeScript:
 ## Getting started
 
 ```bash
-npm install                                # installs all four workspaces
+npm install                                # installs all five workspaces
 npm run build --workspaces                 # tsc for each package
 npm test -w reader                         # Appendix A conformance + unit tests
 npm test -w compressor                     # synthetic-dataset tests (+ real-data tests if the .bin files exist)
+npm test -w verify                         # world spot-checks (skipped without a worldwide .bin)
 
 make netherlands    # data/03-final/zuid-holland.bin: the Netherlands, all 12 provinces
 make europe         # data/03-final/europe.bin
@@ -250,14 +255,12 @@ format and search work.
   local-name field at all -- its `NAME`/`NAME_EN` properties are both
   already the English name (confirmed for `NL`: `NAME` = `NAME_EN` =
   `"Netherlands"`, not `"Nederland"`), so a genuine `Nederland|The
-  Netherlands` pair would need country geometry/names to come from OSM's
-  own `admin_level=2` relations instead of (or alongside) Natural Earth --
-  those relations are already extracted (unfiltered) into
-  `data/01-extracted/world/*-admin.geojson` by `extract-boundaries.sh`, but
-  discarded by `adminBoundaryIndex.ts`'s `PLAUSIBLE_ADMIN_LEVELS` prefilter
-  (levels 4-11 only). This and countries.md's "Natural Earth's outlines
-  are too coarse" and "Border artifacts" items all want the same new OSM
-  `admin_level=2` country source, so they're natural to tackle together.
+  Netherlands` pair would need country names to come from OSM's own
+  `admin_level=2` relations instead of (or alongside) Natural Earth.
+  Country *outlines* already do (`loadOsmCountryRelations`, see
+  countries.md's "Natural Earth's outlines are too coarse"), and those
+  relations carry `name` and `name:en`, so the names are the remaining
+  half; the hierarchy's country list and names are still Natural Earth's.
 - **Search ranks equal matches by area, which is size, not fame.** With
   a locate index, `search({ sort: true })` breaks ties by area
   (`reader/binary-format.md` Appendix B.5.1, see history.md's "Issues fixed along the way"), which

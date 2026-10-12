@@ -9,11 +9,7 @@ node_modules/
 data/
 !data/03-final/*.bin
 
-# OSM extracts and intermediate working files
-data-ingest/osm/
-data-ingest/work/
-data-ingest/work-eu/
-data-ingest/work-world/
+# OSM extracts (data/ is excluded above; this covers stray ones elsewhere)
 *.pbf
 *.pbf.part
 

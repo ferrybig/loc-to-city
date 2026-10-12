@@ -156,11 +156,16 @@ data/03-final/                 gitignored, entirely local build output --
 data/03-final/ (sidecars)      optional, gitignored, reader-only -- never
                                 consumed by data-ingest or compressor
 ├── world.search-index.bin
-└── world.locate-index.bin
+├── world.locate-index.bin
+└── world.checks.json              spot-checks run against the .bin (verify/src/export.ts),
+                                   which the demo draws as markers; the Docker build
+                                   makes it from the shipped .bin
 
 CONSUMERS (read-only, not part of the build):
 ├── demo/src/server.ts, demo/playwright.config.ts   default to data/03-final/zuid-holland.bin
-└── compressor/test/zuid-holland*.test.ts           skip if the .bin is absent
+├── compressor/test/zuid-holland*.test.ts           skip if the .bin is absent
+└── verify/test/world-queries.test.ts               the worldwide .bin (world-high-res.bin, else
+                                                    world.bin); skip if absent
 
 OUTSIDE ALL PIPELINES:
 └── data/03-final/appendix-a-example.bin   hand-extracted from reader/binary-format.md's

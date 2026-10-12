@@ -2,13 +2,23 @@
 world: data/03-final/world.bin
 world-high-res: data/03-final/world-high-res.bin \
 	data/03-final/world-high-res.locate-index.bin \
-	data/03-final/world-high-res.search-index.bin
+	data/03-final/world-high-res.search-index.bin \
+	data/03-final/world-high-res.checks.json
 europe: data/03-final/europe.bin
 netherlands: data/03-final/zuid-holland.bin
 
 # A failed or interrupted recipe leaves no half-written output behind for
 # the next run to mistake for an up-to-date one.
 .DELETE_ON_ERROR:
+
+# Without this, `make <name>.search-index.bin` builds <name>.locate-index.bin
+# as an intermediate file of the pattern rule chain and deletes it again
+# afterwards, leaving a search index ranked by area and no locate index to go
+# with it. Secondary files are kept, and (unlike .PRECIOUS, which would also
+# keep a half-written one) still deleted by .DELETE_ON_ERROR when their recipe
+# fails. A pattern as prerequisite (`.SECONDARY: %.locate-index.bin`) is
+# ignored by make; the bare form is the portable one.
+.SECONDARY:
 
 # --- Compressing a resolved dataset into a final .bin ----------------------
 #
@@ -63,11 +73,11 @@ COMPRESS_OPTIONS = \
 # $$(SOURCE) is expanded a second time, per target, so each .bin depends on
 # its own source directory's output.
 .SECONDEXPANSION:
-$(FINAL_BINS): %: %.args node_modules data/02-resolved/$$(SOURCE)/cities-filtered.geojsonseq
+$(FINAL_BINS): %: %.args data/02-resolved/$$(SOURCE)/cities-filtered.geojsonseq | node_modules
 	$(COMPRESS_ENV) node compressor/src/cli.ts $(COMPRESS_INPUTS) $@ $(COMPRESS_OPTIONS)
 	@# A sidecar index from the previous build no longer matches, and the
 	@# reader refuses to search with a stale one.
-	rm -f $(@:.bin=.search-index.bin) $(@:.bin=.locate-index.bin)
+	rm -f $(@:.bin=.search-index.bin) $(@:.bin=.locate-index.bin) $(@:.bin=.checks.json)
 
 # <name>.bin.args records the settings <name>.bin was built with, rewritten
 # only when they change. Make compares timestamps, not recipes, so without
@@ -80,24 +90,42 @@ $(FINAL_BINS): %: %.args node_modules data/02-resolved/$$(SOURCE)/cities-filtere
 .PHONY: FORCE
 FORCE:
 
+# node_modules is an order-only prerequisite (after the `|`) everywhere: make
+# still runs `npm install` first when package.json or the lockfile changed, but
+# a newer node_modules no longer makes a target out of date. As a normal
+# prerequisite it did: any `npm install` made every stage look stale, and the
+# next `make` restarted the worldwide resolve. What a stage really depends on
+# is the code it runs, which is listed per rule below only where a rebuild is
+# cheap (the sidecars). The resolve and the .bin deliberately do not depend on
+# data-ingest/ or compressor/ sources: after changing those, remove the output
+# you want rebuilt, so that an edit never starts a long build by itself.
+READER_SRC := $(shell find reader/src -name '*.ts')
+
 # Sidecar indexes the reader (and so the demo) picks up next to a .bin, e.g.
 # `make data/03-final/world-high-res.search-index.bin`. The search index
 # comes after the locate index: build-search-index ranks its short-query
 # table by area when a locate index is next to the .bin, as the reader then
 # ranks searches, and the reader only uses a table ranked its own way.
-%.search-index.bin: %.bin %.locate-index.bin node_modules
+%.search-index.bin: %.bin %.locate-index.bin $(READER_SRC) | node_modules
 	node reader/src/cli.ts build-search-index $< --output $@
 
-%.locate-index.bin: %.bin node_modules
+%.locate-index.bin: %.bin $(READER_SRC) | node_modules
 	node reader/src/cli.ts build-locate-index $< --output $@
 
-data/02-resolved/eu/cities-filtered.geojsonseq: node_modules data/02-resolved/world/cities-filtered.geojsonseq
+# The spot-checks of verify/ run against a .bin, written for the demo's map
+# markers (it picks the file up next to the .bin it serves). A failing check
+# is a result, not an error: the export still succeeds (`npm test -w verify`
+# is the gate).
+%.checks.json: %.bin $(READER_SRC) $(wildcard verify/src/*.ts) | node_modules
+	node verify/src/export.ts $< --out $@
+
+data/02-resolved/eu/cities-filtered.geojsonseq: data/02-resolved/world/cities-filtered.geojsonseq | node_modules
 	node data-ingest/src/filter-by-scope.ts --only-continent Europe --out-dir data/02-resolved/eu
 
-data/02-resolved/nl/cities-filtered.geojsonseq: node_modules data/02-resolved/world/cities-filtered.geojsonseq
+data/02-resolved/nl/cities-filtered.geojsonseq: data/02-resolved/world/cities-filtered.geojsonseq | node_modules
 	node data-ingest/src/filter-by-scope.ts --only-country NL --out-dir data/02-resolved/nl
 
-data/02-resolved/world/cities-filtered.geojsonseq: node_modules data/01-extracted/world/planet-latest-admin.geojson data/00-raw/geonames/cities500.txt data/00-raw/geonames/admin1CodesASCII.txt data/00-raw/natural-earth/ne_10m_admin_0_countries.geojson
+data/02-resolved/world/cities-filtered.geojsonseq: data/01-extracted/world/planet-latest-admin.geojson data/00-raw/geonames/cities500.txt data/00-raw/geonames/admin1CodesASCII.txt data/00-raw/natural-earth/ne_10m_admin_0_countries.geojson | node_modules
 	NODE_OPTIONS="--max-old-space-size=9216" \
 	node data-ingest/src/prepare-world.ts
 

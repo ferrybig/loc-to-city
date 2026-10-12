@@ -7,40 +7,78 @@ import { streamMergedAdminRecords } from "./mergeAdminBoundaries.ts";
 
 interface CountryBorderProps {
   admin_level?: string;
+  boundary?: string;
   "ISO3166-1:alpha2"?: string;
   "ISO3166-1"?: string;
 }
 
-/** OSM's own country borders (`admin_level=2` relations), indexed by the
- * same ISO 3166-1 alpha-2 codes Natural Earth's `ISO_A2_EH` uses. Only
- * codes Natural Earth also has are kept, so this can never introduce a
- * country the hierarchy doesn't list. */
-export async function loadOsmCountryBorders(
+export interface OsmCountryRelations {
+  /** `admin_level=2` borders only: what `withOsmCountryBorders` corrects
+   * Natural Earth with. */
+  borders: CountryPolygonIndex;
+  /** Each code's outline, as the geometry JSON text of its relations: the
+   * `admin_level=2` relation, or for a code with none, the lowest-level
+   * ISO-tagged `boundary=administrative` relation. That second kind is a
+   * dependency OSM folds into its parent country (Hong Kong at level 3,
+   * Puerto Rico at 4), and its outline overlaps the parent's -- see
+   * countryOutlines.ts. */
+  outlineJsonByCode: Map<string, string[]>;
+}
+
+/** OSM's own country relations, keyed by the same ISO 3166-1 alpha-2
+ * codes Natural Earth's `ISO_A2_EH` uses. Only codes Natural Earth also
+ * has are kept, so this can never introduce a country the hierarchy
+ * doesn't list. */
+export async function loadOsmCountryRelations(
   files: string[],
   knownCodes: ReadonlySet<string>,
-): Promise<CountryPolygonIndex> {
+): Promise<OsmCountryRelations> {
   const index = new CountryPolygonIndex();
+  const outlines = new Map<string, { level: number; geometries: string[] }>();
   let relations = 0;
   let vertices = 0;
   for await (const { record, parsed } of streamMergedAdminRecords(files)) {
     const props = (parsed?.properties ?? peekOsmiumProperties(record)) as CountryBorderProps | null | undefined;
-    if (props?.admin_level !== "2") continue;
+    if (!props) continue;
+    const isBorder = props.admin_level === "2";
+    if (!isBorder && props.boundary !== "administrative") continue;
     const code = (props["ISO3166-1:alpha2"] ?? props["ISO3166-1"])?.toUpperCase();
     if (!code || !knownCodes.has(code)) continue;
 
-    const geometryJson = parsed ? undefined : splitOsmiumFeature(record)?.geometryJson;
-    const polygons = geometryJson
-      ? (packPolygons(geometryJson) ?? indexGeometry(JSON.parse(geometryJson) as Polygon | MultiPolygon))
-      : indexGeometry((parsed ?? (JSON.parse(record.toString("utf8")) as Feature)).geometry as Polygon | MultiPolygon);
+    const geometryJson = parsed
+      ? JSON.stringify(parsed.geometry)
+      : (splitOsmiumFeature(record)?.geometryJson ??
+        JSON.stringify((JSON.parse(record.toString("utf8")) as Feature).geometry));
+    // Western Sahara's relation has no admin_level at all.
+    const level = props.admin_level === undefined ? Infinity : Number(props.admin_level);
+    const outline = outlines.get(code);
+    if (!outline || level < outline.level) outlines.set(code, { level, geometries: [geometryJson] });
+    else if (level === outline.level) outline.geometries.push(geometryJson);
+    if (!isBorder) continue;
+
+    const polygons = packPolygons(geometryJson) ?? indexGeometry(JSON.parse(geometryJson) as Polygon | MultiPolygon);
     index.add(code, polygons);
     relations++;
     for (const p of polygons) vertices += [p.outer, ...p.holes].reduce((n, r) => n + r.xy.length / 2, 0);
   }
+  const dependencies = [...outlines.values()].filter((o) => o.level !== 2).length;
   console.error(
-    `loadOsmCountryBorders: ${relations} admin_level=2 relations for ${index.codes.size} countries, ` +
-      `${vertices.toLocaleString()} vertices`,
+    `loadOsmCountryRelations: ${relations} admin_level=2 relations for ${index.codes.size} countries, ` +
+      `${vertices.toLocaleString()} vertices; outlines for ${outlines.size} countries, ${dependencies} of them ` +
+      `from a dependency's own relation`,
   );
-  return index;
+  return {
+    borders: index,
+    outlineJsonByCode: new Map([...outlines].map(([code, o]) => [code, o.geometries])),
+  };
+}
+
+/** `loadOsmCountryRelations`' `admin_level=2` borders alone. */
+export async function loadOsmCountryBorders(
+  files: string[],
+  knownCodes: ReadonlySet<string>,
+): Promise<CountryPolygonIndex> {
+  return (await loadOsmCountryRelations(files, knownCodes)).borders;
 }
 
 /** Natural Earth, corrected by OSM's own country borders where the two

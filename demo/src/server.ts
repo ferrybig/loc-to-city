@@ -5,13 +5,16 @@
  * reader's API reference under /docs/ (once `npm run docs -w reader` has
  * built it) and the dataset plus the indexes in use as downloads.
  *
- *   node src/server.ts [port] [dataset.bin]
+ *   node src/server.ts [port] [dataset.bin] [checks.json]
  *
  * dataset defaults to data/03-final/zuid-holland.bin (`make netherlands`,
  * see README); pass a different .bin path to point at a larger build
  * without changing any code. A `<dataset>.search-index.bin` and
  * `<dataset>.locate-index.bin` next to it (from `cgeodata
- * build-search-index` / `build-locate-index`) are picked up automatically.
+ * build-search-index` / `build-locate-index`) are picked up automatically,
+ * and so is a `<dataset>.checks.json` (from `verify/src/export.ts`), whose
+ * spot-checks the page draws as markers (a path as the third argument
+ * uses that file instead).
  *
  * The dataset is only ever read in a piscina pool of worker threads
  * (src/worker.ts); this thread just routes requests to them.
@@ -21,6 +24,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express, { type Request, type Response } from "express";
 import { Piscina, queueOptionsSymbol } from "piscina";
+import { describeChecks, loadChecks } from "./checks.ts";
 import {
 	type Download,
 	download,
@@ -56,6 +60,7 @@ const MAX_TILE_ZOOM = 24;
 async function main(): Promise<void> {
 	const port = Number(process.argv[2] ?? 8766);
 	const datasetArg = process.argv[3];
+	const checksArg = process.argv[4];
 	const datasetPath = datasetArg
 		? path.resolve(datasetArg)
 		: path.join(REPO_ROOT, "data/03-final/zuid-holland.bin");
@@ -66,6 +71,12 @@ async function main(): Promise<void> {
 	}
 
 	console.error(`Loading ${datasetPath}...`);
+	// minThreads 0 + idleTimeout 6000 is deliberate, don't "fix" it: the
+	// production box (2 cores, 4GB) sees a page open as a burst of ~30-40 tile
+	// requests, then silence, and the workers exiting between bursts lets the
+	// process sleep at low memory. A ~500ms cold worker boot is negligible
+	// over a burst, so benchmark cold bursts (`taskset -c 0,1`, after >6s
+	// idle), not warm per-tile latency.
 	const pool = new Piscina({
 		filename: path.resolve(
 			__dirname,
@@ -118,6 +129,11 @@ async function main(): Promise<void> {
 		name: "info",
 	});
 	for (const { message } of info.indexes) console.error(message);
+	const { message: checksMessage, checks } = await loadChecks(
+		datasetPath,
+		checksArg ? path.resolve(checksArg) : undefined,
+	);
+	console.error(checksMessage);
 	console.error("Loaded.");
 
 	const [searchIndex, locateIndex] = info.indexes;
@@ -143,6 +159,7 @@ async function main(): Promise<void> {
 			attribution: info.attribution,
 			cellDegrees: info.cellDegrees,
 			docs: docs ? "/docs/" : null,
+			checks: describeChecks(checks),
 			downloads: await Promise.all(
 				downloads.map(async (d) => ({
 					name: d.name,
@@ -152,6 +169,14 @@ async function main(): Promise<void> {
 				})),
 			),
 		});
+	});
+
+	app.get("/api/checks", (_req, res) => {
+		if (!checks) {
+			res.status(404).json({ error: "no spot-checks for this dataset" });
+			return;
+		}
+		res.json(checks);
 	});
 
 	app.get("/api/query", async (req, res) => {

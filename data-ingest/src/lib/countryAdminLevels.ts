@@ -727,3 +727,17 @@ export const VORONOI_CITY_FALLBACK_WITHIN_REGIONS: ReadonlyMap<string, readonly 
  * `VORONOI_CITY_FALLBACK`: added only after confirming no real OSM region
  * tier exists, not automatically. */
 export const VORONOI_REGION_FALLBACK: ReadonlySet<string> = new Set(["SI"]);
+
+/** City-states: a country that is one city, so a lookup in it should read
+ * `Monaco / Monaco / Monaco`, not `Monaco / - / -` -- someone filtering on
+ * the city field looks for Monaco there. Country code -> the region (and,
+ * when OSM has no city polygon of its own, the city) to synthesize, each
+ * covering the country's whole outline (country-polygons.geojson's, after
+ * countryOutlines.ts). Monaco's own `admin_level=8` "Monaco" relation is
+ * its city once it has a region to sit in; the Vatican has nothing below
+ * its `admin_level=2` relation. See countries.md's Monaco and Vatican
+ * sections. */
+export const CITY_STATES: ReadonlyMap<string, { region: string; city?: string }> = new Map([
+  ["MC", { region: "Monaco" }],
+  ["VA", { region: "Vatican", city: "Vatican City" }],
+]);
