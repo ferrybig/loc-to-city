@@ -14,6 +14,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
+import { parseChunk } from "../src/chunk.ts";
 import { CGeoDataReader } from "../src/index.ts";
 import { buildLocateIndex, buildSearchIndex } from "../src/indexes.ts";
 import { APPENDIX_A_BYTES } from "./fixtures/appendixA.ts";
@@ -51,8 +52,23 @@ test("the main entry point works in a browser, and answers as on Node", {
 	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
 	const locateIndex = await buildLocateIndex(reader);
 	await reader.useLocateIndex(locateIndex);
+	// A chunk big enough for the WebAssembly fast path (Appendix A's
+	// aren't): all 256 cells at max_depth 4, in place 7.
+	const bigChunk = Uint8Array.from([
+		1,
+		7,
+		0x80,
+		0x02,
+		0x80,
+		0x02,
+		0,
+		...new Array<number>(255).fill(1),
+		...new Array<number>(256).fill(4),
+		...new Array<number>(256).fill(1),
+	]);
 	const files: Record<string, Uint8Array> = {
 		"/": new TextEncoder().encode("<!doctype html><title>reader</title>"),
+		"/chunk.bin": bigChunk,
 		"/fixture.bin": APPENDIX_A_BYTES,
 		"/fixture.locate-index.bin": locateIndex,
 		"/fixture.search-index.bin": await buildSearchIndex(reader),
@@ -110,7 +126,17 @@ test("the main entry point works in a browser, and answers as on Node", {
 			const search = [];
 			for await (const place of viaBytes.search("dam", { sort: true }))
 				search.push(place.id);
+			const { parseChunk } = await import(`${origin}/dist/chunk.js`);
+			const { wasmChunkDecoderAvailable } = await import(
+				`${origin}/dist/chunkDecoder.js`
+			);
+			const chunk = parseChunk(new Uint8Array(await get("/chunk.bin")), 4);
 			return {
+				wasm: wasmChunkDecoderAvailable(),
+				chunk: {
+					...chunk,
+					codes: [chunk.codes.constructor.name, ...chunk.codes],
+				},
 				queries,
 				search,
 				hasSearchIndex: await viaBytes.hasSearchIndex(),
@@ -145,6 +171,12 @@ test("the main entry point works in a browser, and answers as on Node", {
 		assert.equal(fromBrowser.hasSearchIndex, true);
 		assert.deepEqual(fromBrowser.locate, await reader.locate(5));
 		assert.equal(fromBrowser.cached, 5);
+		assert.equal(fromBrowser.wasm, true, "no WebAssembly fast path");
+		const chunk = parseChunk(bigChunk, 4);
+		assert.deepEqual(fromBrowser.chunk, {
+			...chunk,
+			codes: [chunk.codes.constructor.name, ...chunk.codes],
+		});
 	} finally {
 		server.close();
 		await reader.close();

@@ -162,7 +162,33 @@ to undo by accident: file reads are async but Node's inflate is sync
 (async zlib cost 15-40% on tile bursts for no gain, since parsing
 dominates); decodes take turns one macrotask each (`turns.ts`), or
 concurrent lookups block the event loop for the whole batch; hot loops
-use `lookupCached() ?? await lookup()` so a cache hit never awaits.
+use `lookupCached() ?? await lookup()` so a cache hit never awaits;
+decoded chunks hold codes in a `Uint32Array` and palette indices only
+as wide as the file stores them, since decoded chunks are what fills
+the cache; and those codes decode through their own
+`readDeltaVarints32Into`, not a `readDeltaVarintsInto` taking either
+array (one function seeing both parsed ~8% slower than with
+`Float64Array` alone, two parse ~20% faster). The reader rejects files
+deeper than `max_depth` 16 (`MAX_SUPPORTED_DEPTH`, a
+`CGeoDataUnsupportedError`), though the format allows 26: a chunk is
+one zlib block a lookup inflates whole, so deeper chunks only make
+lookups slower (finer cells should come from a bigger chunk grid), and
+32-bit codes depend on it.
+
+Chunks of 64+ records decode through a WebAssembly
+SIMD fast path (`reader/wasm/chunkDecoder.wat`, ~5x the JavaScript
+parser): `npm run build:wasm -w reader` compiles it into the committed
+`src/chunkDecoderWasm.ts` (wabt is a devDependency only), and
+`test/chunkDecoder.test.ts` fails when that file is stale. The `.wat`
+never reports an error: it accepts a block or declines it, and a
+declined one is parsed again by `parseChunk`'s JavaScript path, which
+stays the oracle (like the compressor's `--workers 0`) and the only
+source of errors. So the `.wat` must never accept a block JavaScript
+rejects; the test checks that against thousands of corrupted chunks,
+and every check in the `.wat` is one that test fails without (break
+it, rebuild, rerun to see). Its memory is reused while decodes follow
+each other and dropped after a second idle (`chunkDecoder.ts`), so an
+idle reader holds none. `CGEODATA_BENCH_WASM=0` benches without it.
 
 How much slowdown a reader change may cost: a change that buys something
 (a non-blocking event loop, browser support, bounded memory) may cost
@@ -292,7 +318,7 @@ hierarchy JSON, a cities GeoJSON/`.geojsonseq`, an output path, and
 node compressor/src/cli.ts <hierarchy.json> <cities.geojson|.geojsonseq> <out.bin> \
   --regions <regions.geojson> --countries <countries.geojson> \
   --width-exp 6 --height-exp 6 --max-depth N --keyframe-exp 7 \
-  --attribution "..." --workers N [--only-chunks LIST]
+  --attribution "..." --workers N [--only-chunks LIST] [--unlock-depth-limit]
 ```
 
 - `--only-chunks` takes indices/ranges (`200` or `200,300-500`) and leaves
@@ -304,6 +330,10 @@ node compressor/src/cli.ts <hierarchy.json> <cities.geojson|.geojsonseq> <out.bi
   gitignored, regenerate-on-demand artifact, not committed, since it goes
   stale the moment `world-hierarchy.json`/cities/regions change and costs
   nothing to rebuild).
+- `--max-depth` above 16 is an error unless `--unlock-depth-limit` is
+  given: the reader refuses such files (`MAX_SUPPORTED_DEPTH`), since a
+  lookup inflates a whole chunk and deeper chunks only make that slower.
+  For finer cells, raise `--width-exp`/`--height-exp` instead.
 - `--workers N` spreads chunk work across `node:worker_threads` (`0` = the
   original sequential path, kept as the byte-identity oracle parallel
   output is checked against; `1` still spawns a real worker, isolating

@@ -27,15 +27,11 @@ export interface VarintResult {
 	bytesRead: number;
 }
 
-/** Scratch output for `readVarint`, so a single read allocates nothing
- * beyond its result. */
-const single = new Float64Array(1);
-
 /** The varint (Section 3.2) at `offset`; throws a `CGeoDataFormatError`
  * for a malformed one, an `IncompleteBufferError` for a cut-off one. */
 export function readVarint(buf: Uint8Array, offset: number): VarintResult {
-	const end = readDeltaVarintsInto(buf, offset, single);
-	return { value: single[0]!, bytesRead: end - offset };
+	const value = varintAt(buf, offset);
+	return { value, bytesRead: varintEnd - offset };
 }
 
 /** `value`'s minimal varint encoding (Section 3.2). */
@@ -95,14 +91,54 @@ export function readDeltaVarintList(
 	return { values: Array.from(values), bytesRead: end - offset };
 }
 
+/** Where the varint `varintAt` last read ended: a second return value,
+ * kept here rather than in a returned object because a chunk's codes are
+ * millions of varints, and an object per varint showed up as most of a
+ * chunk's parse time. */
+let varintEnd = 0;
+
+/**
+ * The varint at `cursor`, leaving the offset just past it in
+ * `varintEnd`. The one varint decoder here, so every varint the reader
+ * reads gets the same checks.
+ */
+function varintAt(buf: Uint8Array, cursor: number): number {
+	let byte = buf[cursor++];
+	if (byte === undefined)
+		throw new IncompleteBufferError("varint runs past end of buffer");
+	let value = byte & PAYLOAD_MASK;
+	let scale = 128;
+	for (let n = 1; byte & CONTINUATION_BIT; n++) {
+		if (n === MAX_VARINT_BYTES)
+			throw new CGeoDataFormatError(
+				`varint longer than ${MAX_VARINT_BYTES} bytes`,
+			);
+		byte = buf[cursor++];
+		if (byte === undefined)
+			throw new IncompleteBufferError("varint runs past end of buffer");
+		value += (byte & PAYLOAD_MASK) * scale;
+		if ((byte & CONTINUATION_BIT) === 0) {
+			if (value >= MAX_VARINT_VALUE) {
+				throw new CGeoDataFormatError("varint value must be less than 2^53");
+			}
+			if (byte === 0) {
+				// A minimal encoder never emits a trailing zero group (see
+				// writeVarint above), so this can only be non-minimal padding.
+				throw new CGeoDataFormatError(
+					"non-minimal varint encoding (trailing zero byte)",
+				);
+			}
+		}
+		scale *= 128;
+	}
+	varintEnd = cursor;
+	return value;
+}
+
 /**
  * `out.length` delta-coded varints (Section 3.3) from `buf` at `offset`
- * into `out`, returning the offset just past them. The one varint decoder
- * here: `readVarint` is a list of one (whose previous element is the
- * implicit 0), so every varint the reader reads gets the same checks.
- * Decodes inline into a typed array because a chunk's codes are millions
- * of varints, and an object per varint showed up as most of a chunk's
- * parse time.
+ * into `out`, returning the offset just past them. Decodes straight into
+ * a typed array, without an object per varint (see `varintEnd`).
  */
 export function readDeltaVarintsInto(
 	buf: Uint8Array,
@@ -112,35 +148,36 @@ export function readDeltaVarintsInto(
 	let cursor = offset;
 	let previous = 0;
 	for (let i = 0; i < out.length; i++) {
-		let byte = buf[cursor++];
-		if (byte === undefined)
-			throw new IncompleteBufferError("varint runs past end of buffer");
-		let value = byte & PAYLOAD_MASK;
-		let scale = 128;
-		for (let n = 1; byte & CONTINUATION_BIT; n++) {
-			if (n === MAX_VARINT_BYTES)
-				throw new CGeoDataFormatError(
-					`varint longer than ${MAX_VARINT_BYTES} bytes`,
-				);
-			byte = buf[cursor++];
-			if (byte === undefined)
-				throw new IncompleteBufferError("varint runs past end of buffer");
-			value += (byte & PAYLOAD_MASK) * scale;
-			if ((byte & CONTINUATION_BIT) === 0) {
-				if (value >= MAX_VARINT_VALUE) {
-					throw new CGeoDataFormatError("varint value must be less than 2^53");
-				}
-				if (byte === 0) {
-					// A minimal encoder never emits a trailing zero group (see
-					// writeVarint above), so this can only be non-minimal padding.
-					throw new CGeoDataFormatError(
-						"non-minimal varint encoding (trailing zero byte)",
-					);
-				}
-			}
-			scale *= 128;
+		previous += varintAt(buf, cursor);
+		cursor = varintEnd;
+		out[i] = previous;
+	}
+	return cursor;
+}
+
+/**
+ * `readDeltaVarintsInto` for values known to fit in 32 bits, such as a
+ * chunk's codes at `max_depth` 16 and under: a running total that
+ * outgrows the `Uint32Array` is a format error, not a silent wraparound.
+ * A separate function rather than one taking either array, because V8
+ * optimizes a loop for the array types its function has seen, and a
+ * loop that has seen both decoded chunks ~10% slower.
+ */
+export function readDeltaVarints32Into(
+	buf: Uint8Array,
+	offset: number,
+	out: Uint32Array,
+): number {
+	let cursor = offset;
+	let previous = 0;
+	for (let i = 0; i < out.length; i++) {
+		previous += varintAt(buf, cursor);
+		cursor = varintEnd;
+		if (previous > 0xffffffff) {
+			throw new CGeoDataFormatError(
+				`delta-coded value ${previous} does not fit in 32 bits`,
+			);
 		}
-		previous += value;
 		out[i] = previous;
 	}
 	return cursor;

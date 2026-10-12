@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
 	IncompleteBufferError,
+	readDeltaVarints32Into,
 	readDeltaVarintsInto,
 	readVarint,
 	writeVarint,
@@ -55,9 +56,9 @@ test("readDeltaVarintsInto sums deltas and returns the offset past them", () => 
 	assert.deepEqual(Array.from(out), [300, 300, 8492]);
 });
 
-// readVarint is readDeltaVarintsInto on a list of one, so the readVarint
-// cases above cover the decoder chunk codes go through too; these check
-// that every malformed varint is still rejected inside a longer list.
+// readVarint and both list decoders share one varint decoder, so the
+// readVarint cases above cover the one chunk codes go through too; these
+// check that every malformed varint is still rejected inside a longer list.
 for (const [what, bytes, error] of [
 	[
 		"longer than 8 bytes",
@@ -72,11 +73,23 @@ for (const [what, bytes, error] of [
 	],
 	["cut off", [0x80], IncompleteBufferError],
 ] as const) {
-	test(`readDeltaVarintsInto rejects a ${what} varint after a good one`, () => {
+	test(`the delta list decoders reject a ${what} varint after a good one`, () => {
 		const buf = Uint8Array.from([0x05, ...bytes]);
 		assert.throws(
 			() => readDeltaVarintsInto(buf, 0, new Float64Array(2)),
 			error,
 		);
+		assert.throws(
+			() => readDeltaVarints32Into(buf, 0, new Uint32Array(2)),
+			error,
+		);
 	});
 }
+
+test("readDeltaVarints32Into rejects a running total past 32 bits", () => {
+	// Deltas 2^32 - 1, then 1: the second total no longer fits.
+	const buf = Uint8Array.from([...writeVarint(2 ** 32 - 1), ...writeVarint(1)]);
+	const out = new Uint32Array(2);
+	assert.throws(() => readDeltaVarints32Into(buf, 0, out), CGeoDataFormatError);
+	assert.equal(readDeltaVarints32Into(buf, 0, new Uint32Array(1)), 5);
+});
