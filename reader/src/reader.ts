@@ -249,7 +249,7 @@ export interface OpenOptions {
 	/**
 	 * Memory budget, in bytes, for decoded chunks and name blocks; least
 	 * recently used ones are dropped past it. Default 64 MiB. A worldwide
-	 * file decodes to about 2 GB in all, its largest chunk to about 5 MB,
+	 * file decodes to about 1 GB in all, its largest chunk to about 3 MB,
 	 * so a budget much below that makes lookups scattered across the
 	 * world re-decode often. 0 disables caching, except for the one most
 	 * recently used chunk.
