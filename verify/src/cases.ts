@@ -217,6 +217,13 @@ export const CASES: Case[] = [
 		section: "Netherlands",
 	},
 	{
+		name: "Europoort, not Hoek van Holland",
+		at: [51.970725, 4.123875],
+		city: "Europoort",
+		status: "fixed",
+		section: "Netherlands",
+	},
+	{
 		name: "Soest, not Soesterberg",
 		at: [52.131565, 5.277514],
 		city: "Soest",
