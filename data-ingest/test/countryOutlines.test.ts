@@ -19,14 +19,14 @@ function contains(outline: Outline, point: LonLat): boolean {
   return booleanPointInPolygon(point, { type: "MultiPolygon", coordinates: outline });
 }
 
-test("resolveCountryOverlaps: a dependency inside its parent's outline is cut out of the parent", () => {
+test("resolveCountryOverlaps: a dependency inside its parent's outline is cut out of the parent", async () => {
   const outlines = new Map<string, Outline>([
     ["US", [[ring(0, 0, 10, 10)], [ring(20, 0, 30, 10)]]],
     ["PR", [[ring(22, 2, 24, 4)]]],
   ]);
   // Natural Earth puts the island's land in PR and its waters in nothing.
   const ownerAt = ([x, y]: LonLat) => (x > 22.5 && x < 23.5 && y > 2.5 && y < 3.5 ? "PR" : null);
-  const { outlines: result, cuts } = resolveCountryOverlaps(outlines, ownerAt);
+  const { outlines: result, cuts } = await resolveCountryOverlaps(outlines, ownerAt);
 
   assert.deepEqual(
     cuts.map(({ from, owner }) => [from, owner]),
@@ -39,14 +39,14 @@ test("resolveCountryOverlaps: a dependency inside its parent's outline is cut ou
   assert.deepEqual(result.get("PR"), outlines.get("PR"), "the owner is untouched");
 });
 
-test("resolveCountryOverlaps: a disputed overlap goes to the country ownerAt names", () => {
+test("resolveCountryOverlaps: a disputed overlap goes to the country ownerAt names", async () => {
   // RU and UA both claim [10,15]x[0,10]; ownerAt (Natural Earth) says RU.
   const outlines = new Map<string, Outline>([
     ["UA", [[ring(0, 0, 15, 10)]]],
     ["RU", [[ring(10, 0, 40, 10)]]],
   ]);
   const ownerAt = ([x]: LonLat) => (x < 10 ? "UA" : "RU");
-  const { outlines: result, cuts } = resolveCountryOverlaps(outlines, ownerAt);
+  const { outlines: result, cuts } = await resolveCountryOverlaps(outlines, ownerAt);
 
   assert.deepEqual(
     cuts.map(({ from, owner }) => [from, owner]),
@@ -57,7 +57,7 @@ test("resolveCountryOverlaps: a disputed overlap goes to the country ownerAt nam
   assert.ok(contains(result.get("RU")!, [12, 5]));
 });
 
-test("resolveCountryOverlaps: a coarse (Natural Earth) outline never takes land from a precise one", () => {
+test("resolveCountryOverlaps: a coarse (Natural Earth) outline never takes land from a precise one", async () => {
   // Palestine's coarse outline overshoots onto Israeli land, where ownerAt
   // (Natural Earth too) of course names Palestine.
   const outlines = new Map<string, Outline>([
@@ -65,7 +65,7 @@ test("resolveCountryOverlaps: a coarse (Natural Earth) outline never takes land 
     ["PS", [[ring(8, 0, 20, 10)]]],
   ]);
   const ownerAt = ([x]: LonLat) => (x < 8 ? "IL" : "PS");
-  const { outlines: result, cuts } = resolveCountryOverlaps(outlines, ownerAt, new Set(["PS"]));
+  const { outlines: result, cuts } = await resolveCountryOverlaps(outlines, ownerAt, new Set(["PS"]));
   assert.deepEqual(
     cuts.map(({ from, owner }) => [from, owner]),
     [["PS", "IL"]],
@@ -75,12 +75,12 @@ test("resolveCountryOverlaps: a coarse (Natural Earth) outline never takes land 
   assert.ok(contains(result.get("PS")!, [15, 5]));
 });
 
-test("resolveCountryOverlaps: at sea, the smaller country keeps the overlap", () => {
+test("resolveCountryOverlaps: at sea, the smaller country keeps the overlap", async () => {
   const outlines = new Map<string, Outline>([
     ["NL", [[ring(0, 0, 10, 10)]]],
     ["AW", [[ring(4, 4, 5, 5)]]],
   ]);
-  const { outlines: result, cuts } = resolveCountryOverlaps(outlines, () => null);
+  const { outlines: result, cuts } = await resolveCountryOverlaps(outlines, () => null);
   assert.deepEqual(
     cuts.map(({ from, owner }) => [from, owner]),
     [["NL", "AW"]],
@@ -89,18 +89,18 @@ test("resolveCountryOverlaps: at sea, the smaller country keeps the overlap", ()
   assert.ok(contains(result.get("NL")!, [1, 1]));
 });
 
-test("resolveCountryOverlaps: neighbours that only share a border are left alone", () => {
+test("resolveCountryOverlaps: neighbours that only share a border are left alone", async () => {
   const outlines = new Map<string, Outline>([
     ["NL", [[ring(0, 0, 10, 10)]]],
     ["DE", [[ring(10, 0, 20, 10)]]],
   ]);
-  const { outlines: result, cuts } = resolveCountryOverlaps(outlines, () => null);
+  const { outlines: result, cuts } = await resolveCountryOverlaps(outlines, () => null);
   assert.deepEqual(cuts, []);
   assert.equal(result.get("NL"), outlines.get("NL"));
   assert.equal(result.get("DE"), outlines.get("DE"));
 });
 
-test("resolveCountryOverlaps: a small dependency's own land outvotes a strip where ownerAt names the parent", () => {
+test("resolveCountryOverlaps: a small dependency's own land outvotes a strip where ownerAt names the parent", async () => {
   // Hong Kong: Natural Earth's coarse border gives a strip of it to China.
   // China's huge outline has many far-away parts; Hong Kong has one.
   const outlines = new Map<string, Outline>([
@@ -109,14 +109,14 @@ test("resolveCountryOverlaps: a small dependency's own land outvotes a strip whe
   ]);
   const ownerAt = ([x, y]: LonLat) =>
     x >= 10 && x <= 10.5 && y >= 10 && y <= 10.5 ? (y > 10.4 ? "CN" : "HK") : x < 40 ? "CN" : null;
-  const { cuts } = resolveCountryOverlaps(outlines, ownerAt);
+  const { cuts } = await resolveCountryOverlaps(outlines, ownerAt);
   assert.deepEqual(
     cuts.map(({ from, owner }) => [from, owner]),
     [["CN", "HK"]],
   );
 });
 
-test("cutCountriesOutOfForeignRegions: a microstate is cut out of the neighbour's region that swallowed it", () => {
+test("cutCountriesOutOfForeignRegions: a microstate is cut out of the neighbour's region that swallowed it", async () => {
   // Monaco: a land part [5,5]x[6,6] plus territorial waters south of it.
   // France's simplified region covers the land and runs to the coast.
   const outlines = new Map<string, Outline>([
@@ -128,7 +128,7 @@ test("cutCountriesOutOfForeignRegions: a microstate is cut out of the neighbour'
     ["MC monaco", { country: "MC", geometry: { type: "Polygon" as const, coordinates: [ring(5, 3, 6, 6)] } }],
   ]);
   const ownerAt = ([x, y]: LonLat) => (y < 5 ? null : x >= 5 && x <= 6 && y <= 6 ? "MC" : "FR");
-  const { geometryByRegion, cuts } = cutCountriesOutOfForeignRegions(regions, outlines, ownerAt);
+  const { geometryByRegion, cuts } = await cutCountriesOutOfForeignRegions(regions, outlines, ownerAt);
   assert.deepEqual(
     cuts.map(({ region, country }) => [region, country]),
     [["FR paca", "MC"]],
@@ -138,7 +138,7 @@ test("cutCountriesOutOfForeignRegions: a microstate is cut out of the neighbour'
   assert.ok(contains(geometryByRegion.get("FR paca")!, [2, 7]));
 });
 
-test("cutCountriesOutOfForeignRegions: land ownerAt gives to the region's country, and sea, stay", () => {
+test("cutCountriesOutOfForeignRegions: land ownerAt gives to the region's country, and sea, stay", async () => {
   // Western Sahara's outline inside Morocco's region, which ownerAt (Natural
   // Earth) agrees with; and a region overlapping a neighbour's waters only.
   const outlines = new Map<string, Outline>([
@@ -150,7 +150,7 @@ test("cutCountriesOutOfForeignRegions: land ownerAt gives to the region's countr
     ["BE coast", { country: "BE", geometry: { type: "Polygon" as const, coordinates: [ring(12, 0, 16, 4)] } }],
   ]);
   const ownerAt = ([x]: LonLat) => (x < 5 ? "MA" : null);
-  const { geometryByRegion, cuts } = cutCountriesOutOfForeignRegions(regions, outlines, ownerAt);
+  const { geometryByRegion, cuts } = await cutCountriesOutOfForeignRegions(regions, outlines, ownerAt);
   assert.deepEqual(cuts, []);
   assert.equal(geometryByRegion.size, 0);
 });

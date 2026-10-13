@@ -4,7 +4,10 @@ import type { BBox, Feature, MultiPolygon, Polygon } from "geojson";
 import { COUNTRY_ADMIN_LEVELS } from "./countryAdminLevels.ts";
 import type { CountryIndex } from "./countryIndex.ts";
 import type { LonLat } from "./geo.ts";
-import { streamMergedAdminBoundaries } from "./mergeAdminBoundaries.ts";
+import { CountryPolygonIndex, loadCountryIndex, type PackedCountryPolygons } from "./countryIndex.ts";
+import { streamMergedAdminBoundaries, streamMergedAdminRecords } from "./mergeAdminBoundaries.ts";
+import { withOsmCountryBorders } from "./osmCountryBorders.ts";
+import type { TaskHandler, WorkerPool } from "./workerPool.ts";
 import { bboxAndPointOnFeature } from "./pointOnFeature.ts";
 import { resolvePolygonCountry } from "./polygonCountry.ts";
 
@@ -118,12 +121,30 @@ interface AdminBoundaryProps {
   natural?: string;
 }
 
-/** Pass 1 of the 3-pass admin_level auto-detection (README.md's "Europe
- * scaling test"): one full streaming read of the merged, deduplicated
- * corpus, computing just enough per candidate relation (area,
- * representative point, bbox, resolved country) to run Pass 2/3's
- * selection logic without holding any full polygon geometry -- memory
- * bounded by candidate *count*, not corpus size.
+/** What Pass 1 keeps of one relation (`classifyAdminFeature`): null when
+ * it is no candidate at all. */
+export type AdminFeatureClass = null | { noCountry: true } | AdminCandidate;
+
+export interface AdminCandidate {
+  noCountry?: undefined;
+  country: string;
+  level: number;
+  name: string | undefined;
+  nameEn: string | undefined;
+  repPoint: LonLat;
+  bbox: BBox;
+  /** km^2. */
+  area: number;
+  isCity: boolean;
+  /** Counts toward the country-wide `city` vote (not an override-only level). */
+  cityVote: boolean;
+  /** Set for a named region candidate: its simplified polygon. */
+  region?: Feature<Polygon | MultiPolygon, { name?: string }>;
+}
+
+/** Pass 1's per-relation work, which needs nothing from any other
+ * relation -- so worker threads can run it (`adminBoundaryHandlers`),
+ * leaving only `AdminBoundaryAccumulator` to see every relation in order.
  *
  * Which role a feature plays (region candidate, city candidate, neither,
  * or -- at a level a country lists for both roles independently -- both)
@@ -135,18 +156,78 @@ interface AdminBoundaryProps {
  *
  * `outlineAt` places what Natural Earth places nowhere (see
  * `resolvePolygonCountry`). */
-export async function buildAdminBoundaryIndex(
-  files: string[],
-  countries: CountryIndex,
+export function classifyAdminFeature(
+  feature: Feature,
+  countries: Pick<CountryIndex, "lookup">,
   outlineAt?: (point: LonLat) => string | null,
-): Promise<AdminBoundaryIndex> {
-  const cityCandidates: CityCandidateMeta[] = [];
-  const areaByCountryLevel = new Map<string, Map<number, number>>();
-  const regionAreaByCountryLevel = new Map<string, Map<number, number>>();
-  const regionsByCountryName = new Map<string, RegionCandidate>();
-  const diagnostics: AdminBoundaryIndexDiagnostics = { scanned: 0, keptCity: 0, keptRegion: 0, noCountry: 0 };
+): AdminFeatureClass {
+  const props = feature.properties as AdminBoundaryProps | null;
+  const levelRaw = props?.admin_level;
+  if (!levelRaw) return null;
+  const level = Number(levelRaw);
+  if (!PLAUSIBLE_ADMIN_LEVELS.has(level)) return null;
+  // An island's coastline multipolygon with admin tags added (Penghu's
+  // islets at admin_level=4, Indonesia's at 5), not an administrative
+  // unit. Worldwide that is 143 named region candidates and 1,103 city
+  // candidates, all of them islands, islets or skerries by name; as a
+  // region each became a "province" of its country.
+  if (props?.natural === "coastline") return null;
 
-  for await (const { id, feature } of streamMergedAdminBoundaries(files)) {
+  const geometry = feature as Feature<Polygon | MultiPolygon>;
+  // Still needed as a point known to lie on the feature (gap-fill and
+  // region assignment test it for containment), but no longer trusted
+  // to say which country the feature is in -- see polygonCountry.ts.
+  const { bbox: featureBbox, repPoint } = bboxAndPointOnFeature(geometry.geometry);
+  const country = resolvePolygonCountry(geometry, featureBbox, repPoint, countries as CountryIndex, {
+    alwaysSample: REGION_SAMPLE_LEVELS.has(level),
+    ...(outlineAt ? { outlineAt } : {}),
+  });
+  if (!country) return { noCountry: true };
+
+  const levels = COUNTRY_ADMIN_LEVELS[country];
+  // A superset check: a level that's only an override level for one of
+  // this country's regions (not in the country-wide `city` list) still
+  // needs to survive Pass 1, since which region a candidate belongs to
+  // isn't known until regions are resolved, later in prepare-world.ts.
+  // Routing a surviving candidate to its actual region/level (override
+  // vs. country-wide) happens there, not here.
+  const isCity = (levels?.city.includes(level) ?? false) || cachedOverrideLevels(country).includes(level);
+  const name = props?.name;
+  const isRegion = (levels?.region.includes(level) ?? false) && !!name;
+  if (!isCity && !isRegion) return null;
+
+  return {
+    country,
+    level,
+    name,
+    nameEn: props?.["name:en"],
+    repPoint,
+    bbox: featureBbox,
+    area: area(geometry) / 1_000_000, // m^2 -> km^2
+    isCity,
+    // Area accumulates only for the country-wide `city` vote -- an
+    // override-only level (a candidate that survived solely because some
+    // region's override list includes it) never competes for the
+    // country's own primary level.
+    cityVote: levels?.city.includes(level) ?? false,
+    ...(isRegion
+      ? { region: { ...simplify(geometry, { tolerance: REGION_SIMPLIFY_TOLERANCE }), properties: { name: name! } } }
+      : {}),
+  };
+}
+
+/** Pass 1's in-order half: folds each relation's `AdminFeatureClass` into
+ * the index, in corpus order (which decides candidate order and which of
+ * two same-named regions wins a tie). */
+class AdminBoundaryAccumulator {
+  readonly cityCandidates: CityCandidateMeta[] = [];
+  readonly areaByCountryLevel = new Map<string, Map<number, number>>();
+  readonly regionAreaByCountryLevel = new Map<string, Map<number, number>>();
+  readonly regionsByCountryName = new Map<string, RegionCandidate>();
+  readonly diagnostics: AdminBoundaryIndexDiagnostics = { scanned: 0, keptCity: 0, keptRegion: 0, noCountry: 0 };
+
+  add(id: string, c: AdminFeatureClass): void {
+    const diagnostics = this.diagnostics;
     diagnostics.scanned++;
     if (diagnostics.scanned % 500_000 === 0) {
       console.error(
@@ -154,112 +235,180 @@ export async function buildAdminBoundaryIndex(
           `${diagnostics.keptRegion} region candidates, ${diagnostics.noCountry} no-country`,
       );
     }
-
-    const props = feature.properties as AdminBoundaryProps | null;
-    const levelRaw = props?.admin_level;
-    if (!levelRaw) continue;
-    const level = Number(levelRaw);
-    if (!PLAUSIBLE_ADMIN_LEVELS.has(level)) continue;
-    // An island's coastline multipolygon with admin tags added (Penghu's
-    // islets at admin_level=4, Indonesia's at 5), not an administrative
-    // unit. Worldwide that is 143 named region candidates and 1,103 city
-    // candidates, all of them islands, islets or skerries by name; as a
-    // region each became a "province" of its country.
-    if (props?.natural === "coastline") continue;
-
-    const geometry = feature as Feature<Polygon | MultiPolygon>;
-    // Still needed as a point known to lie on the feature (gap-fill and
-    // region assignment test it for containment), but no longer trusted
-    // to say which country the feature is in -- see polygonCountry.ts.
-    const { bbox: featureBbox, repPoint } = bboxAndPointOnFeature(geometry.geometry);
-    const country = resolvePolygonCountry(geometry, featureBbox, repPoint, countries, {
-      alwaysSample: REGION_SAMPLE_LEVELS.has(level),
-      ...(outlineAt ? { outlineAt } : {}),
-    });
-    if (!country) {
+    if (c === null) return;
+    if (c.noCountry) {
       diagnostics.noCountry++;
-      continue;
+      return;
     }
+    const { country, level } = c;
 
-    const levels = COUNTRY_ADMIN_LEVELS[country];
-    // A superset check: a level that's only an override level for one of
-    // this country's regions (not in the country-wide `city` list) still
-    // needs to survive Pass 1, since which region a candidate belongs to
-    // isn't known until regions are resolved, later in prepare-world.ts.
-    // Routing a surviving candidate to its actual region/level (override
-    // vs. country-wide) happens there, not here.
-    const isCity = (levels?.city.includes(level) ?? false) || cachedOverrideLevels(country).includes(level);
-    const isRegionLevel = levels?.region.includes(level) ?? false;
-    if (!isCity && !isRegionLevel) continue;
-
-    // Computed at most once, though a level a country lists for both roles
-    // needs it twice.
-    let areaKm2: number | undefined;
-    const getFeatureArea = (): number => (areaKm2 ??= area(geometry) / 1_000_000); // m^2 -> km^2
-
-    if (isCity) {
-      const featureArea = getFeatureArea();
-      cityCandidates.push({
+    if (c.isCity) {
+      this.cityCandidates.push({
         id,
-        name: props?.name,
-        nameEn: props?.["name:en"],
+        name: c.name,
+        nameEn: c.nameEn,
         country,
         level,
-        area: featureArea,
-        repPoint,
-        bbox: featureBbox,
+        area: c.area,
+        repPoint: c.repPoint,
+        bbox: c.bbox,
       });
-      // Area accumulates here only for the country-wide `city` vote --
-      // an override-only level (a candidate that survived solely because
-      // some region's override list includes it) never competes for the
-      // country's own primary level, so it's excluded from this tally.
-      // `cityCandidates` above still holds it either way; routing happens
-      // once each candidate's region is known, in prepare-world.ts.
-      if (levels?.city.includes(level)) {
-        let byLevel = areaByCountryLevel.get(country);
-        if (!byLevel) {
-          byLevel = new Map();
-          areaByCountryLevel.set(country, byLevel);
-        }
-        byLevel.set(level, (byLevel.get(level) ?? 0) + featureArea);
-      }
+      // `cityCandidates` above still holds an override-only candidate;
+      // routing happens once each candidate's region is known, in
+      // prepare-world.ts.
+      if (c.cityVote) addArea(this.areaByCountryLevel, country, level, c.area);
       diagnostics.keptCity++;
     }
 
-    if (!isRegionLevel) continue;
-    const name = props?.name;
-    if (!name) continue;
-    const regionArea = getFeatureArea();
-    let regionByLevel = regionAreaByCountryLevel.get(country);
-    if (!regionByLevel) {
-      regionByLevel = new Map();
-      regionAreaByCountryLevel.set(country, regionByLevel);
-    }
-    regionByLevel.set(level, (regionByLevel.get(level) ?? 0) + regionArea);
-
+    if (!c.region) return;
+    addArea(this.regionAreaByCountryLevel, country, level, c.area);
+    const name = c.name!;
     const key = `${country} ${level} ${name}`;
-    const existing = regionsByCountryName.get(key);
-    if (!existing || bboxArea(featureBbox) > bboxArea(existing.bbox)) {
-      const simplified = simplify(geometry, { tolerance: REGION_SIMPLIFY_TOLERANCE });
-      regionsByCountryName.set(key, {
+    const existing = this.regionsByCountryName.get(key);
+    if (!existing || bboxArea(c.bbox) > bboxArea(existing.bbox)) {
+      this.regionsByCountryName.set(key, {
         id,
         name,
-        nameEn: props?.["name:en"],
+        nameEn: c.nameEn,
         country,
         level,
-        bbox: featureBbox,
-        feature: { ...simplified, properties: { name } },
+        bbox: c.bbox,
+        feature: c.region,
       });
     }
     diagnostics.keptRegion++;
   }
 
-  console.error(
-    `adminBoundaryIndex: done -- ${diagnostics.scanned} scanned, ${diagnostics.keptCity} city candidates, ` +
-      `${diagnostics.keptRegion} region matches (${regionsByCountryName.size} unique), ${diagnostics.noCountry} no-country`,
-  );
+  finish(): AdminBoundaryIndex {
+    const { cityCandidates, areaByCountryLevel, regionAreaByCountryLevel, regionsByCountryName, diagnostics } = this;
+    console.error(
+      `adminBoundaryIndex: done -- ${diagnostics.scanned} scanned, ${diagnostics.keptCity} city candidates, ` +
+        `${diagnostics.keptRegion} region matches (${regionsByCountryName.size} unique), ${diagnostics.noCountry} no-country`,
+    );
+    return { cityCandidates, areaByCountryLevel, regionAreaByCountryLevel, regionsByCountryName, diagnostics };
+  }
+}
 
-  return { cityCandidates, areaByCountryLevel, regionAreaByCountryLevel, regionsByCountryName, diagnostics };
+function addArea(byCountry: Map<string, Map<number, number>>, country: string, level: number, value: number): void {
+  let byLevel = byCountry.get(country);
+  if (!byLevel) {
+    byLevel = new Map();
+    byCountry.set(country, byLevel);
+  }
+  byLevel.set(level, (byLevel.get(level) ?? 0) + value);
+}
+
+/** Pass 1 of the 3-pass admin_level auto-detection (README.md's "Europe
+ * scaling test"): one full streaming read of the merged, deduplicated
+ * corpus, computing just enough per candidate relation (area,
+ * representative point, bbox, resolved country) to run Pass 2/3's
+ * selection logic without holding any full polygon geometry -- memory
+ * bounded by candidate *count*, not corpus size.
+ *
+ * With a `pool` (one whose workers got `AdminBoundaryWorkerData`), the
+ * per-relation work (`classifyAdminFeature`: parsing, country
+ * resolution, area) runs on its threads, in batches of raw records, and
+ * the results are folded in in corpus order -- the same index the main
+ * thread alone builds. */
+export async function buildAdminBoundaryIndex(
+  files: string[],
+  countries: CountryIndex,
+  outlineAt?: (point: LonLat) => string | null,
+  pool?: WorkerPool,
+): Promise<AdminBoundaryIndex> {
+  const accumulator = new AdminBoundaryAccumulator();
+  if (!pool || pool.size === 0) {
+    for await (const { id, feature } of streamMergedAdminBoundaries(files)) {
+      accumulator.add(id, classifyAdminFeature(feature, countries, outlineAt));
+    }
+    return accumulator.finish();
+  }
+
+  // Batches in flight, oldest first; enough to keep every thread busy
+  // while the oldest is being waited for.
+  const inFlight: { ids: string[]; results: Promise<AdminFeatureClass[]> }[] = [];
+  const maxInFlight = pool.size * 3;
+  let ids: string[] = [];
+  let records: Buffer[] = [];
+  let bytes = 0;
+  const send = (): void => {
+    const batch = new Uint8Array(bytes);
+    const ends = new Int32Array(records.length);
+    let offset = 0;
+    records.forEach((record, i) => {
+      batch.set(record, offset);
+      offset += record.length;
+      ends[i] = offset;
+    });
+    inFlight.push({
+      ids,
+      results: pool.run<AdminFeatureClass[]>("classifyAdminRecords", { batch, ends }, [batch.buffer, ends.buffer], bytes),
+    });
+    ids = [];
+    records = [];
+    bytes = 0;
+  };
+  const drainOne = async (): Promise<void> => {
+    const { ids: batchIds, results } = inFlight.shift()!;
+    const classes = await results;
+    batchIds.forEach((id, i) => accumulator.add(id, classes[i]!));
+  };
+
+  for await (const { id, record } of streamMergedAdminRecords(files)) {
+    ids.push(id);
+    records.push(record);
+    bytes += record.length;
+    if (bytes < BATCH_BYTES && records.length < BATCH_RECORDS) continue;
+    send();
+    if (inFlight.length >= maxInFlight) await drainOne();
+  }
+  if (records.length > 0) send();
+  while (inFlight.length > 0) await drainOne();
+  return accumulator.finish();
+}
+
+const BATCH_BYTES = 4 * 1024 * 1024;
+/** Raw record bytes a Pass 1 pool may be parsing at once (its `maxWeight`):
+ * a relation's parsed form takes several times its text, and the biggest
+ * country relations run to hundreds of MB. */
+export const PASS1_MAX_BYTES = 512 * 1024 * 1024;
+const BATCH_RECORDS = 1024;
+
+/** What `buildAdminBoundaryIndex`'s pool workers need to resolve countries
+ * the way the main thread does: Natural Earth (read from its file) plus
+ * the same OSM borders and drawn outlines, shared rather than copied. */
+export interface AdminBoundaryWorkerData {
+  naturalEarthPath: string;
+  osmBorders: PackedCountryPolygons;
+  outlines: PackedCountryPolygons;
+}
+
+/** The worker side of `buildAdminBoundaryIndex`'s pool. The country index
+ * is built on the first batch, from `workerData`. */
+export function adminBoundaryHandlers(workerData: Partial<AdminBoundaryWorkerData> | undefined): Record<string, TaskHandler> {
+  let resolver: { countries: CountryIndex; outlineAt: (point: LonLat) => string | null } | undefined;
+  return {
+    classifyAdminRecords({ batch, ends }: { batch: Uint8Array; ends: Int32Array }) {
+      if (!resolver) {
+        const { naturalEarthPath, osmBorders, outlines } = workerData ?? {};
+        if (!naturalEarthPath || !osmBorders || !outlines) throw new Error("worker has no AdminBoundaryWorkerData");
+        const outlineIndex = CountryPolygonIndex.fromPacked(outlines);
+        resolver = {
+          countries: withOsmCountryBorders(loadCountryIndex(naturalEarthPath), CountryPolygonIndex.fromPacked(osmBorders)),
+          outlineAt: ([x, y]) => outlineIndex.first(x, y),
+        };
+      }
+      const buffer = Buffer.from(batch.buffer, batch.byteOffset, batch.byteLength);
+      const result: AdminFeatureClass[] = [];
+      let start = 0;
+      for (const end of ends) {
+        const feature = JSON.parse(buffer.toString("utf8", start, end)) as Feature;
+        result.push(classifyAdminFeature(feature, resolver.countries, resolver.outlineAt));
+        start = end;
+      }
+      return { result };
+    },
+  };
 }
 
 function bboxArea(b: BBox): number {

@@ -1,10 +1,10 @@
 import { Delaunay } from "d3-delaunay";
 import bbox from "@turf/bbox";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
-import intersect from "@turf/intersect";
 import union from "@turf/union";
-import { featureCollection, polygon as turfPolygon } from "@turf/helpers";
+import { featureCollection } from "@turf/helpers";
 import type { Feature, MultiPolygon, Polygon, Position } from "geojson";
+import { type Clipper, clipper } from "./clip.ts";
 import type { LonLat } from "./geo.ts";
 import type { Cities500Row } from "./cities500.ts";
 
@@ -48,11 +48,12 @@ export interface VoronoiCityCandidate {
  * wrong") -- a Voronoi cell has no gaps or overlaps by construction, so
  * every point inside the country resolves to its nearest cities500 site,
  * consistently. */
-export function buildCityFallback(
+export async function buildCityFallback(
   countryPolygon: Feature<Polygon | MultiPolygon>,
   points: Cities500Row[],
-): VoronoiCityCandidate[] {
-  const cells = computeClippedCells(countryPolygon, points);
+  clip: Clipper = clipper(),
+): Promise<VoronoiCityCandidate[]> {
+  const cells = await computeClippedCells(countryPolygon, points, clip);
   const candidates: VoronoiCityCandidate[] = [];
   for (let i = 0; i < points.length; i++) {
     const point = points[i]!;
@@ -78,16 +79,17 @@ export function buildCityFallback(
  * district into the next. A container's cells tile it exactly, so they
  * replace it; with no point inside, this returns nothing and the caller
  * keeps the container as the city. */
-export function buildContainerFallback(
+export async function buildContainerFallback(
   container: Feature<Polygon | MultiPolygon>,
   points: Cities500Row[],
-): VoronoiCityCandidate[] {
+  clip: Clipper = clipper(),
+): Promise<VoronoiCityCandidate[]> {
   const [minX, minY, maxX, maxY] = bbox(container);
   const inside = points.filter(
     ({ point: [x, y] }) =>
       x >= minX && x <= maxX && y >= minY && y <= maxY && booleanPointInPolygon([x, y], container),
   );
-  return buildCityFallback(container, inside);
+  return buildCityFallback(container, inside, clip);
 }
 
 /** One synthesized region: the union of every cities500 point's Voronoi
@@ -118,12 +120,13 @@ export interface VoronoiRegionCandidate {
  * distinct admin1 codes, matching `admin1CodesASCII.txt`'s own 212
  * Slovenian municipalities exactly. A point with no admin1 code at all
  * (rare) is dropped from every region -- there's no group to add it to. */
-export function buildRegionFallback(
+export async function buildRegionFallback(
   countryPolygon: Feature<Polygon | MultiPolygon>,
   points: Cities500Row[],
   namesByAdmin1Code: Map<string, string>,
-): VoronoiRegionCandidate[] {
-  const cells = computeClippedCells(countryPolygon, points);
+  clip: Clipper = clipper(),
+): Promise<VoronoiRegionCandidate[]> {
+  const cells = await computeClippedCells(countryPolygon, points, clip);
   const cellsByGroup = new Map<string, Feature<Polygon | MultiPolygon>[]>();
   for (let i = 0; i < points.length; i++) {
     const point = points[i]!;
@@ -157,33 +160,27 @@ export function buildRegionFallback(
  * every point in the country together so their results tile exactly (no
  * gaps or overlaps at a shared boundary, whether that boundary ends up
  * inside one region-fallback group or between two different ones). */
-function computeClippedCells(
+async function computeClippedCells(
   countryPolygon: Feature<Polygon | MultiPolygon>,
   points: Cities500Row[],
-): (Polygon | MultiPolygon | null)[] {
+  clip: Clipper,
+): Promise<(Polygon | MultiPolygon | null)[]> {
   if (points.length === 0) return [];
   const clipBox = bbox(countryPolygon);
   const sites = points.map((p) => p.point);
   const delaunay = Delaunay.from(sites);
   const voronoi = delaunay.voronoi(clipBox as [number, number, number, number]);
-  return points.map((_, i) => clipCellToCountry(voronoi.cellPolygon(i), countryPolygon));
-}
-
-/** A cell from `d3-delaunay` is already clipped to the caller-supplied
- * bounding box, but that box is rectangular -- a country's real outline
- * usually isn't, so a cell can still extend past land into a neighboring
- * country or the sea. `@turf/intersect` clips it to the actual country
- * polygon; returns null for a site whose cell doesn't overlap the
- * country at all (its bbox-clipped cell was entirely outside the real
- * outline -- possible for a site right at the country's own bbox
- * corner). */
-function clipCellToCountry(
-  cell: Position[] | null,
-  countryPolygon: Feature<Polygon | MultiPolygon>,
-): Polygon | MultiPolygon | null {
-  if (!cell || cell.length < 4) return null;
-  const cellFeature = turfPolygon([cell as [number, number][]]);
-  const clipped = intersect(featureCollection([cellFeature, countryPolygon as Feature<Polygon>]));
-  if (!clipped) return null;
-  return clipped.geometry;
+  // A cell from `d3-delaunay` is already clipped to the bbox, but that box
+  // is rectangular -- a country's real outline usually isn't, so a cell can
+  // still extend past land into a neighboring country or the sea. Each cell
+  // is intersected with the actual outline; null for a site whose cell
+  // doesn't overlap the country at all (its bbox-clipped cell was entirely
+  // outside the real outline -- possible for a site right at the country's
+  // own bbox corner).
+  const cells: (Position[] | null)[] = points.map((_, i) => voronoi.cellPolygon(i));
+  const toClip: Position[][] = [];
+  for (const cell of cells) if (cell && cell.length >= 4) toClip.push(cell);
+  const clipped = await clip.intersectCells(toClip, countryPolygon.geometry);
+  let next = 0;
+  return cells.map((cell) => (cell && cell.length >= 4 ? (clipped[next++] ?? null) : null));
 }

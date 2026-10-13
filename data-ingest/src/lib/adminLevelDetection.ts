@@ -6,6 +6,7 @@ import { COUNTRY_ADMIN_LEVELS } from "./countryAdminLevels.ts";
 import type { CountryIndex } from "./countryIndex.ts";
 import { splitOsmiumFeature } from "./geojsonseqStream.ts";
 import { streamMergedAdminRecords } from "./mergeAdminBoundaries.ts";
+import { preparePolygon } from "./preparedPolygon.ts";
 
 const DEFAULT_COVERAGE_THRESHOLD = 0.6;
 
@@ -272,9 +273,16 @@ export function createGapFillTracker(
         .search({ minX, minY, maxX, maxY })
         .filter((p) => !p.covered && p.candidate.country === primaryCandidate.country);
       if (open.length === 0) return;
+      // One point is one walk over the polygon either way; more are worth
+      // an index.
       const polygon = geometry();
+      if (open.length === 1) {
+        if (booleanPointInPolygon(open[0]!.candidate.repPoint, polygon)) open[0]!.covered = true;
+        return;
+      }
+      const prepared = preparePolygon(polygon);
       for (const point of open) {
-        if (booleanPointInPolygon(point.candidate.repPoint, polygon)) point.covered = true;
+        if (prepared.contains(point.candidate.repPoint[0], point.candidate.repPoint[1])) point.covered = true;
       }
     },
     gapFill() {
@@ -378,18 +386,27 @@ export function suppressedByWholeUnits(
 }
 
 /** `selectWholeUnits` + one targeted read for their geometry (none when
- * no country has any) + `suppressedByWholeUnits`. */
+ * no country has any) + `suppressedByWholeUnits`.
+ *
+ * The same read also hands `alsoFetch`'s geometry to `onFetched`, for a
+ * caller that wants a few other relations before the primaries stream
+ * past (prepare-world.ts' within-region fallback containers). */
 export async function findSuppressedByWholeUnits(
   files: string[],
   index: AdminBoundaryIndex,
   primary: PrimaryLevelResult,
   resolveRegion: (candidate: CityCandidateMeta) => string | null,
+  alsoFetch: ReadonlySet<string> = new Set(),
+  onFetched?: (id: string, geometryJson: string) => void,
 ): Promise<Set<string>> {
   const candidates = selectWholeUnits(index, primary, resolveRegion);
   const byId = new Map(candidates.map((c) => [c.id, c]));
+  const wanted = new Set([...byId.keys(), ...alsoFetch]);
   const units: { candidate: CityCandidateMeta; geometry: Polygon | MultiPolygon }[] = [];
-  for await (const { id, geometryJson } of streamGeometries(files, byId)) {
-    units.push({ candidate: byId.get(id)!, geometry: JSON.parse(geometryJson) as Polygon | MultiPolygon });
+  for await (const { id, geometryJson } of streamGeometries(files, wanted)) {
+    if (alsoFetch.has(id)) onFetched?.(id, geometryJson);
+    const unit = byId.get(id);
+    if (unit) units.push({ candidate: unit, geometry: JSON.parse(geometryJson) as Polygon | MultiPolygon });
   }
   const suppressed = suppressedByWholeUnits(index, primary, units);
   console.error(`findSuppressedByWholeUnits: ${units.length} whole units, ${suppressed.size} sub-units suppressed`);

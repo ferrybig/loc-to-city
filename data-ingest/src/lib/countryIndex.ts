@@ -138,12 +138,66 @@ function polygonContains({ outer, holes }: IndexedPolygon, x: number, y: number)
   return ringContains(outer, x, y) && !holes.some((hole) => ringContains(hole, x, y));
 }
 
+/** A `CountryPolygonIndex`'s polygons in flat arrays, every vertex in one
+ * `SharedArrayBuffer`: worker threads rebuild the index from it without
+ * each getting a copy of millions of vertices. */
+export interface PackedCountryPolygons {
+  /** Each polygon's code, in the index's own order. */
+  codes: string[];
+  /** Polygon `p`'s rings are `ringStart[p] .. ringStart[p + 1]`, the first
+   * of them its outer ring. */
+  ringStart: Int32Array;
+  /** Ring `r`'s vertices are `vertexStart[r] .. vertexStart[r + 1]`. */
+  vertexStart: Int32Array;
+  xy: Float64Array;
+}
+
 /** Country polygons, one rbush entry per polygon (see
  * `IndexedCountryPolygon`), answering which codes contain a point. */
 export class CountryPolygonIndex {
   private readonly items: IndexedCountryPolygon[] = [];
   private tree: RBush<IndexedCountryPolygon> | null = null;
   readonly codes = new Set<string>();
+
+  /** The same index, polygons in the same order (which `first` and
+   * `codesAt` answer in), from `pack`'s output. */
+  static fromPacked({ codes, ringStart, vertexStart, xy }: PackedCountryPolygons): CountryPolygonIndex {
+    const index = new CountryPolygonIndex();
+    const ring = (r: number) => indexPackedRing(xy.subarray(2 * vertexStart[r]!, 2 * vertexStart[r + 1]!));
+    codes.forEach((code, p) => {
+      const holes: IndexedRing[] = [];
+      for (let r = ringStart[p]! + 1; r < ringStart[p + 1]!; r++) holes.push(ring(r));
+      index.add(code, [{ outer: ring(ringStart[p]!), holes }]);
+    });
+    return index;
+  }
+
+  pack(): PackedCountryPolygons {
+    let rings = 0;
+    let vertices = 0;
+    for (const { polygon } of this.items) {
+      for (const r of [polygon.outer, ...polygon.holes]) {
+        rings++;
+        vertices += r.xy.length / 2;
+      }
+    }
+    const ringStart = new Int32Array(this.items.length + 1);
+    const vertexStart = new Int32Array(rings + 1);
+    const xy = new Float64Array(new SharedArrayBuffer(vertices * 16));
+    let r = 0;
+    let v = 0;
+    this.items.forEach(({ polygon }, p) => {
+      ringStart[p] = r;
+      for (const ring of [polygon.outer, ...polygon.holes]) {
+        vertexStart[r++] = v;
+        xy.set(ring.xy, 2 * v);
+        v += ring.xy.length / 2;
+      }
+    });
+    ringStart[this.items.length] = r;
+    vertexStart[rings] = v;
+    return { codes: this.items.map((item) => item.code), ringStart, vertexStart, xy };
+  }
 
   add(code: string, polygons: IndexedPolygon[]): void {
     for (const polygon of polygons) {

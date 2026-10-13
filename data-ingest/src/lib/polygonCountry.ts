@@ -1,7 +1,7 @@
-import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import type { BBox, Feature, MultiPolygon, Polygon } from "geojson";
 import type { CountryIndex } from "./countryIndex.ts";
 import type { LonLat } from "./geo.ts";
+import { preparePolygon } from "./preparedPolygon.ts";
 
 /** Resolves which country an admin polygon belongs to.
  *
@@ -92,13 +92,14 @@ function sampledMajority(
   const [minX, minY, maxX, maxY] = featureBbox;
   const tally = new Map<string, number>();
   let interior = 0;
+  const polygon = preparePolygon(feature.geometry);
   for (const grid of SAMPLE_GRIDS) {
     tally.clear();
     interior = 0;
     for (let i = 0; i < grid; i++) {
       for (let j = 0; j < grid; j++) {
         const point: LonLat = [minX + ((i + 0.5) / grid) * (maxX - minX), minY + ((j + 0.5) / grid) * (maxY - minY)];
-        if (!booleanPointInPolygon(point, feature)) continue;
+        if (!polygon.contains(point[0], point[1])) continue;
         interior++;
         const code = lookup(point);
         if (code) tally.set(code, (tally.get(code) ?? 0) + 1);
