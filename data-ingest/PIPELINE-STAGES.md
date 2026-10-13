@@ -39,14 +39,14 @@ data/01-extracted/world/*-admin.geojson
         │ prepare-world.ts (full per-country admin_level resolution,
         │   already correct for every country -- see countryAdminLevels.ts)
         ▼
-data/02-resolved/world/{hierarchy.json, regions.geojson,
+data/02-resolved/world/{hierarchy.json, regions.geojsonseq,
                         country-polygons.geojson, cities-filtered.geojsonseq}
         │ filter-by-scope.ts --only-country NL
         │              --out-dir data/02-resolved/nl
         │ filter-by-scope.ts --only-continent Europe
         │              --out-dir data/02-resolved/eu
         ▼
-data/02-resolved/{nl,eu}/{hierarchy.json, regions.geojson,
+data/02-resolved/{nl,eu}/{hierarchy.json, regions.geojsonseq,
                           country-polygons.geojson, cities-filtered.geojson[seq]}
         │ compressor/src/cli.ts (cgeodata-compress), same for all three
         ▼
@@ -126,7 +126,7 @@ data/01-extracted/           osmium-exported admin boundaries (gitignored)
         ▼
 data/02-resolved/world/       gitignored, entirely local build output
 ├── hierarchy.json
-├── regions.geojson
+├── regions.geojsonseq           (763MB, unsimplified)
 ├── country-polygons.geojson
 └── cities-filtered.geojsonseq   (4.4GB)
 
@@ -134,7 +134,7 @@ data/02-resolved/world/       gitignored, entirely local build output
         ▼
 data/02-resolved/{nl,eu}/     gitignored, entirely local build output
 ├── hierarchy.json
-├── regions.geojson
+├── regions.geojsonseq
 ├── country-polygons.geojson
 ├── nl/cities-filtered.geojson       (38MB)
 └── eu/cities-filtered.geojsonseq    (2.1GB)

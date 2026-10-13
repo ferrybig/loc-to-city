@@ -28,7 +28,7 @@ import { createWriteStream, mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import bbox from "@turf/bbox";
-import type { Feature, FeatureCollection, MultiPolygon, Polygon } from "geojson";
+import type { Feature, MultiPolygon, Polygon } from "geojson";
 import type { CityProperties, HierarchyCountry } from "@loc-to-city/compressor";
 import { discoverAdminGeoJsonFiles } from "./lib/osmFiles.ts";
 import { loadCountryIndex } from "./lib/countryIndex.ts";
@@ -78,7 +78,7 @@ const ADMIN1_CODES_SOURCE = path.join(REPO_ROOT, "data/00-raw/geonames/admin1Cod
 
 const HIERARCHY_OUT = path.join(REPO_ROOT, "data/02-resolved/world/hierarchy.json");
 const CITIES_OUT = path.join(REPO_ROOT, "data/02-resolved/world/cities-filtered.geojsonseq");
-const REGIONS_OUT = path.join(REPO_ROOT, "data/02-resolved/world/regions.geojson");
+const REGIONS_OUT = path.join(REPO_ROOT, "data/02-resolved/world/regions.geojsonseq");
 const COUNTRIES_OUT = path.join(REPO_ROOT, "data/02-resolved/world/country-polygons.geojson");
 
 async function main(): Promise<void> {
@@ -222,8 +222,8 @@ async function main(): Promise<void> {
     console.error(`Voronoi fallback: ${voronoiRegionCount.toLocaleString()} synthesized regions added`);
   }
 
-  // A small country inside a neighbour's simplified region polygon (Monaco
-  // in Provence-Alpes-Côte d'Azur) is cut out of it -- see
+  // A country inside a neighbour's region polygon (Western Sahara in
+  // Morocco's regions) is cut out of it -- see
   // cutCountriesOutOfForeignRegions. Each region keeps its original bbox:
   // it is only a prefilter, and changing it would reorder regionIndex,
   // which assignCityRegion is sensitive to (see the city-states below).
@@ -266,15 +266,23 @@ async function main(): Promise<void> {
     });
     cityStateRegion.set(code, region);
   }
-  const regionOf = (repPoint: LonLat, country: string): string | null =>
-    cityStateRegion.get(country) ?? assignCityRegion(repPoint, country, regionIndex);
+  const regionAt = (point: LonLat, country: string): string | null =>
+    cityStateRegion.get(country) ?? assignCityRegion(point, country, regionIndex);
+  // A city whose repPoint is a boundary vertex is placed by a point strictly
+  // inside it (see interiorPoint), so a town on a region border no longer
+  // goes to the neighbour. That point can fall where no region of the
+  // country is (Zmajevac's lands in the Danube strip cut out of its county
+  // for Serbia; Iligan is a hole in Lanao del Norte), and then the vertex
+  // still decides, as before, rather than the city being dropped.
+  const regionOf = (candidate: { repPoint: LonLat; regionPoint?: LonLat | undefined; country: string }): string | null =>
+    (candidate.regionPoint && regionAt(candidate.regionPoint, candidate.country)) ??
+    regionAt(candidate.repPoint, candidate.country);
   // Only needed to route a region-override candidate (see
   // COUNTRY_ADMIN_LEVELS.overrides) to its region's own level instead of
   // the country-wide one -- resolves the same way emitCity's own region
   // assignment does later, just early enough for selectPrimaryLevels to
   // use it.
-  const resolveCandidateRegion = (candidate: CityCandidateMeta): string | null =>
-    regionOf(candidate.repPoint, candidate.country);
+  const resolveCandidateRegion = (candidate: CityCandidateMeta): string | null => regionOf(candidate);
   const primary = selectPrimaryLevels(index, countries, undefined, resolveCandidateRegion);
 
   // Cities stream straight to disk as a GeoJSON Text Sequence (one
@@ -473,6 +481,7 @@ async function main(): Promise<void> {
     nameEn?: string | undefined;
     country: string;
     repPoint: LonLat;
+    regionPoint?: LonLat | undefined;
   }
   /** `geometryJson` is the geometry's JSON text, written out as is -- for
    * an OSM city, the exact text osmium wrote, never parsed. */
@@ -481,7 +490,7 @@ async function main(): Promise<void> {
       skippedNoName++;
       return false;
     }
-    const region = regionOf(candidate.repPoint, candidate.country);
+    const region = regionOf(candidate);
     if (!region) {
       skippedNoRegionByCountry.set(candidate.country, (skippedNoRegionByCountry.get(candidate.country) ?? 0) + 1);
       return false;
@@ -544,19 +553,17 @@ async function main(): Promise<void> {
   writeFileSync(COUNTRIES_OUT, `{"type":"FeatureCollection","features":[${countryFeatureJson.join(",")}]}`);
   console.error(`wrote ${COUNTRIES_OUT} (${countryFeatureJson.length} countries)`);
 
-  const regionCollection: FeatureCollection<
-    Polygon | MultiPolygon,
-    { name: string; nameEn?: string; country: string }
-  > = {
-    type: "FeatureCollection",
-    features: [...finalRegions.values()].map((r) => ({
-      type: "Feature",
-      properties: { name: r.name, ...(r.nameEn ? { nameEn: r.nameEn } : {}), country: r.country },
-      geometry: r.feature.geometry,
-    })),
-  };
-  writeFileSync(REGIONS_OUT, JSON.stringify(regionCollection));
-  console.error(`wrote ${REGIONS_OUT} (${regionCollection.features.length} regions)`);
+  // A sequence, one feature per record, like the cities: the regions are
+  // unsimplified, and all of them in one string would pass Node's ~512MB
+  // limit.
+  const regionOut = createWriteStream(REGIONS_OUT);
+  for (const r of finalRegions.values()) {
+    const properties = { name: r.name, ...(r.nameEn ? { nameEn: r.nameEn } : {}), country: r.country };
+    const record = `\x1e${JSON.stringify({ type: "Feature", properties, geometry: r.feature.geometry })}\n`;
+    if (!regionOut.write(record)) await new Promise<void>((resolve) => regionOut.once("drain", () => resolve()));
+  }
+  await new Promise<void>((resolve, reject) => regionOut.end((err?: Error | null) => (err ? reject(err) : resolve())));
+  console.error(`wrote ${REGIONS_OUT} (${finalRegions.size} regions)`);
 
   console.error(`admin relations resolving to no country: ${index.diagnostics.noCountry}`);
 }

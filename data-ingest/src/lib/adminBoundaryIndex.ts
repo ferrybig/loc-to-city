@@ -11,11 +11,16 @@ import type { TaskHandler, WorkerPool } from "./workerPool.ts";
 import { bboxAndPointOnFeature } from "./pointOnFeature.ts";
 import { resolvePolygonCountry } from "./polygonCountry.ts";
 
-// Matches prepare-europe.ts's REGION_SIMPLIFY_TOLERANCE: regions are a
-// fallback layer, not precision-critical the way cities are, and holding
-// thousands of full-precision multipolygons across the whole run would be
-// wasted memory for geometry that's simplified before output anyway.
-const REGION_SIMPLIFY_TOLERANCE = 0.01; // ~1.1km
+// Regions are kept at full precision, like the country outlines. At 0.01
+// (~1.1 km) a region part only a few times that across came out a sliver:
+// Lombardy's Campione d'Italia exclave (~2 km) no longer held the comune's
+// own representative point, so the comune was dropped, and so were ~480
+// coastal and island cities (Cannes, Lipari, Valparaíso) whose point fell
+// outside a simplified coastline. Neighbouring simplified regions also
+// overlapped by up to the tolerance, and a city in the overlap went to
+// whichever region the R-tree tried first. See countries.md, "Simplified
+// region polygons".
+const REGION_SIMPLIFY_TOLERANCE = 0; // 0 = keep every vertex
 
 // A cheap, purely worldwide (not per-country) prefilter, applied before
 // the country is even known: any admin_level outside this range is never
@@ -67,6 +72,9 @@ export interface CityCandidateMeta {
   level: number;
   area: number;
   repPoint: LonLat;
+  /** Set when `repPoint` is a boundary vertex: a point strictly inside,
+   * which region assignment uses instead (see `interiorPoint`). */
+  regionPoint?: LonLat;
   bbox: BBox;
 }
 
@@ -132,13 +140,14 @@ export interface AdminCandidate {
   name: string | undefined;
   nameEn: string | undefined;
   repPoint: LonLat;
+  regionPoint?: LonLat;
   bbox: BBox;
   /** km^2. */
   area: number;
   isCity: boolean;
   /** Counts toward the country-wide `city` vote (not an override-only level). */
   cityVote: boolean;
-  /** Set for a named region candidate: its simplified polygon. */
+  /** Set for a named region candidate: its polygon (see REGION_SIMPLIFY_TOLERANCE). */
   region?: Feature<Polygon | MultiPolygon, { name?: string }>;
 }
 
@@ -177,7 +186,7 @@ export function classifyAdminFeature(
   // Still needed as a point known to lie on the feature (gap-fill and
   // region assignment test it for containment), but no longer trusted
   // to say which country the feature is in -- see polygonCountry.ts.
-  const { bbox: featureBbox, repPoint } = bboxAndPointOnFeature(geometry.geometry);
+  const { bbox: featureBbox, repPoint, interiorPoint } = bboxAndPointOnFeature(geometry.geometry);
   const country = resolvePolygonCountry(geometry, featureBbox, repPoint, countries as CountryIndex, {
     alwaysSample: REGION_SAMPLE_LEVELS.has(level),
     ...(outlineAt ? { outlineAt } : {}),
@@ -202,6 +211,7 @@ export function classifyAdminFeature(
     name,
     nameEn: props?.["name:en"],
     repPoint,
+    ...(interiorPoint !== repPoint ? { regionPoint: interiorPoint } : {}),
     bbox: featureBbox,
     area: area(geometry) / 1_000_000, // m^2 -> km^2
     isCity,
@@ -211,7 +221,12 @@ export function classifyAdminFeature(
     // country's own primary level.
     cityVote: levels?.city.includes(level) ?? false,
     ...(isRegion
-      ? { region: { ...simplify(geometry, { tolerance: REGION_SIMPLIFY_TOLERANCE }), properties: { name: name! } } }
+      ? {
+          region: {
+            ...(REGION_SIMPLIFY_TOLERANCE > 0 ? simplify(geometry, { tolerance: REGION_SIMPLIFY_TOLERANCE }) : geometry),
+            properties: { name: name! },
+          },
+        }
       : {}),
   };
 }
@@ -251,6 +266,7 @@ class AdminBoundaryAccumulator {
         level,
         area: c.area,
         repPoint: c.repPoint,
+        ...(c.regionPoint ? { regionPoint: c.regionPoint } : {}),
         bbox: c.bbox,
       });
       // `cityCandidates` above still holds an override-only candidate;

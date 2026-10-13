@@ -700,6 +700,11 @@ wall clock from 171s to 10s and peak RSS from 1.26GB to 0.61GB, with
 byte-identical output. The numbers in this section predate that and are
 worth re-measuring, the region tolerance especially.)
 
+(Since done, 2026-10-13: regions are no longer simplified at all. The
+1.1 km tolerance turned small region parts into slivers and dropped the
+cities on them, Campione d'Italia among ~480 others; countries.md's
+"Simplified region polygons" has the measurement.)
+
 
 ### Issues fixed along the way
 

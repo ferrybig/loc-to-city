@@ -266,8 +266,7 @@ export interface CountryIndex {
  * Build time is paid once per rebuild; that error would ship in every
  * file. See history.md's "How much precision these tolerances cost".
  *
- * Regions are a different trade and stay simplified -- see
- * adminBoundaryIndex.ts. */
+ * Regions are kept at full precision too -- see adminBoundaryIndex.ts. */
 const COUNTRY_SIMPLIFY_TOLERANCE = 0; // 0 = keep every vertex
 
 export function loadCountryIndex(neCountriesPath: string): CountryIndex {

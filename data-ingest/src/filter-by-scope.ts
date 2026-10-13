@@ -8,13 +8,10 @@
 // for the investigation that led here), so this is a pure post-hoc
 // filter over its output, not a second resolution pass.
 //
-// Reads data/02-resolved/world/{hierarchy.json,regions.geojson,
+// Reads data/02-resolved/world/{hierarchy.json,regions.geojsonseq,
 // country-polygons.geojson,cities-filtered.geojsonseq} and writes the
-// same four shapes, scoped to --only-country/--only-continent, as plain
-// (non-streamed) .json/.geojson -- the compressor CLI already accepts
-// either .geojson or .geojsonseq for cities (see cities.ts), and a
-// country- or continent-scale cities file is small enough to hold in
-// memory, unlike the 4.4GB worldwide one.
+// same four files, scoped to --only-country/--only-continent. The two
+// sequences are copied through record by record, never held whole.
 import { createWriteStream, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -27,7 +24,7 @@ const REPO_ROOT = path.resolve(__dirname, "../..");
 
 const WORLD_DIR = path.join(REPO_ROOT, "data/02-resolved/world");
 const HIERARCHY_SOURCE = path.join(WORLD_DIR, "hierarchy.json");
-const REGIONS_SOURCE = path.join(WORLD_DIR, "regions.geojson");
+const REGIONS_SOURCE = path.join(WORLD_DIR, "regions.geojsonseq");
 const COUNTRIES_SOURCE = path.join(WORLD_DIR, "country-polygons.geojson");
 const CITIES_SOURCE = path.join(WORLD_DIR, "cities-filtered.geojsonseq");
 
@@ -100,15 +97,6 @@ async function main(): Promise<void> {
     throw new Error(`none of [${[...countries].join(", ")}] found in ${HIERARCHY_SOURCE}`);
   }
 
-  const regionsIn = JSON.parse(readFileSync(REGIONS_SOURCE, "utf8")) as FeatureCollection<
-    Polygon | MultiPolygon,
-    { name: string; nameEn?: string; country: string }
-  >;
-  const filteredRegions: typeof regionsIn = {
-    type: "FeatureCollection",
-    features: regionsIn.features.filter((f) => countries.has(f.properties.country)),
-  };
-
   const countriesIn = JSON.parse(readFileSync(COUNTRIES_SOURCE, "utf8")) as FeatureCollection<
     Polygon | MultiPolygon,
     { code: string }
@@ -122,8 +110,25 @@ async function main(): Promise<void> {
   mkdirSync(resolvedOutDir, { recursive: true });
 
   writeFileSync(path.join(resolvedOutDir, "hierarchy.json"), JSON.stringify(filteredHierarchy));
-  writeFileSync(path.join(resolvedOutDir, "regions.geojson"), JSON.stringify(filteredRegions));
   writeFileSync(path.join(resolvedOutDir, "country-polygons.geojson"), JSON.stringify(filteredCountries));
+
+  // Regions are a sequence too: unsimplified, the worldwide file is past
+  // the ~512MB a single string can hold.
+  const regionsOut = createWriteStream(path.join(resolvedOutDir, "regions.geojsonseq"));
+  let regionsKept = 0;
+  for await (const record of streamGeoJSONSeqRecords(REGIONS_SOURCE)) {
+    const properties =
+      peekLeadingProperties(record) ?? (JSON.parse(record.toString("utf8")) as Feature).properties ?? undefined;
+    const country = (properties as { country?: string } | undefined)?.country;
+    if (!country || !countries.has(country)) continue;
+    regionsKept++;
+    if (!regionsOut.write(Buffer.concat([Buffer.from("\x1e"), record, Buffer.from("\n")]))) {
+      await new Promise<void>((resolve) => regionsOut.once("drain", resolve));
+    }
+  }
+  await new Promise<void>((resolve, reject) => {
+    regionsOut.end((err: Error | null | undefined) => (err ? reject(err) : resolve()));
+  });
 
   // Streamed out as a .geojsonseq (RS-delimited, one feature per line),
   // not buffered into one array + JSON.stringify -- Europe alone holds
@@ -159,7 +164,7 @@ async function main(): Promise<void> {
   });
 
   console.error(
-    `wrote ${resolvedOutDir}: ${filteredHierarchy.length} countries, ${filteredRegions.features.length} regions, ` +
+    `wrote ${resolvedOutDir}: ${filteredHierarchy.length} countries, ${regionsKept} regions, ` +
       `${kept} cities (scanned ${scanned})`,
   );
 }

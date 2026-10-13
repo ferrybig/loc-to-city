@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import bbox from "@turf/bbox";
+import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import pointOnFeature from "@turf/point-on-feature";
 import type { MultiPolygon, Polygon } from "geojson";
 import { bboxAndPointOnFeature } from "../src/lib/pointOnFeature.ts";
@@ -86,5 +87,15 @@ for (const [label, geometry] of Object.entries(shapes)) {
     const { bbox: gotBbox, repPoint } = bboxAndPointOnFeature(geometry);
     assert.deepEqual(gotBbox, bbox(feature));
     assert.deepEqual(repPoint, pointOnFeature(feature).geometry.coordinates);
+  });
+}
+
+// Region assignment uses interiorPoint, so it must never be on the
+// boundary a town shares with the neighbouring region.
+for (const [label, geometry] of Object.entries(shapes)) {
+  test(`interiorPoint is strictly inside: ${label}`, () => {
+    const { repPoint, interiorPoint } = bboxAndPointOnFeature(geometry);
+    assert.ok(booleanPointInPolygon(interiorPoint, geometry, { ignoreBoundary: true }), `${interiorPoint}`);
+    if (booleanPointInPolygon(repPoint, geometry, { ignoreBoundary: true })) assert.deepEqual(interiorPoint, repPoint);
   });
 }

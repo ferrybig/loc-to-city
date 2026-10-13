@@ -61,7 +61,7 @@ COMPRESS_INPUTS = \
 	data/02-resolved/$(SOURCE)/hierarchy.json \
 	data/02-resolved/$(SOURCE)/cities-filtered.geojsonseq
 COMPRESS_OPTIONS = \
-	--regions data/02-resolved/$(SOURCE)/regions.geojson \
+	--regions data/02-resolved/$(SOURCE)/regions.geojsonseq \
 	--countries data/02-resolved/$(SOURCE)/country-polygons.geojson \
 	--width-exp $(GRID_EXP) \
 	--height-exp $(GRID_EXP) \

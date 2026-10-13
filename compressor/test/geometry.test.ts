@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Feature, FeatureCollection, Polygon, MultiPolygon } from "geojson";
+import type { Feature, FeatureCollection, GeoJsonProperties, Polygon, MultiPolygon } from "geojson";
 import bbox from "@turf/bbox";
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
+import { loadFeatureCollection } from "../src/geojsonseq.ts";
 import { classifyCell, containsPoint, packGeometry, type CellBounds, type CellRelation } from "../src/geometry.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -157,17 +158,15 @@ function makeRng(seed: number): () => number {
 }
 
 // Built by `make netherlands`, not committed (see CLAUDE.md).
-const PROVINCES_PATH = path.resolve(__dirname, "../../data/02-resolved/nl/regions.geojson");
+const PROVINCES_PATH = path.resolve(__dirname, "../../data/02-resolved/nl/regions.geojsonseq");
 
-test("containsPoint agrees with turf on real, complex province geometry", { skip: !existsSync(PROVINCES_PATH) }, () => {
-  // regions.geojson (filtered to NL, see filter-by-scope.ts) is real
+test("containsPoint agrees with turf on real, complex province geometry", { skip: !existsSync(PROVINCES_PATH) }, async () => {
+  // regions.geojsonseq (filtered to NL, see filter-by-scope.ts) is real
   // OSM-derived data with exactly the shapes that made this worth
   // replacing turf for in the first place: holes (a province with a city
   // carved out), MultiPolygons (islands), and enough vertices per ring to
   // exercise the banded ray cast, not just the plain one.
-  const provinces = JSON.parse(readFileSync(PROVINCES_PATH, "utf8")) as FeatureCollection<
-    Polygon | MultiPolygon
-  >;
+  const provinces = await loadFeatureCollection<Polygon | MultiPolygon, GeoJsonProperties>(PROVINCES_PATH);
   assert.ok(provinces.features.length > 0, "fixture must actually have provinces to test against");
 
   const rng = makeRng(42);

@@ -67,7 +67,7 @@ REMOTE_MAX_OLD_SPACE_MB=24576
 REQUIRED_DATA_FILES=(
   data/02-resolved/world/hierarchy.json
   data/02-resolved/world/cities-filtered.geojsonseq
-  data/02-resolved/world/regions.geojson
+  data/02-resolved/world/regions.geojsonseq
   data/02-resolved/world/country-polygons.geojson
 )
 for f in "${REQUIRED_DATA_FILES[@]}"; do
@@ -126,7 +126,7 @@ echo "== running compressor build on remote (default workers = os.availableParal
 # --workers is deliberately omitted: the CLI's own default is
 # os.availableParallelism(), which is exactly "the default amount of
 # workers" on whichever machine actually runs it.
-ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR_WIN && set NODE_OPTIONS=--max-old-space-size=$REMOTE_MAX_OLD_SPACE_MB && node compressor\\src\\cli.ts data\\02-resolved\\world\\hierarchy.json data\\02-resolved\\world\\cities-filtered.geojsonseq data\\03-final\\world.bin --regions data\\02-resolved\\world\\regions.geojson --countries data\\02-resolved\\world\\country-polygons.geojson --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 7 --attribution \"[OpenStreetMap](https://openstreetmap.org/copyright)\" $*"
+ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR_WIN && set NODE_OPTIONS=--max-old-space-size=$REMOTE_MAX_OLD_SPACE_MB && node compressor\\src\\cli.ts data\\02-resolved\\world\\hierarchy.json data\\02-resolved\\world\\cities-filtered.geojsonseq data\\03-final\\world.bin --regions data\\02-resolved\\world\\regions.geojsonseq --countries data\\02-resolved\\world\\country-polygons.geojson --width-exp 6 --height-exp 6 --max-depth 8 --keyframe-exp 7 --attribution \"[OpenStreetMap](https://openstreetmap.org/copyright)\" $*"
 
 echo "== syncing data/03-final/world.bin back =="
 rsync -avz \

@@ -6,6 +6,7 @@ import type { FeatureCollection, MultiPolygon, Polygon } from "geojson";
 import { buildCGeoDataFileParallel } from "./buildParallel.ts";
 import { parseChunkSelection } from "./chunkSelection.ts";
 import { loadCities } from "./cities.ts";
+import { loadFeatureCollection } from "./geojsonseq.ts";
 import { loadHierarchy } from "./hierarchy.ts";
 
 const KNOWN_FLAGS = new Set([
@@ -75,7 +76,7 @@ async function main(): Promise<void> {
   if (!hierarchyPath || !citiesPath || !outPath) {
     console.error(
       "usage: cgeodata-compress <hierarchy.json> <cities.geojson|.geojsonseq> <out.bin> " +
-        "[--regions regions.geojson] [--countries countries.geojson] " +
+        "[--regions regions.geojson[seq]] [--countries countries.geojson] " +
         "[--width-exp N] [--height-exp N] [--max-depth N] [--keyframe-exp N] [--attribution TEXT] " +
         "[--workers N] [--only-chunks LIST] [--unlock-depth-limit]\n" +
         "  --only-chunks takes indices and inclusive ranges (e.g. '200' or '200,300-500'); " +
@@ -129,10 +130,7 @@ async function main(): Promise<void> {
   const cities = await loadCities(citiesPath);
   const regionsPath = flags.regions;
   const regions = regionsPath
-    ? (JSON.parse(readFileSync(regionsPath, "utf8")) as FeatureCollection<
-        Polygon | MultiPolygon,
-        { name: string; country: string }
-      >)
+    ? await loadFeatureCollection<Polygon | MultiPolygon, { name: string; country: string }>(regionsPath)
     : undefined;
   const countriesPath = flags.countries;
   const countries = countriesPath

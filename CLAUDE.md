@@ -329,7 +329,7 @@ hierarchy JSON, a cities GeoJSON/`.geojsonseq`, an output path, and
 
 ```bash
 node compressor/src/cli.ts <hierarchy.json> <cities.geojson|.geojsonseq> <out.bin> \
-  --regions <regions.geojson> --countries <countries.geojson> \
+  --regions <regions.geojson[seq]> --countries <countries.geojson> \
   --width-exp 6 --height-exp 6 --max-depth N --keyframe-exp 7 \
   --attribution "..." --workers N [--only-chunks LIST] [--unlock-depth-limit]
 ```
@@ -534,9 +534,9 @@ country win a cell, so an overlap left in place loses the smaller one's
 cities. Natural Earth is the outline only for codes OSM has no relation
 for (Palestine, Antarctica, U.S. Minor Outlying Islands). The same rule
 cuts a country out of a *foreign region* that covers land the lookup gives
-to the country (`cutCountriesOutOfForeignRegions`): simplified regions lose
-small holes, so Lazio covered the Vatican and Provence-Alpes-Côte d'Azur
-Monaco. City-states (`CITY_STATES`) get a region (and if OSM has none, a
+to the country (`cutCountriesOutOfForeignRegions`): when regions were
+still simplified they lost small holes, so Lazio covered the Vatican and
+Provence-Alpes-Côte d'Azur Monaco. City-states (`CITY_STATES`) get a region (and if OSM has none, a
 city) covering the whole country; their cities get that region by country
 code, not through `assignCityRegion`, whose answer for a point inside two
 overlapping regions is the first in R-tree order -- adding regions to that
@@ -573,7 +573,7 @@ of work are spread over `workerPool.ts`'s threads (`PREPARE_WORKERS=N`,
 default one per core; `0` runs everything on the main thread, the path
 the parallel one must match):
 - **Pass 1's per-relation work.** `classifyAdminFeature` (parse, country
-  resolution, area, region simplify) runs on batches of raw records. The
+  resolution, area) runs on batches of raw records. The
   results are folded in strictly in corpus order (`buildAdminBoundaryIndex`),
   since candidate order and same-name region ties depend on it. The
   workers share the country lookups through `SharedArrayBuffer`s

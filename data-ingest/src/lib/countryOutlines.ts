@@ -111,9 +111,12 @@ export interface RegionCut {
 /** Cuts countries out of *other* countries' region polygons, where
  * `ownerAt` says the land is the country's.
  *
- * Regions are simplified (~1.1 km, adminBoundaryIndex.ts), which drops a
- * small hole: France's Provence-Alpes-Côte d'Azur covered all of Monaco,
- * and Lazio the Vatican. A region of another country is no ancestor of
+ * Regions used to be simplified (~1.1 km), which dropped a small hole:
+ * France's Provence-Alpes-Côte d'Azur covered all of Monaco, and Lazio the
+ * Vatican; 302 regions were cut, most by a sliver of overshoot. At full
+ * precision only 10 are (Western Sahara, a Danube island between Croatia
+ * and Serbia, Kafia Kingi), but a region whose OSM relation includes land
+ * the lookup gives to another country still needs this. A region of another country is no ancestor of
  * Monaco's places, so it wins every cell Monaco's own places only partly
  * cover (measured: Mareterra, Monaco's reclaimed district outside the
  * older city polygon, answered France / Provence-Alpes-Côte d'Azur).

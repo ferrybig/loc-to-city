@@ -203,12 +203,13 @@ below).
     States: OSM's US relation includes them and their own outline is
     Natural Earth's.
   - **A country is cut out of a foreign region that covers its land**
-    (`cutCountriesOutOfForeignRegions`). Region polygons are simplified
-    (~1.1 km), which drops a small hole: Lazio covered the Vatican,
+    (`cutCountriesOutOfForeignRegions`). Region polygons were simplified
+    (~1.1 km) until 2026-10-13 (see "Simplified region polygons"), which
+    dropped a small hole: Lazio covered the Vatican,
     Provence-Alpes-Côte d'Azur Monaco (Mareterra, outside Monaco's older
     city polygon, answered France), Guangdong Macau, Noord-Brabant the
-    Baarle-Hertog enclaves. 304 regions are cut, most by a sliver where a
-    simplified region overshot a land border.
+    Baarle-Hertog enclaves. 304 regions were cut, most by a sliver where a
+    simplified region overshot a land border; at full precision 10 are.
 
   Cost: the outline step takes about 45 s and 3 GB in `prepare-world.ts`,
   the region cut about 2.5 minutes. `country-polygons.geojson` grows from
@@ -301,11 +302,54 @@ below).
   candidate city or region was assigned to, never the country polygons,
   which were Natural Earth's. All six are fixed by the OSM outlines (item
   above), on `world-high-res.bin` and on `world.bin`.
+- **Simplified region polygons dropped and misplaced cities.** Region
+  polygons were simplified to 0.01° (~1.1 km) in Pass 1
+  (`REGION_SIMPLIFY_TOLERANCE`, `adminBoundaryIndex.ts`), and a city gets
+  its region by testing its representative point against them. Campione
+  d'Italia (45.96944, 8.97361), Lombardy's ~2 km exclave inside Ticino,
+  answered `Italy`, region `-`, city `-`: its part of Lombardy came out a
+  10-vertex sliver that missed the comune's representative point, so the
+  comune was dropped ("skipped (no region)"). The same happened on
+  coastlines (Cannes, Hyères, Lipari, Valparaíso answered their region
+  with no city), and simplified neighbours overlapped by up to the
+  tolerance, so a border town could get the neighbour (Dordrecht answered
+  Noord-Brabant). Fixed by keeping regions at full precision, like the
+  country outlines (2026-10-13). That exposed a second cause: when a
+  polygon's bbox midpoint is outside it, the representative point is
+  turf's fallback, the nearest *vertex*, and for a border town that vertex
+  is on the border, inside both regions (Trenton, NJ went to Pennsylvania,
+  Lotte to Lower Saxony, Weikersheim to Bavaria). Region assignment now
+  uses a point strictly inside the city instead (`interiorPoint`,
+  `pointOnFeature.ts`; the representative point itself is unchanged, since
+  gap-fill and country resolution use it), falling back to the vertex when
+  that point is in no region of the country (Zmajevac's lands in the Danube
+  strip cut out of its county for Serbia, Iligan in a hole of Lanao del
+  Norte).
+
+  Measured against the simplified build: 487 cities more and 6 fewer
+  (255,233 kept; "skipped (no region)" 3,150 -> 2,642), and 328 cities
+  changed region. Every one of a 45-city random sample of those moves
+  that could be checked went to the right region (Manendragarh to
+  Chhattisgarh, Nhamundá to Amazonas, Caniapiscau to Québec, Deglur to
+  Maharashtra, ...); the rest are Bosnian villages crossing the
+  inter-entity line, named `(RS)`/`(FBiH)` after the side they are on. The
+  6 lost are northern Cyprus (see Cyprus). `cutCountriesOutOfForeignRegions`
+  now cuts 10 regions instead of 302, the rest having been simplification
+  overshoot. Cost: `regions.geojson` (27.8 MB) became `regions.geojsonseq`
+  (763 MB, written and read as a sequence since it no longer fits in one
+  string), and `prepare-world.ts` took 6:54 wall / 12.5 GB peak RSS on a
+  busy machine, against ~2:22 unloaded before. The compressor got cheaper,
+  not dearer: `world-high-res.bin` went from 75.7 MB / 166.8M records to
+  73.0 MB / 159.4M (overlapping simplified regions made mixed cells that
+  needed refining), and `make world-high-res` took 6:10 wall / 11.7 GB
+  peak, sidecars included.
 - **A city inside two overlapping regions gets whichever the R-tree returns
   first.** *(open)* `assignCityRegion` (`regionPolygons.ts`) returns the
   first region in `regionIndex`'s R-tree order whose polygon contains the
-  city's representative point, and simplified region polygons overlap
-  along their borders. The order depends on the whole tree: adding two
+  city's point. This used to be common, since simplified region polygons
+  overlapped along their borders; with full-precision regions and
+  `interiorPoint` (see "Simplified region polygons") it is down to regions
+  that really overlap in OSM. The text below predates that. The order depends on the whole tree: adding two
   regions (Monaco's and the Vatican's) moved 593 cities500 points to
   another region, Ninghe District from Tianjin to Hebei among them, and
   cost Taipa (Macau) its city. The city-states are kept out of the tree for
@@ -679,7 +723,10 @@ tessellates its country, so the bug was always grain, not coverage.
   Cyprus relation covers the whole island: it now answers `Cyprus`, with no
   region or city yet (see "Countries without an ISO code"). Its
   municipalities now get Cyprus, and are dropped for having no region
-  instead.
+  instead. Six of them (Kokkina/Erenköy, Mansur, Mosfili, Pano Zodia,
+  Petra, İksilodimbu) still had a region while regions were simplified,
+  only because a simplified Republic-side region overshot onto them; with
+  full-precision regions they are dropped like the rest (2026-10-13).
 
 ## Czechia (CZ)
 
@@ -1166,6 +1213,15 @@ worldwide resolved data (`make netherlands`) and
   the relations lack a usable `name`. Untested; first step is to
   scratch-script the extract at one of these points and read the
   `admin_level=6` and `7` relations covering it.
+
+  Likely cause (2026-10-13, from names only): regions are keyed by
+  country and name, and Poland repeats powiat names across voivodeships.
+  `regions.geojsonseq` has one `powiat ostrowski` (Ostrów Mazowiecka), and
+  the first point is Ostrów Wielkopolski, whose powiat of the same name is
+  missing; gmina Nowe Skalmierzyce, inside it, has no region. The other
+  points look like powiaty with namesakes too (średzki, tomaszowski,
+  grodziski, nowodworski, opolski, świdnicki). Check that, then key
+  regions by relation id instead of name.
   (The `world-queries` todo tests encode all seven.)
 
 ## Portugal (PT)
