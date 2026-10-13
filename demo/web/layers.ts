@@ -10,7 +10,8 @@ import { map, Z_BASE_MAP, Z_GRID_OVERLAY } from "./map.ts";
 // so a cacheless browser doesn't fetch from OSM's tile servers.
 const baseMapToggle = byId<HTMLInputElement>("basemap-toggle");
 const baseMap = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-	maxZoom: 19,
+	maxZoom: 24,
+	maxNativeZoom: 19,
 	zIndex: Z_BASE_MAP,
 	attribution:
 		'Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
