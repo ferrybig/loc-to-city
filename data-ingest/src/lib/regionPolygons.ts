@@ -1,8 +1,8 @@
-import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import RBush from "rbush";
 import type { Feature, MultiPolygon, Polygon } from "geojson";
 import type { RegionCandidate } from "./adminBoundaryIndex.ts";
 import type { LonLat } from "./geo.ts";
+import { type PreparedPolygon, preparePolygon } from "./preparedPolygon.ts";
 
 interface IndexedRegion {
   minX: number;
@@ -12,6 +12,8 @@ interface IndexedRegion {
   name: string;
   country: string;
   feature: Feature<Polygon | MultiPolygon, { name?: string }>;
+  /** Prepared on first use: every city is tested against its regions. */
+  prepared?: PreparedPolygon;
 }
 
 export interface RegionIndex {
@@ -52,7 +54,9 @@ export function assignCityRegion(repPoint: LonLat, country: string, index: Regio
   const [x, y] = repPoint;
   const hits = index.tree.search({ minX: x, minY: y, maxX: x, maxY: y });
   for (const hit of hits) {
-    if (hit.country === country && booleanPointInPolygon(repPoint, hit.feature)) return hit.name;
+    if (hit.country !== country) continue;
+    hit.prepared ??= preparePolygon(hit.feature.geometry);
+    if (hit.prepared.contains(x, y)) return hit.name;
   }
   return null;
 }

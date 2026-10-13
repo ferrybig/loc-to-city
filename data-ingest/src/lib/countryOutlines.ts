@@ -1,11 +1,10 @@
 import area from "@turf/area";
 import type { MultiPolygon, Polygon, Position } from "geojson";
-import { difference, type Geom } from "polyclip-ts";
+import { type Clipper, clipper, type Outline } from "./clip.ts";
 import { CountryPolygonIndex, indexPackedRing } from "./countryIndex.ts";
 import type { LonLat } from "./geo.ts";
 
-/** A MultiPolygon's `coordinates`. */
-export type Outline = Position[][][];
+export type { Outline } from "./clip.ts";
 
 export interface OverlapCut {
   /** The country the overlap was cut out of. */
@@ -48,12 +47,17 @@ export interface OverlapCut {
  * outline (seeded, so deterministic), not by intersecting every pair: a
  * country's bbox can span the globe (France, the United States), and the
  * clipping itself is the expensive part. A sliver no sample hits stays
- * overlapping, and is left to the compressor's tie-breaks. */
-export function resolveCountryOverlaps(
+ * overlapping, and is left to the compressor's tie-breaks.
+ *
+ * The cuts are made in sorted pair order, each from the outlines as the
+ * cuts before it left them; `clip` may run cuts that don't depend on each
+ * other side by side, which changes nothing about the result. */
+export async function resolveCountryOverlaps(
   outlines: ReadonlyMap<string, Outline>,
   ownerAt: (point: LonLat) => string | null,
   coarse: ReadonlySet<string> = new Set(),
-): { outlines: Map<string, Outline>; cuts: OverlapCut[] } {
+  clip: Clipper = clipper(),
+): Promise<{ outlines: Map<string, Outline>; cuts: OverlapCut[] }> {
   const index = indexOutlines(outlines);
   const votesByPair = new Map<string, Map<string, number>>();
   sampleOutlines(outlines, index, (code, point, codes) => {
@@ -65,7 +69,9 @@ export function resolveCountryOverlaps(
     }
   });
 
-  const result = new Map(outlines);
+  // Each country's latest outline, as a promise of it: a cut starts as soon
+  // as the two versions it reads are done.
+  const result = new Map([...outlines].map(([code, outline]) => [code, Promise.resolve(outline)]));
   const cuts: OverlapCut[] = [];
   for (const pair of [...votesByPair.keys()].sort()) {
     const votes = votesByPair.get(pair)!;
@@ -81,14 +87,17 @@ export function resolveCountryOverlaps(
           ? forA > forB
             ? a
             : b
-          : outlineArea(result.get(a)!) <= outlineArea(result.get(b)!)
+          : outlineArea(await result.get(a)!) <= outlineArea(await result.get(b)!)
             ? a
             : b;
     const from = owner === a ? b : a;
-    result.set(from, cutOut(result.get(from)!, result.get(owner)!));
+    const fromOutline = result.get(from)!;
+    const ownerOutline = result.get(owner)!;
+    result.set(from, Promise.all([fromOutline, ownerOutline]).then(([f, o]) => cutOut(f, o, clip)));
     cuts.push({ from, owner, votes: Object.fromEntries(votes) });
   }
-  return { outlines: result, cuts };
+  const settled = await Promise.all([...result].map(async ([code, outline]) => [code, await outline] as const));
+  return { outlines: new Map(settled), cuts };
 }
 
 export interface RegionCut {
@@ -117,11 +126,12 @@ export interface RegionCut {
  * neighbour's territorial waters is left alone, and so is a disputed area
  * `ownerAt` gives to the region's country (Western Sahara inside
  * Morocco's regions). Only the regions that change are returned. */
-export function cutCountriesOutOfForeignRegions(
+export async function cutCountriesOutOfForeignRegions(
   regions: ReadonlyMap<string, { country: string; geometry: Polygon | MultiPolygon }>,
   outlines: ReadonlyMap<string, Outline>,
   ownerAt: (point: LonLat) => string | null,
-): { geometryByRegion: Map<string, Outline>; cuts: RegionCut[] } {
+  clip: Clipper = clipper(),
+): Promise<{ geometryByRegion: Map<string, Outline>; cuts: RegionCut[] }> {
   const regionOutlines = new Map<string, Outline>();
   for (const [key, { geometry }] of regions) {
     regionOutlines.set(key, geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates);
@@ -137,17 +147,23 @@ export function cutCountriesOutOfForeignRegions(
     }
   });
 
-  const geometryByRegion = new Map<string, Outline>();
+  // As in resolveCountryOverlaps: a region's cuts are made one after the
+  // other, and different regions' side by side.
+  const geometryByRegion = new Map<string, Promise<Outline>>();
   const cuts: RegionCut[] = [];
   for (const pair of [...votesByPair.keys()].sort()) {
     const votes = votesByPair.get(pair)!;
     const [region, country] = pair.split("\t") as [string, string];
     const forCountry = votes.get(country) ?? 0;
     if (forCountry < 2 || forCountry <= (votes.get(regions.get(region)!.country) ?? 0)) continue;
-    geometryByRegion.set(region, cutOut(geometryByRegion.get(region) ?? regionOutlines.get(region)!, outlines.get(country)!));
+    const before = geometryByRegion.get(region) ?? Promise.resolve(regionOutlines.get(region)!);
+    geometryByRegion.set(region, before.then((outline) => cutOut(outline, outlines.get(country)!, clip)));
     cuts.push({ region, country, votes: Object.fromEntries(votes) });
   }
-  return { geometryByRegion, cuts };
+  const settled = await Promise.all(
+    [...geometryByRegion].map(async ([region, outline]) => [region, await outline] as const),
+  );
+  return { geometryByRegion: new Map(settled), cuts };
 }
 
 /** Which outline contains a point, for outlines `resolveCountryOverlaps`
@@ -157,7 +173,8 @@ export function outlineLookup(outlines: ReadonlyMap<string, Outline>): (point: L
   return ([x, y]) => index.first(x, y);
 }
 
-function indexOutlines(outlines: ReadonlyMap<string, Outline>): CountryPolygonIndex {
+/** The index `outlineLookup` answers from. */
+export function indexOutlines(outlines: ReadonlyMap<string, Outline>): CountryPolygonIndex {
   const index = new CountryPolygonIndex();
   for (const [code, outline] of outlines) {
     index.add(
@@ -220,7 +237,7 @@ function vote(votesByPair: Map<string, Map<string, number>>, pair: string, owner
 /** `outline` minus `owner`. Only the parts whose bbox meets the owner's
  * parts are clipped, against only those owner parts; the rest are kept
  * as they are, untouched by the clipper's rounding. */
-function cutOut(outline: Outline, owner: Outline): Outline {
+async function cutOut(outline: Outline, owner: Outline, clip: Clipper): Promise<Outline> {
   const ownerBoxes = owner.map((part) => ringBbox(part[0]!));
   const meets = (box: number[]) =>
     ownerBoxes.some((o) => box[0]! <= o[2]! && box[2]! >= o[0]! && box[1]! <= o[3]! && box[3]! >= o[1]!);
@@ -229,10 +246,10 @@ function cutOut(outline: Outline, owner: Outline): Outline {
   for (const part of outline) (meets(ringBbox(part[0]!)) ? near : kept).push(part);
   if (near.length === 0) return outline;
   const nearBox = near.map((part) => ringBbox(part[0]!));
-  const clipper = owner.filter((_, i) =>
+  const clipParts = owner.filter((_, i) =>
     nearBox.some((n) => n[0]! <= ownerBoxes[i]![2]! && n[2]! >= ownerBoxes[i]![0]! && n[1]! <= ownerBoxes[i]![3]! && n[3]! >= ownerBoxes[i]![1]!),
   );
-  return [...kept, ...(difference(near as Geom, clipper as Geom) as Outline)];
+  return [...kept, ...(await clip.difference(near, clipParts))];
 }
 
 function outlineArea(outline: Outline): number {

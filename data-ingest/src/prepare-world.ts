@@ -36,12 +36,13 @@ import { loadOsmCountryRelations, withOsmCountryBorders } from "./lib/osmCountry
 import {
   cutCountriesOutOfForeignRegions,
   type Outline,
+  indexOutlines,
   outlineLookup,
   resolveCountryOverlaps,
 } from "./lib/countryOutlines.ts";
 import { bboxAndPointOnFeature } from "./lib/pointOnFeature.ts";
 import { buildAdminBoundaryIndex } from "./lib/adminBoundaryIndex.ts";
-import type { CityCandidateMeta } from "./lib/adminBoundaryIndex.ts";
+import { type AdminBoundaryWorkerData, type CityCandidateMeta, PASS1_MAX_BYTES } from "./lib/adminBoundaryIndex.ts";
 import {
   selectRegionLevels,
   selectPrimaryLevels,
@@ -53,6 +54,7 @@ import {
 import { buildRegionIndex, assignCityRegion } from "./lib/regionPolygons.ts";
 import { streamCities500 } from "./lib/cities500.ts";
 import type { Cities500Row } from "./lib/cities500.ts";
+import type { VoronoiCityCandidate } from "./lib/voronoiFallback.ts";
 import { loadAdmin1Names } from "./lib/admin1Codes.ts";
 import { buildCityFallback, buildContainerFallback, buildRegionFallback } from "./lib/voronoiFallback.ts";
 import {
@@ -63,6 +65,8 @@ import {
 } from "./lib/countryAdminLevels.ts";
 import type { LonLat } from "./lib/geo.ts";
 import type { RegionCandidate } from "./lib/adminBoundaryIndex.ts";
+import { CLIP_MAX_VERTICES, clipHandlers, clipper } from "./lib/clip.ts";
+import { defaultWorkerCount, WorkerPool } from "./lib/workerPool.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
@@ -85,6 +89,13 @@ async function main(): Promise<void> {
     throw new Error(`no *-admin.geojson files found in ${WORK_DIR} -- run scripts/extract-boundaries.sh first`);
   }
   console.error(`found ${files.length} admin files: ${files.map((f) => path.basename(f)).join(", ")}`);
+
+  // Worker threads for the polygon clipping (clip.ts) -- PREPARE_WORKERS=0
+  // clips on the main thread instead, with the same result.
+  const workerUrl = new URL("./lib/ingestWorker.ts", import.meta.url);
+  const pool = new WorkerPool(workerUrl, defaultWorkerCount(), clipHandlers, { maxWeight: CLIP_MAX_VERTICES });
+  const clip = clipper(pool);
+  console.error(`${pool.size} worker threads`);
 
   console.error("Loading country index (Natural Earth, worldwide)...");
   const naturalEarth = loadCountryIndex(COUNTRIES_SOURCE);
@@ -116,7 +127,7 @@ async function main(): Promise<void> {
     );
   }
   osmCountries.outlineJsonByCode.clear();
-  const resolved = resolveCountryOverlaps(outlines, countries.lookup, new Set(naturalEarthOutlines));
+  const resolved = await resolveCountryOverlaps(outlines, countries.lookup, new Set(naturalEarthOutlines), clip);
   for (const cut of resolved.cuts) {
     console.error(`  ${cut.owner} cut out of ${cut.from} (sampled: ${JSON.stringify(cut.votes)})`);
   }
@@ -138,7 +149,18 @@ async function main(): Promise<void> {
   // A polygon Natural Earth puts entirely at sea (a coastal village inland
   // of its coastline, an atoll it doesn't have) gets the country whose
   // outline is drawn there -- see resolvePolygonCountry.
-  const index = await buildAdminBoundaryIndex(files, countries, outlineLookup(resolved.outlines));
+  // Its own pool: these workers hold the country lookups, which the
+  // clipping ones don't need.
+  const pass1Pool = new WorkerPool(workerUrl, pool.size, {}, {
+    workerData: {
+      naturalEarthPath: COUNTRIES_SOURCE,
+      osmBorders: osmCountries.borders.pack(),
+      outlines: indexOutlines(resolved.outlines).pack(),
+    } satisfies AdminBoundaryWorkerData,
+    maxWeight: PASS1_MAX_BYTES,
+  });
+  const index = await buildAdminBoundaryIndex(files, countries, outlineLookup(resolved.outlines), pass1Pool);
+  await pass1Pool.close();
 
   console.error("Pass 1.5/4: selecting each country's region level...");
   const region = selectRegionLevels(index, countries);
@@ -176,7 +198,7 @@ async function main(): Promise<void> {
     for (const [countryCode, points] of regionPointsByCountry) {
       const countryPolygon = countries.simplifiedFeatureByCode.get(countryCode);
       if (!countryPolygon) continue;
-      const candidates = buildRegionFallback(countryPolygon, points, admin1Names);
+      const candidates = await buildRegionFallback(countryPolygon, points, admin1Names, clip);
       for (const candidate of candidates) {
         const key = `${candidate.country} voronoi ${candidate.name}`;
         const feature: Feature<Polygon | MultiPolygon, { name: string }> = {
@@ -205,10 +227,11 @@ async function main(): Promise<void> {
   // cutCountriesOutOfForeignRegions. Each region keeps its original bbox:
   // it is only a prefilter, and changing it would reorder regionIndex,
   // which assignCityRegion is sensitive to (see the city-states below).
-  const regionCut = cutCountriesOutOfForeignRegions(
+  const regionCut = await cutCountriesOutOfForeignRegions(
     new Map([...finalRegions].map(([key, r]) => [key, { country: r.country, geometry: r.feature.geometry }])),
     resolved.outlines,
     countries.lookup,
+    clip,
   );
   for (const cut of regionCut.cuts) {
     console.error(`  ${cut.country} cut out of region ${cut.region} (sampled: ${JSON.stringify(cut.votes)})`);
@@ -311,9 +334,46 @@ async function main(): Promise<void> {
   }
   let withinRegionCount = 0;
 
+  // A container in a within-region fallback region is replaced by its
+  // cells. Emitting it as well, as a backstop, would be worse than no
+  // backstop: at the compressor's max depth a leaf cell on a border
+  // between two cells is won by the candidate covering the largest share
+  // of it, which is always the container (100%) over either neighbouring
+  // cell -- measured as ~5% of random Highland lookups returning
+  // "Highland". The cells tile the container, so nothing is lost; a
+  // container with no point at all is still emitted as itself.
+  //
+  // A container's cells can take minutes to clip (Highland's polygon has
+  // 355k vertices, and every cell is clipped against all of it), so the
+  // containers are fetched by the read below, which happens anyway, and
+  // their cells clipped on the pool while the primaries stream past.
+  const containerPoints = new Map<string, Cities500Row[]>(); // container id -> its country's points
+  for (const candidate of index.cityCandidates) {
+    const withinRegions = VORONOI_CITY_FALLBACK_WITHIN_REGIONS.get(candidate.country);
+    const points = withinRegionPoints.get(candidate.country);
+    if (!withinRegions || !points || !primary.primaryIds.has(candidate.id)) continue;
+    const region = resolveCandidateRegion(candidate);
+    if (region && withinRegions.includes(region)) containerPoints.set(candidate.id, points);
+  }
+  const cellsByContainer = new Map<string, Promise<VoronoiCityCandidate[]>>();
+
   // A whole unit's sub-units (Wales' communities inside Cardiff) are dropped
   // from the stream below -- see CountryAdminLevels.wholeUnits.
-  const suppressed = await findSuppressedByWholeUnits(files, index, primary, resolveCandidateRegion);
+  const suppressed = await findSuppressedByWholeUnits(
+    files,
+    index,
+    primary,
+    resolveCandidateRegion,
+    new Set(containerPoints.keys()),
+    (id, geometryJson) => {
+      const container: Feature<Polygon | MultiPolygon> = {
+        type: "Feature",
+        properties: {},
+        geometry: JSON.parse(geometryJson) as Polygon | MultiPolygon,
+      };
+      cellsByContainer.set(id, buildContainerFallback(container, containerPoints.get(id)!, clip));
+    },
+  );
 
   // Primaries are written as they stream past, straight from their source
   // text, while the same read marks which other candidates they cover --
@@ -321,25 +381,7 @@ async function main(): Promise<void> {
   const tracker = createGapFillTracker(index, primary, resolveCandidateRegion);
   const primariesFound = await streamPrimaries(files, tracker, async (candidate, geometryJson) => {
     if (suppressed.has(candidate.id)) return;
-    // A container in a within-region fallback region is replaced by its
-    // cells. Emitting it as well, as a backstop, would be worse than no
-    // backstop: at the compressor's max depth a leaf cell on a border
-    // between two cells is won by the candidate covering the largest
-    // share of it, which is always the container (100%) over either
-    // neighbouring cell -- measured as ~5% of random Highland lookups
-    // returning "Highland". The cells tile the container, so nothing is
-    // lost; a container with no point at all is still emitted as itself.
-    // Only these few containers are parsed; every other primary stays text.
-    const withinRegions = VORONOI_CITY_FALLBACK_WITHIN_REGIONS.get(candidate.country);
-    const points = withinRegionPoints.get(candidate.country);
-    const region = withinRegions && points ? resolveCandidateRegion(candidate) : null;
-    const cells =
-      region && withinRegions!.includes(region)
-        ? buildContainerFallback(
-            { type: "Feature", properties: {}, geometry: JSON.parse(geometryJson) as Polygon | MultiPolygon },
-            points!,
-          )
-        : [];
+    const cells = (await cellsByContainer.get(candidate.id)) ?? [];
     if (cells.length === 0) {
       if (await emitCity(candidate, geometryJson)) cityCount++;
       return;
@@ -388,10 +430,14 @@ async function main(): Promise<void> {
       points.push(row);
     }
     let voronoiCount = 0;
-    for (const [countryCode, points] of pointsByCountry) {
-      const countryPolygon = countries.simplifiedFeatureByCode.get(countryCode);
-      if (!countryPolygon) continue;
-      const candidates = buildCityFallback(countryPolygon, points);
+    // Every country's cells are clipped at once, then emitted in order.
+    const candidatesByCountry = await Promise.all(
+      [...pointsByCountry].map(([countryCode, points]) => {
+        const countryPolygon = countries.simplifiedFeatureByCode.get(countryCode);
+        return countryPolygon ? buildCityFallback(countryPolygon, points, clip) : [];
+      }),
+    );
+    for (const candidates of candidatesByCountry) {
       for (const candidate of candidates) {
         const emitted = await emitCity(candidate, JSON.stringify(candidate.geometry));
         if (emitted) {
@@ -414,6 +460,7 @@ async function main(): Promise<void> {
   }
 
   await new Promise<void>((resolve, reject) => cityOut.end((err?: Error | null) => (err ? reject(err) : resolve())));
+  await pool.close();
 
   // Structural, not CityCandidateMeta itself, so a synthesized Voronoi
   // fallback candidate (voronoiFallback.ts's VoronoiCityCandidate -- no
@@ -516,5 +563,6 @@ async function main(): Promise<void> {
 
 main().catch((err: unknown) => {
   console.error(err);
-  process.exitCode = 1;
+  // Not just exitCode: the worker threads would keep the process alive.
+  process.exit(1);
 });

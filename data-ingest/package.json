@@ -23,7 +23,8 @@
     "@turf/union": "^7.4.0",
     "d3-delaunay": "^6.0.4",
     "polyclip-ts": "^0.16.8",
-    "rbush": "^4.0.1"
+    "rbush": "^4.0.1",
+    "robust-predicates": "^3.0.3"
   },
   "devDependencies": {
     "@types/d3-delaunay": "^6.0.4",

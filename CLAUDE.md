@@ -567,6 +567,37 @@ id peeked off the raw bytes (`geojsonseqStream.ts`'s
 whole corpus. A primary only counts as covering a gap-fill candidate of
 its own country.
 
+**`prepare-world.ts` runs on worker threads, with byte-identical output.**
+A worldwide run takes ~2.5 minutes on 16 cores (it was ~20). Three kinds
+of work are spread over `workerPool.ts`'s threads (`PREPARE_WORKERS=N`,
+default one per core; `0` runs everything on the main thread, the path
+the parallel one must match):
+- **Pass 1's per-relation work.** `classifyAdminFeature` (parse, country
+  resolution, area, region simplify) runs on batches of raw records. The
+  results are folded in strictly in corpus order (`buildAdminBoundaryIndex`),
+  since candidate order and same-name region ties depend on it. The
+  workers share the country lookups through `SharedArrayBuffer`s
+  (`CountryPolygonIndex.pack`), rather than each getting a copy.
+- **Every polyclip-ts call** (`clip.ts`): country overlaps, countries cut
+  out of regions, and Voronoi cells. polyclip-ts computes in arbitrary
+  precision (bignumber.js), so it was most of the run. Cuts that depend on
+  each other still run in the original order, each from the outlines the
+  cuts before it left, chained through promises (`countryOutlines.ts`).
+- **Cropping before clipping.** Before each call, `cropForClip` cuts the
+  clipper down to the edges near the subject, and replaces the rest of each
+  ring with a path along a frame that keeps every winding number inside
+  it. polyclip-ts then answers the same, byte for byte, for a fraction of
+  the work. Highland's 355k-vertex council area took ~7 s and ~1.5 GB per
+  Voronoi cell before. `test/cropForClip.test.ts` compares the two on
+  shapes built to break it (a spiral winding around the cell); it fails
+  when the winding is not preserved.
+
+The pool has a weight budget (`maxWeight`: vertices for clipping, bytes
+for Pass 1), because sixteen threads in polyclip-ts at once took 22 GB.
+Point-in-polygon tests of one polygon against many points use
+`preparedPolygon.ts`, which gives turf's answers exactly, boundary
+included, from a banded edge index.
+
 **Memory-constrained runs**: use
 `systemd-run --user --scope -p MemoryMax=<N>` around a build, and set `N`
 *below* what the system can actually spare — too high and the kernel's

@@ -202,8 +202,9 @@ cd demo && npx playwright install chromium && npx playwright test   # click-to-q
 `make netherlands` and `make europe` filter the worldwide pipeline's
 already-resolved output, so they build the worldwide data first if it is
 missing, which is slow from scratch (the planet download, osmium extraction
-and `prepare-world.ts`; the compressor step alone is about a minute with
-`--workers 16`). `data-ingest/PIPELINE-STAGES.md` has the full `data/`
+and `prepare-world.ts`; `prepare-world.ts` is about 2.5 minutes on 16
+cores, `PREPARE_WORKERS=N` to use fewer, and the compressor step alone is
+about a minute with `--workers 16`). `data-ingest/PIPELINE-STAGES.md` has the full `data/`
 layout and what each stage reads and writes. The compressor CLI
 (`node compressor/src/cli.ts`) also takes `--workers N` to spread chunk work
 across threads (output is byte-identical at every count) and `--only-chunks`
