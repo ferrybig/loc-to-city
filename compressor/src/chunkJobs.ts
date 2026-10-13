@@ -4,9 +4,9 @@ import type { CellBounds } from "./geometry.ts";
 
 /** One chunk's worth of work: everything a worker needs to reproduce
  * `buildChunkRecords` + `encodeChunk` for this chunk, with no further
- * access to the spatial index. `candidates` must be in exactly the order
- * `CandidateIndex.candidatesForBbox` returned it (see quadtree.ts's doc
- * comment on why order is load-bearing, not just which candidates). */
+ * access to the spatial index. `candidates` is what
+ * `CandidateIndex.candidatesForBbox` returned for the chunk, in any order
+ * (quadtree.ts's `preferred` makes the output independent of it). */
 export interface ChunkJob {
   chunkIndex: number;
   bounds: CellBounds;

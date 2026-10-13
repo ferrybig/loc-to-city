@@ -67,6 +67,7 @@ import {
 import type { LonLat } from "./lib/geo.ts";
 import type { RegionCandidate } from "./lib/adminBoundaryIndex.ts";
 import { CLIP_MAX_VERTICES, clipHandlers, clipper } from "./lib/clip.ts";
+import { DuplicateGeometries, osmUrlFor } from "./lib/duplicateGeometries.ts";
 import { defaultWorkerCount, WorkerPool } from "./lib/workerPool.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -81,6 +82,7 @@ const HIERARCHY_OUT = path.join(REPO_ROOT, "data/02-resolved/world/hierarchy.jso
 const CITIES_OUT = path.join(REPO_ROOT, "data/02-resolved/world/cities-filtered.geojsonseq");
 const REGIONS_OUT = path.join(REPO_ROOT, "data/02-resolved/world/regions.geojsonseq");
 const COUNTRIES_OUT = path.join(REPO_ROOT, "data/02-resolved/world/country-polygons.geojson");
+const DUPLICATES_OUT = path.join(REPO_ROOT, "data/02-resolved/world/duplicate-cities.tsv");
 
 async function main(): Promise<void> {
   mkdirSync(path.dirname(HIERARCHY_OUT), { recursive: true });
@@ -324,6 +326,7 @@ async function main(): Promise<void> {
   const skippedNoRegionByCountry = new Map<string, number>();
   // Cities emitted per `${country}\t${region}`, for REGION_CITIES.
   const citiesByRegion = new Map<string, number>();
+  const duplicates = new DuplicateGeometries<CityProperties>();
   let cityCount = 0;
   let skippedNoName = 0;
   let skippedNoGeometry = 0;
@@ -539,6 +542,7 @@ async function main(): Promise<void> {
     };
     const regionKey = `${candidate.country}\t${region}`;
     citiesByRegion.set(regionKey, (citiesByRegion.get(regionKey) ?? 0) + 1);
+    duplicates.add(geometryJson, properties);
     // Same bytes JSON.stringify gives a {type, properties, geometry} feature,
     // and properties-first is what filter-by-scope.ts peeks at.
     await write(`\x1e{"type":"Feature","properties":${JSON.stringify(properties)},"geometry":${geometryJson}}\n`);
@@ -584,6 +588,26 @@ async function main(): Promise<void> {
   writeFileSync(HIERARCHY_OUT, JSON.stringify(hierarchy));
   console.error(
     `wrote ${HIERARCHY_OUT} (${hierarchy.length} countries, ${hierarchy.reduce((n, c) => n + c.regions.length, 0)} regions) and ${CITIES_OUT} (${cityCount} cities)`,
+  );
+
+  // Cities drawn exactly alike (DuplicateGeometries' doc comment): only one
+  // of each group resolves, so they are listed for reporting.
+  const duplicateGroups = duplicates.groups();
+  const duplicateRows = duplicateGroups.flatMap((group, i) =>
+    group.map((city) =>
+      [i + 1, city.country, city.region, city.name, city.id ?? "", (city.id && osmUrlFor(city.id)) ?? ""].join("\t"),
+    ),
+  );
+  writeFileSync(DUPLICATES_OUT, ["group\tcountry\tregion\tname\tid\tosm", ...duplicateRows, ""].join("\n"));
+  const duplicatesByCountry = new Map<string, number>();
+  for (const group of duplicateGroups) {
+    for (const country of new Set(group.map((city) => city.country))) {
+      duplicatesByCountry.set(country, (duplicatesByCountry.get(country) ?? 0) + 1);
+    }
+  }
+  console.error(
+    `wrote ${DUPLICATES_OUT} (${duplicateGroups.length} geometries shared by ${duplicateRows.length} cities; ` +
+      `${[...duplicatesByCountry].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([c, n]) => `${c}=${n}`).join(", ")})`,
   );
 
   writeFileSync(COUNTRIES_OUT, `{"type":"FeatureCollection","features":[${countryFeatureJson.join(",")}]}`);

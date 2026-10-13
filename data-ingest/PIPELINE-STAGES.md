@@ -128,7 +128,9 @@ data/02-resolved/world/       gitignored, entirely local build output
 ├── hierarchy.json
 ├── regions.geojsonseq           (763MB, unsimplified)
 ├── country-polygons.geojson
-└── cities-filtered.geojsonseq   (4.4GB)
+├── cities-filtered.geojsonseq   (4.4GB)
+└── duplicate-cities.tsv         (cities with byte-identical geometry,
+                                  for reporting; nothing reads it)
 
         │ filter-by-scope.ts --only-country NL / --only-continent Europe
         ▼

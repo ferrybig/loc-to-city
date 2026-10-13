@@ -162,6 +162,10 @@ paid off:
    Montenegro 9.6, Namibia 0.1, Uganda 6.4, Uruguay 1.3, Qatar 1.2, ... and
    a tail of islands) means most of that country answers with its region.
    Check those by hand before trusting any of them.
+7. **Cities drawn twice.** `data/02-resolved/world/duplicate-cities.tsv`,
+   written by every `prepare-world.ts` run, lists cities whose geometry is
+   byte-identical to another's (see "Cities drawn twice" below), with
+   links to fix them in OSM.
 
 Confirming a hypothesis about the OSM data does not need a world rebuild:
 scratch-script the extracted GeoJSON directly. `data-ingest`'s own
@@ -417,8 +421,8 @@ below).
     (`candidateIndex.ts`), and on a tie (two containing polygons of equal
     area, or a max-depth cell they score the same on) the first returned
     wins (`quadtree.ts`). Adding candidates rebuilds the tree, so any such
-    tie anywhere can flip. A tie-break by id instead of tree order would
-    make it stable (a compressor change; untried).
+    tie anywhere can flip. Fixed the same day by a tie-break that does not
+    depend on order; see "Cities drawn twice".
     300,000 uniform random points (100,260 on land) did not change at
     all.
   - **Districts below it, under other names.** Still open: Astana
@@ -430,6 +434,43 @@ below).
     A city that has finer districts under a *different* name than itself
     at the city tier (Tallinn, Mexico City, Lisbon, below) is the same
     shape one tier down.
+- **Cities drawn twice, with identical geometry.** *(human error)* Two OSM
+  objects with the same outline, both becoming a city: 226 geometries
+  shared by 453 cities, all within one region (US 80, CA 67, IR 28, RU 9,
+  NA 8, HR 7, KE 5, ...). The kinds: an admin relation and a closed way
+  drawn on the same line (Windhoek, Wellington CO and most US ones);
+  `X` and `Village of X` / `Town of X` (Alberta: Alix, Bassano, Ponoka);
+  `X` and `شهر X` in Iran; `X City Limits` (Maynardville TN), `Duplicate
+  of X` (Yemen); Crimea's Ukrainian-era city councils and the Russian
+  okrugs drawn over them (Yalta, Sudak, Feodosia, Simferopol), which is
+  deliberate dual mapping rather than a mistake; and two differently
+  named units sharing one outline (Pulap and Tamatam, Multan city tehsil
+  and Gulshan).
+
+  Only one of a pair can get the cells; the other is a place with no
+  cells (`search` finds it, `locate` says `no geometry found`). Which one
+  used to be the first the compressor's R-tree search returned, and any
+  added candidate reshuffles that, so builds differed at these places for
+  no reason (61 cities500 points when `REGION_CITIES` added 24 cities).
+  Since 2026-10-13 `quadtree.ts`'s `preferred` decides: smaller area,
+  then the finer tier (a city over a region drawn the same: Bamako, Mong
+  La), then the lower global id, which within a region is the order of
+  the `id` property (osmium's area id), so the older OSM object. That
+  changed 71 cities500 points once, all at identically drawn pairs (Crimea back to
+  the councils, `Duplicate of X` and `City Limits` losing to the real
+  one), and made the choice independent of candidate order
+  (`compressor/test/quadtree.test.ts`). No measurable cost: the four
+  slowest `world-high-res` chunks took 15.2/15.2/14.1 s before and
+  15.1/13.8/13.7 s after, alternated.
+
+  `prepare-world.ts` lists every group in
+  `data/02-resolved/world/duplicate-cities.tsv` (one row per city, with
+  its group, region and openstreetmap.org link; osmium's area id `a<n>`
+  is relation `(n-1)/2` for odd `n`, way `n/2` for even). Reporting them
+  upstream, or a rule that drops the loser before the compressor (prefer
+  a `place=*` tag, or the relation over the way), would remove the
+  placeless records; not done. Only byte-identical geometry is found: the
+  same outline written from another starting vertex is not.
 - **Towns mapped only as place nodes cannot be returned.** *(unsolvable)*
   Shire (14.083301, 38.281860) and Yebokile (10.447974, 37.896309) in
   Ethiopia have no boundary relation in OSM (the whole of Ethiopia has two
@@ -496,10 +537,11 @@ below).
     entry ("Capitals that are their own region"). Its `REGION_CITIES`
     took 13 capitals off this list on 2026-10-13 (Vienna, Minsk, Prague,
     Kinshasa, Berlin, Conakry, Riga, Kuala Lumpur, Port Louis, Bucharest,
-    Moscow, Dushanbe, Kyiv). Bamako resolves since the same build, but
-    only by winning a tie it used to lose (see "Capitals that are their
-    own region"). The rest are either a province named after its seat or
-    not checked yet (that entry says which).
+    Moscow, Dushanbe, Kyiv). Bamako resolves since the same day: its city
+    is drawn exactly like a second region (`Bamako - Koulikoro`), and a
+    city now beats a region drawn the same (see "Cities drawn twice").
+    The rest are either a province named after its seat or not checked
+    yet (that entry says which).
     Baku (Azerbaijan); Hamilton
     (Bermuda); Thimphu (Bhutan); Gaborone (Botswana); Gitega (Burundi);
     Praia (Cabo Verde); Bangui (Central African Rep.); Yamoussoukro (Côte

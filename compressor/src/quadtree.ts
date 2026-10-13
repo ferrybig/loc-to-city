@@ -25,13 +25,30 @@ function pruneAncestors(candidates: IndexedCandidate[]): IndexedCandidate[] {
   return candidates.filter((c) => !ancestorIds.has(c.globalId));
 }
 
+/** Of two candidates equally good for a cell, the one that gets it: the
+ * smaller, then (for identical polygons, which only differ in this) the
+ * finer tier -- a city over a region over a country -- then the lower
+ * global id (cities in a region are numbered by their `id` property, OSM's
+ * relation id for an OSM city). A total order, so the
+ * answer never depends on the order candidates come in: that is the
+ * spatial index's search order, which any added candidate anywhere
+ * reshuffles. OSM holds a few hundred duplicate relations with identical
+ * geometry (Alix and "Village of Alix"); with first-in-array-wins they
+ * flipped between builds for no reason (countries.md, "Capitals that are
+ * their own region"). */
+function preferred(a: IndexedCandidate, b: IndexedCandidate): IndexedCandidate {
+  if (a.area !== b.area) return a.area < b.area ? a : b;
+  if (a.ancestorIds.length !== b.ancestorIds.length) return a.ancestorIds.length > b.ancestorIds.length ? a : b;
+  return a.globalId <= b.globalId ? a : b;
+}
+
 /** Adaptive quadtree subdivision for one chunk (Section 10's "Building
  * records" guidance): stop and emit nothing when no place touches a cell;
  * otherwise prune ancestors of any more specific candidate also touching
  * this cell (a region is irrelevant here if one of its own cities is also a
  * candidate), then stop and emit a record when *every remaining* candidate
- * fully contains the cell (preferring the smallest on ties -- safe exactly
- * because none of their boundaries pass through here); otherwise at least
+ * fully contains the cell (preferring the smallest, see `preferred` -- safe
+ * exactly because none of their boundaries pass through here); otherwise at least
  * one remaining candidate's boundary crosses the cell, so subdivide to find
  * where; at max_depth, resolve remaining ambiguity among the pruned
  * candidates by whichever covers the largest share of the cell, since this
@@ -51,14 +68,12 @@ function pruneAncestors(candidates: IndexedCandidate[]): IndexedCandidate[] {
  * to that region once no city touches that specific cell anymore.
  *
  * `rootCandidates` must already be the result of querying the spatial
- * index for `chunkBounds` (i.e. `CandidateIndex.candidatesForBbox`), in
- * that exact order -- this function never touches the index itself, which
- * is what makes it safe to run inside a worker thread given only a plain
- * array. Order matters beyond just "which candidates": two tie-breaks
- * below (the smallest-area pick among fully-containing candidates, and the
- * max-depth largest-share pick) break ties by first-in-array-wins, so a
- * caller that reorders `rootCandidates` (sorting, round-tripping through a
- * Set/Map, etc.) can silently change the output. */
+ * index for `chunkBounds` (i.e. `CandidateIndex.candidatesForBbox`) --
+ * this function never touches the index itself, which is what makes it
+ * safe to run inside a worker thread given only a plain array. Their
+ * order does not matter: every pick below goes through
+ * `preferred`, a total order, so the output is the same for any order of
+ * `rootCandidates`. */
 export function buildChunkRecords(
   rootCandidates: IndexedCandidate[],
   chunkBounds: CellBounds,
@@ -97,9 +112,7 @@ export function buildChunkRecords(
 
     // One classification per candidate answers both questions this cell
     // needs -- "does it touch" and "does it fully contain" -- so the
-    // expensive geometry is walked once instead of twice. Order is
-    // preserved exactly (see this function's doc comment on why that's
-    // load-bearing for the tie-breaks below).
+    // expensive geometry is walked once instead of twice.
     const touching: IndexedCandidate[] = [];
     const containsCell = new Set<number>();
     for (const candidate of bboxOverlapping) {
@@ -120,7 +133,7 @@ export function buildChunkRecords(
 
     const containing = relevant.filter((candidate) => containsCell.has(candidate.globalId));
     if (containing.length === relevant.length) {
-      const winner = containing.reduce((a, b) => (a.area <= b.area ? a : b));
+      const winner = containing.reduce(preferred);
       emit(cellX, cellY, depth, winner.globalId);
       return;
     }
@@ -134,18 +147,16 @@ export function buildChunkRecords(
       return;
     }
 
-    let bestId = relevant[0]!.globalId;
+    let best = relevant[0]!;
     let bestScore = -1;
-    let bestArea = Infinity;
     for (const candidate of relevant) {
       const score = countContainedSamples(candidate.geometry, bounds);
-      if (score > bestScore || (score === bestScore && candidate.area < bestArea)) {
+      if (score > bestScore || (score === bestScore && preferred(candidate, best) === candidate)) {
         bestScore = score;
-        bestArea = candidate.area;
-        bestId = candidate.globalId;
+        best = candidate;
       }
     }
-    emit(cellX, cellY, depth, bestId);
+    emit(cellX, cellY, depth, best.globalId);
   }
 
   recurse(0, 0, 0, rootCandidates);

@@ -129,7 +129,7 @@ node --test compressor/test/geometry.test.ts
 `npm test -w data-ingest` covers the pure, library-shaped parts only
 (`adminLevelDetection`, `placeTagSignal`, `cities500`, `admin1Codes`,
 `polygonCountry`, `voronoiFallback`, `geojsonseqStream`, `pointOnFeature`,
-`osmCountryBorders`); the ingest scripts themselves have
+`osmCountryBorders`, `duplicateGeometries`); the ingest scripts themselves have
 no test coverage — validate those by running a scoped build (see below)
 and reading their diagnostic output.
 
@@ -450,10 +450,12 @@ encodes the resulting records → `writer.ts` assembles the final buffer.
 ~1000x) and reporting `onChunkBuilt` incrementally as each worker's result
 lands — not batched until the end, which matters for progress reporting on
 a big build.
-Candidate array order is significant: `quadtree.ts` breaks containment/
-depth ties by first-in-array-wins, so anything that reorders candidates
-(a `Set`/`Map` round-trip, a sort) can silently change output for
-ambiguous cells.
+Candidate array order is not significant: every pick in `quadtree.ts`
+goes through `preferred` (smaller area, then finer tier, then lower
+global id), a total order. It used to be first-in-array-wins, which made
+the few hundred OSM relations with identical geometry flip between builds
+whenever any candidate was added, since that reorders the R-tree's
+search results. Keep it a total order.
 
 **`geometry.ts`'s `classifyCell`** replaced turf's `booleanContains`/
 `booleanIntersects` — those gave wrong answers on multi-part polygons at
