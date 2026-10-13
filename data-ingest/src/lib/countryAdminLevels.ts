@@ -735,9 +735,14 @@ export const VORONOI_REGION_FALLBACK: ReadonlySet<string> = new Set(["SI"]);
  * covering the country's whole outline (country-polygons.geojson's, after
  * countryOutlines.ts). Monaco's own `admin_level=8` "Monaco" relation is
  * its city once it has a region to sit in; the Vatican has nothing below
- * its `admin_level=2` relation. See countries.md's Monaco and Vatican
- * sections. */
+ * its `admin_level=2` relation. San Marino (castelli, level 8), Andorra
+ * (parishes, level 7) and Malta (local councils, level 8) have a full
+ * city tier in OSM and only lacked a region to sit in. See countries.md's
+ * Monaco, Vatican and "Country only" entries. */
 export const CITY_STATES: ReadonlyMap<string, { region: string; city?: string }> = new Map([
   ["MC", { region: "Monaco" }],
   ["VA", { region: "Vatican", city: "Vatican City" }],
+  ["SM", { region: "San Marino" }],
+  ["AD", { region: "Andorra" }],
+  ["MT", { region: "Malta" }],
 ]);

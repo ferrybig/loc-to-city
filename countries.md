@@ -378,7 +378,7 @@ below).
 - **Capitals.** *(open)* `verify/test/world-queries.test.ts` looks up
   the capital of every country and dependency GeoNames lists one for
   (232; `verify/src/cases.ts`'s `CAPITALS` and `OPEN_CAPITALS` tables carry the
-  coordinates and the exact rule) and measured 78 resolving and 154
+  coordinates and the exact rule) and measured 81 resolving and 151
   not, on `world-high-res.bin` (built 2026-10-12). A capital resolves when
   the country is right and the **city** tier is named for the capital. The
   goal is a city answer: "all photos in the city of Beijing" is a city
@@ -390,19 +390,19 @@ below).
   fifth, **no country or the wrong one**, is gone since the OSM country
   outlines: Vatican City and Monaco resolve, and Gibraltar and the three
   atolls get their country; see "Natural Earth's outlines are too coarse".)
-  - **Country only** (28): neither a region nor a city covers the point.
+  - **Country only** (25): neither a region nor a city covers the point.
     Microstates and small territories, and also Manila (Philippines),
     Tbilisi (Georgia) and Skopje (North Macedonia), which have their own
     sections. `CITY_STATES` (Monaco, Vatican) is the mechanism for the
-    microstates among them.
-    Andorra la Vella (Andorra); The Valley (Anguilla); Oranjestad (Aruba);
+    microstates among them (Andorra, Malta and San Marino were added
+    2026-10-13 and are out of this list).
+    The Valley (Anguilla); Oranjestad (Aruba);
     Nassau (Bahamas); George Town (Cayman Is.); Willemstad (Curaçao);
     Stanley (Falkland Is.); Port-aux-Français (Fr. S. Antarctic Lands);
     Tbilisi (Georgia); Gibraltar (Gibraltar); Bissau (Guinea-Bissau); Saint
-    Helier (Jersey); Tarawa (Kiribati); Valletta
-    (Malta); Majuro (Marshall Is.); Alofi (Niue); Skopje (North Macedonia);
+    Helier (Jersey); Tarawa (Kiribati); Majuro (Marshall Is.); Alofi (Niue); Skopje (North Macedonia);
     Manila (Philippines); Adamstown (Pitcairn Is.); Grytviken (S. Geo. and
-    the Is.); Jamestown (Saint Helena); San Marino (San Marino); Philipsburg
+    the Is.); Jamestown (Saint Helena); Philipsburg
     (Sint Maarten); Gustavia (St-Barthélemy); Marigot (St-Martin);
     Saint-Pierre (St. Pierre and Miquelon); Funafuti (Tuvalu); Mata-Utu
     (Wallis and Futuna Is.)
@@ -516,6 +516,18 @@ tessellates its country, so the bug was always grain, not coverage.
   region 4 (provinces) / city 5 (districts, ~100%): Kunduz resolves to
   `Kunduz Province / Kunduz District`, Kabul to `Kabul Province / Kabul
   Municipality` (the local name `کابل ښاروالۍ`).
+
+## Andorra (AD)
+
+`region []`, `city [7]` (103.5%).
+
+- **Andorra had no region, so none of its parishes resolved.** Andorra la
+  Vella answered `Andorra` with no region or city: OSM has the seven
+  parishes at `admin_level=7`, but a city needs a region to sit in and
+  Andorra has no region tier. Fixed by `CITY_STATES` (`countryAdminLevels.ts`,
+  as for Monaco): one region, `Andorra`, covering the outline. The parishes
+  became the cities (measured on `world-high-res.bin`, built 2026-10-13:
+  42.50779, 1.52109 is `Andorra la Vella`, 42.54, 1.51 is `La Massana`).
 
 ## Angola (AO)
 
@@ -912,6 +924,17 @@ tessellates its country, so the bug was always grain, not coverage.
   artifacts": 49.947409, 6.159039 resolves to Germany instead of
   Luxembourg; 49.446226, 5.977764 resolves to Luxembourg instead of France.
 
+## Malta (MT)
+
+`region []`, `city [8]` (97.0%).
+
+- **Malta had no region, so none of its local councils resolved.** Valletta
+  answered `Malta` with no region or city. Same cause and fix as Andorra:
+  `CITY_STATES` gives it one region, `Malta`, and the `admin_level=8` local
+  councils become the cities (measured on `world-high-res.bin`, built
+  2026-10-13: 35.89968, 14.5148 is `Il-Belt Valletta | Valletta`, 36.044,
+  14.2397 `Ir-Rabat | Victoria`, on Gozo).
+
 ## Mexico (MX)
 
 `region [4]`, `city [6]`.
@@ -1172,6 +1195,19 @@ worldwide resolved data (`make netherlands`) and
 - **Russia and Turkey span several continent files.** Moscow,
   Yekaterinburg, Novosibirsk and Istanbul each resolve to their region
   exactly once. Fixed by deduplicating relations by id across files.
+
+## San Marino (SM)
+
+`region []`, `city [8]` (84.2%).
+
+- **San Marino had no region, so none of its castelli resolved.** The
+  capital answered `San Marino` with no region or city. Same cause and fix
+  as Andorra: `CITY_STATES` gives it one region, `San Marino`, and the nine
+  `admin_level=8` castelli become the cities (measured on
+  `world-high-res.bin`, built 2026-10-13: 43.93667, 12.44639 is `Città di
+  San Marino`, 43.964, 12.48 `Serravalle`). The Italian land east of the
+  San Marino river that enclaves list (`List of enclaves and exclaves`) is
+  a few metres wide and not tested.
 
 ## Saudi Arabia (SA)
 
