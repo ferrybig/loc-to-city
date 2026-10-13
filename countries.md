@@ -378,20 +378,58 @@ below).
   Krasnystaw's, were spotted by eye.
 - **Capitals that are their own region** *(open)*. The capital is an OSM
   `admin_level` of the *region* tier, so the only polygons below it are its
-  districts, or nothing. Seen at: Berlin and Hamburg (Germany), Prague
-  (Czechia), Kyiv (Ukraine), Moscow (Russia), Astana (Kazakhstan), Sana'a
-  and Aden (Yemen), Tashkent (Uzbekistan), Minsk (Belarus), Yerevan
-  (Armenia), Ashgabat (Turkmenistan, fixed by a duplicate relation). The
-  levels cannot express this: there is no tier where the city appears as a
-  city. What the current primary/gap-fill model *cannot* do is repeat a
-  region polygon as a city. An untried mechanism: a short opt-in list of
-  "city-state regions" (like `VORONOI_CITY_FALLBACK`) that also emits the
-  region polygon as a gap-fill city, which would make Kyiv, Berlin,
-  Hamburg, Prague and Moscow answer with their own name without disturbing
-  districts elsewhere. A city that has finer districts under a *different*
-  name than itself (Tallinn, Mexico City, Lisbon, below) is a separate,
-  harder shape: the district polygons tile the city, so a whole-city
-  gap-fill never gets the chance to win.
+  districts, or nothing. The levels cannot express this: there is no tier
+  where the city appears as a city. Two shapes:
+  - **Nothing below it.** Fixed 2026-10-13 by `REGION_CITIES`
+    (`countryAdminLevels.ts`): a hand-reviewed list of regions that are
+    legally one city and hold no other city, whose polygon
+    `prepare-world.ts` also emits as a city, named after the region
+    (District of Columbia as `Washington`). Listed: Wien; Minsk; Kinshasa;
+    Praha; Berlin and Hamburg; Conakry; Rīga and Latvia's six other
+    republic cities; Port Louis; Kuala Lumpur and Putrajaya; București;
+    Moscow, Saint Petersburg and Sevastopol; Dushanbe; Kyiv; District of
+    Columbia. The resolve changed by exactly those 24 cities (255,233 ->
+    255,257 kept; no other region gained or lost one), and 14 capitals
+    resolve now (see "Capitals."). A listed region that already holds a
+    city is skipped with a warning: a region-sized city next to real ones
+    wins their shared border cells (the regressions `overrides` exists
+    for). Deliberately not listed: a province or district named after its
+    seat (Lilongwe, Maseru, Thimphu, Gitega, Bratislava's `okres`es);
+    Delhi and Dubai (a territory or emirate holding more than one town).
+    Not checked yet, and likely candidates: Honiara, Port of Spain and
+    Trinidad's other city and borough corporations, Banjul, Bangui,
+    Djibouti, Osh, Sejong, and Botswana's city and town councils
+    (Gaborone, Francistown, ...); Lithuania's city municipalities
+    (`Vilniaus miesto savivaldybė`) too, with a `city` name given, since
+    the region's name is not the city's.
+
+    Measured by querying every cities500 point (235,895) on the build
+    before and after: 791 answers changed. 730 are the listed regions'
+    points going from `city -` to the city. The other 61, at 28 places
+    elsewhere, switched between two overlapping polygons, mostly two of
+    the same place: Alix -> Village of Alix (Alberta), Yalta's
+    Ukrainian-era `Ялтинский городской совет` -> the Russian
+    `муниципальный округ Ялта` (30 points over four Crimean councils),
+    `شهر X` <-> `X` in Iran, Bamako - Koulikoro (region only) -> Bamako
+    (Mali's capital, now resolving); a few between different units
+    (Multan city tehsil -> Gulshan, Tamatam -> Pulap). Cause: the
+    compressor takes a cell's candidates from an R-tree search
+    (`candidateIndex.ts`), and on a tie (two containing polygons of equal
+    area, or a max-depth cell they score the same on) the first returned
+    wins (`quadtree.ts`). Adding candidates rebuilds the tree, so any such
+    tie anywhere can flip. A tie-break by id instead of tree order would
+    make it stable (a compressor change; untried).
+    300,000 uniform random points (100,260 on land) did not change at
+    all.
+  - **Districts below it, under other names.** Still open: Astana
+    (Kazakhstan), Sana'a and Aden (Yemen), Tashkent (Uzbekistan) and
+    Yerevan (Armenia) answer one of their districts (Ashgabat was fixed by
+    a duplicate relation). The districts tile the capital, so a gap-fill
+    city never wins; the region would have to replace them (an
+    `overrides` entry with no city level plus `REGION_CITIES`, untried).
+    A city that has finer districts under a *different* name than itself
+    at the city tier (Tallinn, Mexico City, Lisbon, below) is the same
+    shape one tier down.
 - **Towns mapped only as place nodes cannot be returned.** *(unsolvable)*
   Shire (14.083301, 38.281860) and Yebokile (10.447974, 37.896309) in
   Ethiopia have no boundary relation in OSM (the whole of Ethiopia has two
@@ -425,7 +463,8 @@ below).
   the capital of every country and dependency GeoNames lists one for
   (232; `verify/src/cases.ts`'s `CAPITALS` and `OPEN_CAPITALS` tables carry the
   coordinates and the exact rule) and measured 81 resolving and 151
-  not, on `world-high-res.bin` (built 2026-10-12). A capital resolves when
+  not, on `world-high-res.bin` (built 2026-10-12); 96 and 136 since
+  `REGION_CITIES` (2026-10-13). A capital resolves when
   the country is right and the **city** tier is named for the capital. The
   goal is a city answer: "all photos in the city of Beijing" is a city
   query, so a capital must not answer with a district inside it (Beijing
@@ -452,30 +491,36 @@ below).
     (Sint Maarten); Gustavia (St-Barthélemy); Marigot (St-Martin);
     Saint-Pierre (St. Pierre and Miquelon); Funafuti (Tuvalu); Mata-Utu
     (Wallis and Futuna Is.)
-  - **The capital is only a region** (39): the region carries the
+  - **The capital is only a region** (25): the region carries the
     capital's name and no city covers the point. This is the previous
-    entry ("Capitals that are their own region"), which has the untried
-    mechanism for it; Kyiv, Prague and Bremen are tracked by their own
-    cases there.
-    Vienna (Austria); Baku (Azerbaijan); Minsk (Belarus); Hamilton
+    entry ("Capitals that are their own region"). Its `REGION_CITIES`
+    took 13 capitals off this list on 2026-10-13 (Vienna, Minsk, Prague,
+    Kinshasa, Berlin, Conakry, Riga, Kuala Lumpur, Port Louis, Bucharest,
+    Moscow, Dushanbe, Kyiv). Bamako resolves since the same build, but
+    only by winning a tie it used to lose (see "Capitals that are their
+    own region"). The rest are either a province named after its seat or
+    not checked yet (that entry says which).
+    Baku (Azerbaijan); Hamilton
     (Bermuda); Thimphu (Bhutan); Gaborone (Botswana); Gitega (Burundi);
     Praia (Cabo Verde); Bangui (Central African Rep.); Yamoussoukro (Côte
-    d'Ivoire); Prague (Czechia); Kinshasa (Dem. Rep.
-    Congo); Djibouti (Djibouti); Mbabane (eSwatini); Banjul (Gambia);
-    Berlin (Germany); Conakry (Guinea); Pristina (Kosovo); Riga (Latvia);
+    d'Ivoire); Djibouti (Djibouti); Mbabane (eSwatini); Banjul (Gambia);
+    Pristina (Kosovo);
     Maseru (Lesotho); Monrovia (Liberia); Vilnius (Lithuania); Lilongwe
-    (Malawi); Kuala Lumpur (Malaysia); Male (Maldives); Bamako (Mali);
-    Port Louis (Mauritius); Saipan (N. Mariana Is.); Yaren (Nauru);
-    Bucharest (Romania); Moscow (Russia); Castries (Saint Lucia);
+    (Malawi); Male (Maldives);
+    Saipan (N. Mariana Is.); Yaren (Nauru);
+    Castries (Saint Lucia);
     Bratislava (Slovakia); Ljubljana (Slovenia); Honiara (Solomon Is.);
-    Basseterre (St. Kitts and Nevis); Dushanbe (Tajikistan); Port of Spain
-    (Trinidad and Tobago); Kyiv (Ukraine)
-  - **A region around it, no city** (25): the region is a province,
-    parish or federal district (Washington is "District of Columbia", New
-    Delhi is "Delhi", Brasília is "Distrito Federal"), and no city covers
-    the point. Washington, New Delhi and Brasília are the capital's own
-    jurisdiction under a different name, so they probably need the same
-    mechanism as the previous shape.
+    Basseterre (St. Kitts and Nevis); Port of Spain
+    (Trinidad and Tobago)
+  - **A region around it, no city** (24): the region is a province,
+    parish or federal district (New Delhi is "Delhi", Brasília is
+    "Distrito Federal"), and no city covers the point. Washington
+    ("District of Columbia") was one and resolves since 2026-10-13
+    (`REGION_CITIES` with a `city` name). New Delhi and Brasília are not
+    that simple: Delhi holds New Delhi and more, and Distrito Federal
+    already holds one city polygon (`Nucleo rural Morro da Cruz`, a rural
+    settlement), which `REGION_CITIES` refuses next to a region-sized
+    city.
     Manama (Bahrain); Bridgetown (Barbados); Belmopan (Belize); Brasília
     (Brazil); Road Town (British Virgin Is.); Quito (Ecuador); Suva
     (Fiji); Nuuk (Greenland); Saint George's (Grenada); Saint Peter Port
@@ -483,8 +528,7 @@ below).
     (Madagascar); Plymouth (Montserrat); Ngerulmud (Palau); Kigali
     (Rwanda); Apia (Samoa); Victoria (Seychelles); Kingstown (St. Vin. and
     Gren.); Khartoum (Sudan); Lomé (Togo); Tunis
-    (Tunisia); Cockburn Town (Turks and Caicos Is.); Washington (United
-    States of America); Port-Vila (Vanuatu)
+    (Tunisia); Cockburn Town (Turks and Caicos Is.); Port-Vila (Vanuatu)
   - **A district, ward or parish instead of the capital** (62): the
     country's city tier is finer than its capital (Beijing, Tokyo, Seoul,
     Bangkok, Lisbon, London and many more). The capital's own boundary
@@ -611,17 +655,29 @@ tessellates its country, so the bug was always grain, not coverage.
   the same way as Ashgabat and Minsk; no level fixes it. See "Capitals that
   are their own region".
 
+## Austria (AT)
+
+`region [4]`, `city [8]` (98.0%), `REGION_CITIES` for Wien.
+
+- **Vienna was a region with no city.** 48.20849, 16.37208 returned `Wien /
+  Vienna`, `city -`: Wien is a Land (level 4) and a municipality in one,
+  with only its districts (level 9) below it. Fixed 2026-10-13 by
+  `REGION_CITIES`, which emits the Land polygon as the city too (see
+  "Capitals that are their own region").
+
 ## Belarus (BY)
 
-`region [4]`, `city [8, 6]` (99.5% at 8, gap-fill 6).
+`region [4]`, `city [8, 6]` (99.5% at 8, gap-fill 6), `REGION_CITIES` for Minsk.
 
 - **Level 6 gap-fill for Baranavichy.** Level 6 holds 9 `place=city`
   relations (Belarus's major cities below the level-4 ones); 8 of them
   already resolved through an identically-named level-8 entry. Only
   Baranavichy (Баранавічы, 7th-largest city) lacked one; confirmed by
   `world.bin` resolving it to nothing before the fix.
-- **Minsk is a level-4 region.** *(open)* See "Capitals that are their own
-  region".
+- **Minsk is a level-4 region.** 53.9006, 27.5590 returned `Мінск /
+  Minsk`, `city -`. Fixed 2026-10-13 by `REGION_CITIES`, which emits the
+  region polygon as the city too (see "Capitals that are their own
+  region").
 - **A village council surrounds Mikashevichy.** *(open)* 52.225276,
   27.468910 resolves to `Мікашэвічы / Mikashevichy` and 52.212235,
   27.444878 to `Сінкевіцкі сельскі Савет` (Sinkevichy rural council), whose
@@ -732,11 +788,13 @@ tessellates its country, so the bug was always grain, not coverage.
 
 ## Czechia (CZ)
 
-`region [4]`, `city [8]` (99.3%).
+`region [4]`, `city [8]` (99.3%), `REGION_CITIES` for Praha.
 
-- **Prague is a region with no city.** *(open)* 50.087382, 14.421787
-  returns `region Praha / Prague`, `city -`. Same shape as Berlin: the
-  capital is a level-4 region. See "Capitals that are their own region".
+- **Prague is a region with no city.** 50.087382, 14.421787 returned
+  `region Praha / Prague`, `city -`. Same shape as Berlin: the capital is a
+  level-4 region. Fixed 2026-10-13 by `REGION_CITIES`, which emits the
+  region polygon as the city too (see "Capitals that are their own
+  region").
 - **Place-tagged level-10 villages deliberately not gap-filled.** Level 8
   (`place=municipality`/`city` where tagged) already resolves every sampled
   case, including Brno and all 6 same-named "Babice" municipalities. The
@@ -746,6 +804,17 @@ tessellates its country, so the bug was always grain, not coverage.
   for no naming benefit). The one survivor of the strict filter, Petřkovice,
   is a `place=borough` at level 9 inside Ostrava, not a standalone
   settlement.
+
+## Democratic Republic of the Congo (CD)
+
+`region [4]`, `city [6]` (42.6%), `REGION_CITIES` for Kinshasa.
+
+- **Kinshasa was a region with no city.** -4.32758, 15.31357 returned
+  `Kinshasa`, `city -`: Kinshasa is a city-province, with nothing at level
+  6 inside it. Fixed 2026-10-13 by `REGION_CITIES`, which emits the
+  province polygon as the city too (see "Capitals that are their own
+  region"). The polygon includes the rural Maluku commune in the east,
+  which is legally part of the city.
 
 ## Egypt (EG)
 
@@ -828,7 +897,7 @@ tessellates its country, so the bug was always grain, not coverage.
 
 ## Germany (DE)
 
-`region [4]`, `city [8, 6]` (97.8% at 8, gap-fill 6).
+`region [4]`, `city [8, 6]` (97.8% at 8, gap-fill 6), `REGION_CITIES` for Berlin and Hamburg.
 
 - **Bremen is a city-state with a second relation.** Germany's three
   city-states are `admin_level=4`, the same level as every other Land, so
@@ -855,12 +924,24 @@ tessellates its country, so the bug was always grain, not coverage.
   regression, candidates to bisect are `20eba2c` (stream primaries instead
   of batching), `9c6a89a` (OSM country borders) and `15fb005` (UK/Ireland
   grain). Rebuild before trusting any "regressed" label here.
-- **Berlin and Hamburg are regions with no city.** *(open)* 52.520008,
+- **Berlin and Hamburg are regions with no city.** 52.520008,
   13.404954 and 53.551086, 9.993682. Confirmed: neither has a second,
-  lower-level relation anywhere in the German extract, unlike Bremen. See
-  "Capitals that are their own region".
+  lower-level relation anywhere in the German extract, unlike Bremen.
+  Fixed 2026-10-13 by `REGION_CITIES`, which emits the Land polygon as the
+  city too (see "Capitals that are their own region"). Bremen is not
+  listed: the Land holds Bremerhaven, and the city of Bremen has a
+  relation of its own (see the entry above).
 - **Border artifacts** on the Dutch, Belgian, Luxembourg and Czech borders.
   Fixed by the OSM country outlines: see "Border artifacts".
+
+## Guinea (GN)
+
+`region [4]`, `city [6]` (100.4%), `REGION_CITIES` for Conakry.
+
+- **Conakry was a region with no city.** 9.53795, -13.67729 returned
+  `Conakry`, `city -`: the capital is its own region, with nothing at level
+  6 inside it. Fixed 2026-10-13 by `REGION_CITIES`, which emits the region
+  polygon as the city too (see "Capitals that are their own region").
 
 ## Indonesia (ID)
 
@@ -921,7 +1002,7 @@ tessellates its country, so the bug was always grain, not coverage.
 
 ## Latvia (LV)
 
-`region [5]`, `city [8, 7]` (98.0% at 8, gap-fill 7).
+`region [5]`, `city [8, 7]` (98.0% at 8, gap-fill 7), `REGION_CITIES` for the seven republic cities.
 
 - **Real towns are at level 7, not 8.** Latvia tags its town tier with
   `border_type=town` (72 of 75 level-7 features) and no `place` value, so
@@ -931,9 +1012,12 @@ tessellates its country, so the bug was always grain, not coverage.
   resolved to "Aizkraukles pagasts" / "Kokneses pagasts". Level 7 gap-fills
   the real towns (Aizkraukle's level-9 village bbox sits inside its level-7
   town polygon).
-- **Rīga and the other six republic cities.** *(open)* They are
+- **Rīga and the other six republic cities.** They are
   `border_type=city` at level 5, the country's own region level, so no
-  level choice fixes it. See "Capitals that are their own region".
+  level choice fixes it. Fixed 2026-10-13 by `REGION_CITIES` for all seven
+  (Rīga, Daugavpils, Jelgava, Jūrmala, Liepāja, Rēzekne, Ventspils), which
+  emits each region polygon as the city too (see "Capitals that are their
+  own region").
 
 ## Libya (LY)
 
@@ -973,6 +1057,19 @@ tessellates its country, so the bug was always grain, not coverage.
   artifacts": 49.947409, 6.159039 resolves to Germany instead of
   Luxembourg; 49.446226, 5.977764 resolves to Luxembourg instead of France.
 
+## Malaysia (MY)
+
+`region [4]`, `city [6]` (100.8%), `REGION_CITIES` for Kuala Lumpur and
+Putrajaya.
+
+- **The federal territories had no city.** Kuala Lumpur (3.1412,
+  101.68653) returned `Kuala Lumpur`, `city -`, and so did Putrajaya: each
+  is a federal territory at the region level with nothing at level 6
+  inside it. Fixed 2026-10-13 by `REGION_CITIES`, which emits each
+  territory polygon as the city too (see "Capitals that are their own
+  region"). Labuan, the third, is an island territory whose town
+  (Victoria) is not the whole of it, and is not listed.
+
 ## Malta (MT)
 
 `region []`, `city [8]` (97.0%).
@@ -983,6 +1080,16 @@ tessellates its country, so the bug was always grain, not coverage.
   councils become the cities (measured on `world-high-res.bin`, built
   2026-10-13: 35.89968, 14.5148 is `Il-Belt Valletta | Valletta`, 36.044,
   14.2397 `Ir-Rabat | Victoria`, on Gozo).
+
+## Mauritius (MU)
+
+`region [4]`, `city [8]` (95.7%), `REGION_CITIES` for Port Louis.
+
+- **Port Louis was a region with no city.** -20.16194, 57.49889 returned
+  `Port Louis`, `city -`: the capital is its own district, with nothing at
+  level 8 inside it. Fixed 2026-10-13 by `REGION_CITIES`, which emits the
+  district polygon as the city too (see "Capitals that are their own
+  region").
 
 ## Mexico (MX)
 
@@ -1239,12 +1346,27 @@ worldwide resolved data (`make netherlands`) and
   concelhos already resolve through an identically-named level-8 entry. See
   Estonia.
 
+## Romania (RO)
+
+`region [4]`, `city [8]` (100.5%), `REGION_CITIES` for București.
+
+- **Bucharest was a region with no city.** 44.43225, 26.10626 returned
+  `București / Bucharest`, `city -`: the municipality is at the county
+  level, with only its sectors below it. Fixed 2026-10-13 by
+  `REGION_CITIES`, which emits the region polygon as the city too (see
+  "Capitals that are their own region").
+
 ## Russia (RU)
 
-`region [4]`, `city [6]` (104.0%).
+`region [4]`, `city [6]` (104.0%), `REGION_CITIES` for the three federal cities.
 
-- **Moscow has a region and no city.** *(open)* 55.7558, 37.6173 returns
-  `Москва / Moscow`, `city -`. See "Capitals that are their own region".
+- **Moscow has a region and no city.** 55.7558, 37.6173 returned
+  `Москва / Moscow`, `city -`; so did Saint Petersburg (59.9386, 30.3141)
+  and Sevastopol (44.6167, 33.5254), the other two federal cities. Fixed
+  2026-10-13 by `REGION_CITIES`, which emits each region polygon as the
+  city too (see "Capitals that are their own region"). Moscow's polygon
+  includes New Moscow, whose settlements have no polygon at level 6, so
+  they answer `Москва` as well, which is what they legally are.
 - **Simferopol municipality council inside Simferopol district.** *(open)*
   44.949006, 34.118385 is `Симферопольский городской совет / Simferopol
   municipality council`; 44.959454, 33.983116 is `Симферопольский район /
@@ -1340,6 +1462,16 @@ worldwide resolved data (`make netherlands`) and
   (inside special municipalities) gap-fill: Taipei -> `Taipei City / Xinyi
   District`, Kaohsiung -> `Kaohsiung City / Xinxing District`.
 
+## Tajikistan (TJ)
+
+`region [4]`, `city [6]` (99.3%), `REGION_CITIES` for Dushanbe.
+
+- **Dushanbe was a region with no city.** 38.53575, 68.77905 returned
+  `Душанбе / Dushanbe`, `city -`: the capital is its own region, with
+  nothing at level 6 inside it. Fixed 2026-10-13 by `REGION_CITIES`, which
+  emits the region polygon as the city too (see "Capitals that are their
+  own region").
+
 ## Tanzania (TZ)
 
 - **Mbamba Bay and Liuli resolve to Malawi.** *(false positive)* Their
@@ -1366,11 +1498,12 @@ worldwide resolved data (`make netherlands`) and
 
 ## Ukraine (UA)
 
-`region [4]`, `city [7]` (99.7%).
+`region [4]`, `city [7]` (99.7%), `REGION_CITIES` for Kyiv.
 
-- **Kyiv has a region and no city.** *(open)* 50.441108, 30.527229 returns
-  `Київ / Kyiv`, `city -`; the expected city is `Kyiv`. See "Capitals that
-  are their own region".
+- **Kyiv has a region and no city.** 50.441108, 30.527229 returned
+  `Київ / Kyiv`, `city -`; the expected city is `Kyiv`. Fixed 2026-10-13 by
+  `REGION_CITIES`, which emits the region polygon as the city too (see
+  "Capitals that are their own region").
 
 ## United Kingdom (GB)
 
@@ -1436,7 +1569,8 @@ for Scotland and Northern Ireland.
 
 ## United States of America (US)
 
-`region [4]`, `city [8]` (10.7%), with `overrides: { "New York": [8, 7] }`.
+`region [4]`, `city [8]` (10.7%), with `overrides: { "New York": [8, 7] }`, `REGION_CITIES` for
+District of Columbia.
 
 - **County grain, not city.** Seattle (47.602922, -122.331390) used to
   resolve to `King County`: county (level 6, 103.0%) auto-won the >=60% vote
@@ -1486,6 +1620,10 @@ for Scotland and Northern Ireland.
   it exists and the township answers around it. Another "Surrounding rural
   unit" instance, with the US-wide twist that a township is not really a
   city either.
+- **Washington, D.C. had no city.** 38.89511, -77.03637 returned `District
+  of Columbia`, `city -`: the district is a level-4 region with nothing at
+  level 8 inside it. Fixed 2026-10-13 by `REGION_CITIES`, with the city
+  named `Washington` (see "Capitals that are their own region").
 
 ## Uzbekistan (UZ)
 

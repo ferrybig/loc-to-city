@@ -549,7 +549,9 @@ Provence-Alpes-Côte d'Azur Monaco. City-states (`CITY_STATES`) get a region (an
 city) covering the whole country; their cities get that region by country
 code, not through `assignCityRegion`, whose answer for a point inside two
 overlapping regions is the first in R-tree order -- adding regions to that
-tree moves cities elsewhere.
+tree moves cities elsewhere. A region that is one city (`REGION_CITIES`:
+Berlin, Prague, Kyiv, Moscow, ...) is emitted as a city too, and only when
+no other city lies inside it.
 
 **Multi-file country handling.** OSM relations for a single country (e.g.
 Russia, Turkey) can be split across multiple continent extract files with

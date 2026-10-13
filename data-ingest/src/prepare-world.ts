@@ -59,6 +59,7 @@ import { loadAdmin1Names } from "./lib/admin1Codes.ts";
 import { buildCityFallback, buildContainerFallback, buildRegionFallback } from "./lib/voronoiFallback.ts";
 import {
   CITY_STATES,
+  REGION_CITIES,
   VORONOI_CITY_FALLBACK,
   VORONOI_CITY_FALLBACK_WITHIN_REGIONS,
   VORONOI_REGION_FALLBACK,
@@ -321,6 +322,8 @@ async function main(): Promise<void> {
     }
   }
   const skippedNoRegionByCountry = new Map<string, number>();
+  // Cities emitted per `${country}\t${region}`, for REGION_CITIES.
+  const citiesByRegion = new Map<string, number>();
   let cityCount = 0;
   let skippedNoName = 0;
   let skippedNoGeometry = 0;
@@ -467,6 +470,35 @@ async function main(): Promise<void> {
     }
   }
 
+  // A region that is one city (REGION_CITIES' doc comment) is its own city
+  // too, unless anything else already is a city inside it.
+  for (const [code, regionCities] of REGION_CITIES) {
+    for (const { region, city } of regionCities) {
+      const candidate = [...finalRegions.values()].find((r) => r.country === code && r.name === region);
+      const inside = citiesByRegion.get(`${code}\t${region}`) ?? 0;
+      if (!candidate || inside > 0) {
+        console.error(
+          `  WARNING: REGION_CITIES ${code} ${region}: ${candidate ? `already holds ${inside} cities` : "no such region"}, skipped`,
+        );
+        continue;
+      }
+      const geometryJson = JSON.stringify(candidate.feature.geometry);
+      const { repPoint } = bboxAndPointOnFeature(candidate.feature.geometry);
+      const emitted = await emitCity(
+        {
+          id: `region-city:${candidate.id}`,
+          name: city ?? candidate.name,
+          nameEn: city ? undefined : candidate.nameEn,
+          country: code,
+          repPoint,
+          region,
+        },
+        geometryJson,
+      );
+      if (emitted) cityCount++;
+    }
+  }
+
   await new Promise<void>((resolve, reject) => cityOut.end((err?: Error | null) => (err ? reject(err) : resolve())));
   await pool.close();
 
@@ -482,6 +514,8 @@ async function main(): Promise<void> {
     country: string;
     repPoint: LonLat;
     regionPoint?: LonLat | undefined;
+    /** Set when the city's region is known without looking it up (REGION_CITIES). */
+    region?: string;
   }
   /** `geometryJson` is the geometry's JSON text, written out as is -- for
    * an OSM city, the exact text osmium wrote, never parsed. */
@@ -490,7 +524,7 @@ async function main(): Promise<void> {
       skippedNoName++;
       return false;
     }
-    const region = regionOf(candidate);
+    const region = candidate.region ?? regionOf(candidate);
     if (!region) {
       skippedNoRegionByCountry.set(candidate.country, (skippedNoRegionByCountry.get(candidate.country) ?? 0) + 1);
       return false;
@@ -503,6 +537,8 @@ async function main(): Promise<void> {
       region,
       country: candidate.country,
     };
+    const regionKey = `${candidate.country}\t${region}`;
+    citiesByRegion.set(regionKey, (citiesByRegion.get(regionKey) ?? 0) + 1);
     // Same bytes JSON.stringify gives a {type, properties, geometry} feature,
     // and properties-first is what filter-by-scope.ts peeks at.
     await write(`\x1e{"type":"Feature","properties":${JSON.stringify(properties)},"geometry":${geometryJson}}\n`);

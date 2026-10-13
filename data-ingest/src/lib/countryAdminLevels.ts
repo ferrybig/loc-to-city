@@ -135,8 +135,8 @@ export interface CountryAdminLevels {
  *   place=city-tagged admin_level=6 relation for the city itself
  *   (distinct from the Land); city [8, 6] gap-fills it in. Berlin and
  *   Hamburg have no relation below level 4 at all -- no level choice
- *   fixes those two, see countries.md ("Capitals that are their own
- *   region").
+ *   fixes those two; `REGION_CITIES` emits their Land as the city (see
+ *   countries.md, "Capitals that are their own region").
  * - UZ, LA: the generated region pick (level 6) was a district tier --
  *   Uzbekistan's 204 tumani/shahri, Laos's 148 muang -- not the real
  *   province tier, because `region`'s candidate scan only ever considered
@@ -745,4 +745,47 @@ export const CITY_STATES: ReadonlyMap<string, { region: string; city?: string }>
   ["SM", { region: "San Marino" }],
   ["AD", { region: "Andorra" }],
   ["MT", { region: "Malta" }],
+]);
+
+/** Regions that are one city: a capital or other city with the status of a
+ * region (a German city-state, a Russian federal city, Kyiv, Prague, Latvia's
+ * republic cities), whose OSM relation is at the country's region level and
+ * has nothing at its city level below it, so a lookup there answered the
+ * region with `city -`. Country code -> the regions (by the exact name the
+ * country's regions resolve to, as in `overrides`) whose polygon is also
+ * emitted as a city, named `city` when given (District of Columbia is
+ * Washington) and after the region otherwise. Only for a region that holds
+ * no other city: a region-sized city next to real ones would win their
+ * shared border cells (see `overrides`), so prepare-world.ts skips, with a
+ * warning, a listed region that has any. Hand-reviewed, same opt-in
+ * philosophy as `VORONOI_CITY_FALLBACK`: a capital whose districts tile it
+ * under other names (Tashkent, Yerevan, Astana) is a different shape, and a
+ * province merely named after its seat (Lilongwe, Maseru) is not a city.
+ * See countries.md's "Capitals that are their own region". */
+export const REGION_CITIES: ReadonlyMap<string, readonly { region: string; city?: string }[]> = new Map([
+  ["AT", [{ region: "Wien" }]],
+  ["BY", [{ region: "Мінск" }]],
+  ["CD", [{ region: "Kinshasa" }]],
+  ["CZ", [{ region: "Praha" }]],
+  ["DE", [{ region: "Berlin" }, { region: "Hamburg" }]],
+  ["GN", [{ region: "Conakry" }]],
+  [
+    "LV",
+    [
+      { region: "Rīga" },
+      { region: "Daugavpils" },
+      { region: "Jelgava" },
+      { region: "Jūrmala" },
+      { region: "Liepāja" },
+      { region: "Rēzekne" },
+      { region: "Ventspils" },
+    ],
+  ],
+  ["MU", [{ region: "Port Louis" }]],
+  ["MY", [{ region: "Kuala Lumpur" }, { region: "Putrajaya" }]],
+  ["RO", [{ region: "București" }]],
+  ["RU", [{ region: "Москва" }, { region: "Санкт-Петербург" }, { region: "Севастополь" }]],
+  ["TJ", [{ region: "Душанбе" }]],
+  ["UA", [{ region: "Київ" }]],
+  ["US", [{ region: "District of Columbia", city: "Washington" }]],
 ]);
