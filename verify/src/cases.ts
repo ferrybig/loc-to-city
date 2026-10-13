@@ -559,6 +559,16 @@ export const CASES: Case[] = [
 		entry: "Simplified region polygons",
 	},
 	{
+		name: "Baarle-Hertog has a city in its Belgian enclaves",
+		at: [51.436574, 4.928302],
+		country: "Belgium",
+		region: ANY,
+		city: "Baarle-Hertog",
+		status: "fixed",
+		section: "Cross-cutting patterns",
+		entry: "Simplified region polygons",
+	},
+	{
 		name: "Trenton is in New Jersey, not Pennsylvania",
 		at: [40.2206, -74.7597],
 		country: "United States of America",

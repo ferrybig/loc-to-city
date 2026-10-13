@@ -313,8 +313,10 @@ below).
   coastlines (Cannes, Hyères, Lipari, Valparaíso answered their region
   with no city), and simplified neighbours overlapped by up to the
   tolerance, so a border town could get the neighbour (Dordrecht answered
-  Noord-Brabant). Fixed by keeping regions at full precision, like the
-  country outlines (2026-10-13). That exposed a second cause: when a
+  Noord-Brabant). Baarle-Hertog was dropped too: 51.436574, 4.928302, in
+  its largest enclave, answered `Belgium`, `Vlaanderen`, city `-`, and the
+  municipality was missing from the place table. Fixed by keeping regions
+  at full precision, like the country outlines (2026-10-13). That exposed a second cause: when a
   polygon's bbox midpoint is outside it, the representative point is
   turf's fallback, the nearest *vertex*, and for a border town that vertex
   is on the border, inside both regions (Trenton, NJ went to Pennsylvania,
@@ -1062,7 +1064,9 @@ worldwide resolved data (`make netherlands`) and
   enclaves). The country polygons are OSM's now, enclaves included, and
   the enclaves are cut out of Noord-Brabant's simplified region polygon
   (and Baarle-Nassau's out of Vlaanderen); see "Natural Earth's outlines
-  are too coarse".
+  are too coarse". The enclaves then answered Belgium and Vlaanderen but
+  no city until regions were kept at full precision (see "Simplified
+  region polygons").
 - **Border artifact against Germany.** 52.441101, 6.848860 returned
   Germany. Fixed by the OSM country outlines: see "Border artifacts".
 - **A village that crosses a municipal border is two places.**
