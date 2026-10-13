@@ -9,7 +9,7 @@ test("the spot-check markers are drawn, with a legend and a popup", async ({
 	page,
 }) => {
 	await page.goto("/");
-	await expect(page.locator("#checks-panel")).toBeVisible();
+	await expect(page.locator("#checks-layers")).toBeVisible();
 	await page.waitForFunction(() => "map" in window);
 	await page.evaluate(() => {
 		const { map } = window as unknown as {
@@ -36,7 +36,7 @@ test("the markers can be switched off; a group the dataset has none of is not of
 	page,
 }) => {
 	await page.goto("/");
-	await expect(page.locator("#checks-panel")).toBeVisible();
+	await expect(page.locator("#checks-layers")).toBeVisible();
 	await page.evaluate(() => {
 		const { map } = window as unknown as {
 			map: { setView(center: [number, number], zoom: number): void };

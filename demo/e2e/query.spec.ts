@@ -255,7 +255,7 @@ test("the chunk grid labels chunks with their compressed size", async ({
 	page,
 }) => {
 	await page.goto("/");
-	const toggle = page.getByRole("checkbox", { name: "Show chunk grid" });
+	const toggle = page.getByRole("checkbox", { name: "Chunk grid" });
 	await expect(toggle).toBeEnabled();
 	await expect(toggle).not.toBeChecked();
 
@@ -310,7 +310,7 @@ test("the base map is off in tests, and fetches OSM's tiles once on", async ({
 	});
 	await page.goto("/");
 	const toggle = page.getByRole("checkbox", {
-		name: "Show OpenStreetMap base map",
+		name: "OpenStreetMap base map",
 	});
 	await expect(toggle).not.toBeChecked();
 	const attribution = page.locator(".leaflet-control-attribution");
@@ -354,9 +354,9 @@ test("the base map stays under the grid overlay, whichever is switched on last",
 	);
 	await page.goto("/");
 	const baseMap = page.getByRole("checkbox", {
-		name: "Show OpenStreetMap base map",
+		name: "OpenStreetMap base map",
 	});
-	const grid = page.getByRole("checkbox", { name: "Show grid overlay" });
+	const grid = page.getByRole("checkbox", { name: "Grid overlay" });
 
 	// Tests start with the base map off, so this adds it after the grid.
 	await baseMap.check();
@@ -369,7 +369,6 @@ test("the base map stays under the grid overlay, whichever is switched on last",
 
 test("the dataset can be downloaded from the page", async ({ page }) => {
 	await page.goto("/");
-	await page.locator("#downloads summary").click();
 	const link = page.getByRole("link", { name: "appendix-a-example.bin" });
 	await expect(link).toBeVisible();
 	const resp = await page.request.get((await link.getAttribute("href"))!);
@@ -378,4 +377,83 @@ test("the dataset can be downloaded from the page", async ({ page }) => {
 		"appendix-a-example.bin",
 	);
 	expect((await resp.body()).subarray(0, 4).toString("latin1")).toBe("CGEO");
+});
+
+test("the dataset's attribution is the map's, whether or not the grid is on", async ({
+	page,
+}) => {
+	await page.goto("/");
+	const attribution = page.locator(".leaflet-control-attribution");
+	// The example file's attribution is "OSM".
+	await expect(attribution).toContainText("OSM");
+	await page.getByRole("checkbox", { name: "Grid overlay" }).uncheck();
+	await expect(attribution).toContainText("OSM");
+});
+
+test("explanations are hidden until their i button is pressed", async ({
+	page,
+}) => {
+	await page.goto("/");
+	const info = page.getByRole("button", { name: "About the grid overlay" });
+	const hint = page.locator("#overlay-hint");
+	await expect(hint).toBeHidden();
+	await expect(info).toHaveAttribute("aria-expanded", "false");
+
+	await info.click();
+	await expect(hint).toBeVisible();
+	await expect(info).toHaveAttribute("aria-expanded", "true");
+	await info.click();
+	await expect(hint).toBeHidden();
+});
+
+test.describe("on a phone", () => {
+	test.use({ viewport: { width: 390, height: 780 }, hasTouch: true });
+
+	test("the controls stay closed until the layers button opens them", async ({
+		page,
+	}) => {
+		await page.goto("/");
+		const toggle = page.getByRole("button", { name: "Layers and dataset" });
+		const grid = page.getByRole("checkbox", { name: "Grid overlay" });
+		await expect(toggle).toHaveAttribute("aria-expanded", "false");
+		await expect(grid).toBeHidden();
+
+		await toggle.click();
+		await expect(toggle).toHaveAttribute("aria-expanded", "true");
+		await expect(grid).toBeVisible();
+
+		await page.keyboard.press("Escape");
+		await expect(grid).toBeHidden();
+		await expect(toggle).toBeFocused();
+	});
+
+	test("a tap on the map beside the open controls closes them, and queries nothing", async ({
+		page,
+	}) => {
+		await page.goto("/");
+		await setView(page, 20, 100, 6);
+		await page.getByRole("button", { name: "Layers and dataset" }).click();
+		const grid = page.getByRole("checkbox", { name: "Grid overlay" });
+		await expect(grid).toBeVisible();
+
+		const box = await page.locator("#map").boundingBox();
+		if (!box) throw new Error("#map has no bounding box");
+		// Below the sheet, which ends short of the bottom of the screen.
+		await page.mouse.click(box.x + box.width / 2, box.y + box.height - 60);
+		await expect(grid).toBeHidden();
+		await expect(page.locator(".leaflet-popup-content")).toHaveCount(0);
+
+		// The next tap queries as usual.
+		await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+		await expect(row(page, "City")).toContainText("Zaandam");
+	});
+
+	test("focusing the search box closes the controls", async ({ page }) => {
+		await page.goto("/");
+		await page.getByRole("button", { name: "Layers and dataset" }).click();
+		await page.getByRole("combobox", { name: "Search places" }).focus();
+		await expect(
+			page.getByRole("checkbox", { name: "Grid overlay" }),
+		).toBeHidden();
+	});
 });

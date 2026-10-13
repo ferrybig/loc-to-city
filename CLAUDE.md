@@ -71,10 +71,19 @@ Five npm workspaces (Node >=26, see `.nvmrc`), all TypeScript, ESM
 - **`demo/`** — an Express server: a click-to-query Leaflet page plus a
   grid tile overlay, the reader's TypeDoc output under `/docs/` (when
   built), and the dataset plus the sidecar indexes in use under
-  `/download/`. Static files and downloads are served from disk;
-  `npm run prepare-static -w demo -- [dir...]` (the Docker build runs it)
-  writes `.br` files and a content-hash `.etags.json` per directory. Don't
-  run it in a dev checkout: its output goes stale on the next edit.
+  `/download/`. The page's source is `demo/web/` (an HTML template,
+  TypeScript modules, one stylesheet; `tsc -p web/tsconfig.json` in
+  `typecheck`), which `src/buildWeb.ts` bundles with esbuild, Leaflet
+  included, into `dist/public/index.html` and content-hashed
+  `dist/assets/main-<hash>.{js,css}` served as immutable, so a page load
+  revalidates only the HTML. `npm run build -w demo` builds it; the dev
+  server (`node src/server.ts`, run as TypeScript) builds it at startup and
+  rebuilds on every edit (reload to see one). Static files and downloads
+  are served from disk; `npm run prepare-static -w demo -- [dir...]` (the
+  Docker build runs it) writes `.br` files and a content-hash
+  `.etags.json` per directory. Don't run it in a dev checkout: its output
+  goes stale on the next edit (a page rebuild removes it from
+  `dist/`, but not from `reader/docs/`).
 
 ## Code style: tabs
 

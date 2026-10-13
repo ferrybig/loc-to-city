@@ -17,5 +17,8 @@
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "reader": "node reader/src/cli.ts"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
   }
 }

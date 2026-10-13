@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * The CGEODATA demo's web server: serves the Leaflet page (with Leaflet
- * itself, see staticAssets.ts), a JSON query API, a tile overlay, the
+ * The CGEODATA demo's web server: serves the Leaflet page (bundled from
+ * web/, see buildWeb.ts and staticAssets.ts), a JSON query API, a tile overlay, the
  * reader's API reference under /docs/ (once `npm run docs -w reader` has
  * built it) and the dataset plus the indexes in use as downloads.
  *
@@ -64,6 +64,14 @@ async function main(): Promise<void> {
 	const datasetPath = datasetArg
 		? path.resolve(datasetArg)
 		: path.join(REPO_ROOT, "data/03-final/zuid-holland.bin");
+
+	// Run as TypeScript, this is the dev server: it builds the page (see
+	// buildWeb.ts) and rebuilds it on every edit. Built, it serves the page
+	// the build step made, and esbuild isn't installed.
+	if (import.meta.url.endsWith(".ts")) {
+		const { watchWeb } = await import("./buildWeb.ts");
+		await watchWeb();
+	}
 
 	const docs = hasDocs();
 	if (!docs) {

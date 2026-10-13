@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<title>CGEODATA demo</title>
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<!-- buildWeb.ts points these two at the bundle's hashed files. -->
+		<link rel="stylesheet" href="main.css">
+		<script type="module" src="main.ts"></script>
+	</head>
+	<body>
+		<h1 class="visually-hidden">CGEODATA demo</h1>
+
+		<search id="search-panel">
+			<div class="search-box">
+				<label for="search-input" class="visually-hidden">Search places</label>
+				<input
+					type="text"
+					id="search-input"
+					placeholder="Search places…"
+					autocomplete="off"
+					spellcheck="false"
+					role="combobox"
+					aria-autocomplete="list"
+					aria-expanded="false"
+					aria-controls="search-results"
+				>
+				<!-- Only shown where the controls panel doesn't fit next to the map. -->
+				<button
+					type="button"
+					id="controls-toggle"
+					aria-expanded="false"
+					aria-controls="controls"
+					aria-label="Layers and dataset"
+					title="Layers and dataset"
+				>
+					<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+						<path
+							d="M12 3 2 8.5 12 14l10-5.5L12 3Zm-7.7 9.4L2 13.7 12 19.2l10-5.5-2.3-1.3L12 16.7l-7.7-4.3Z"
+							fill="currentColor"
+						/>
+					</svg>
+				</button>
+			</div>
+			<div
+				id="search-results"
+				class="card"
+				role="listbox"
+				aria-label="Matching places"
+			></div>
+			<div
+				id="search-status"
+				class="visually-hidden"
+				role="status"
+				aria-live="polite"
+			></div>
+		</search>
+
+		<aside id="controls" class="card" aria-label="Layers and dataset">
+			<section aria-labelledby="layers-heading">
+				<h2 id="layers-heading">Layers</h2>
+
+				<div class="row">
+					<label>
+						<input type="checkbox" id="basemap-toggle" checked>
+						OpenStreetMap base map
+					</label>
+				</div>
+
+				<div class="row">
+					<label>
+						<input type="checkbox" id="overlay-toggle" checked>
+						Grid overlay
+					</label>
+					<button
+						type="button"
+						class="info"
+						aria-expanded="false"
+						aria-controls="overlay-hint"
+						aria-label="About the grid overlay"
+					>
+						i
+					</button>
+				</div>
+				<p class="hint" id="overlay-hint" hidden>
+					Each pixel is one query against the CGEODATA file, colored by a hash
+					of the resolved place. Zoomed out past level 7, one query covers a
+					block of pixels to keep tiles fast, so borders get blockier there.
+					From level 8 in, lines mark where places meet: darker between regions,
+					darkest between countries.
+				</p>
+				<label class="sub-row">
+					<span>Overlay opacity</span>
+					<input
+						type="range"
+						id="opacity-range"
+						min="10"
+						max="100"
+						step="5"
+						value="65"
+					>
+					<output id="opacity-value" for="opacity-range">65%</output>
+				</label>
+
+				<div class="row">
+					<label>
+						<input type="checkbox" id="chunk-grid-toggle" disabled>
+						Chunk grid
+					</label>
+					<button
+						type="button"
+						class="info"
+						aria-expanded="false"
+						aria-controls="chunk-grid-hint"
+						aria-label="About the chunk grid"
+					>
+						i
+					</button>
+				</div>
+				<p class="hint" id="chunk-grid-hint" hidden>
+					A lookup decompresses the one chunk its point is in. Zoomed in far
+					enough, each chunk shows its compressed size and index.
+				</p>
+
+				<div id="checks-layers" hidden>
+					<div class="row">
+						<label>
+							<input type="checkbox" id="checks-spot-toggle" checked>
+							Spot checks
+						</label>
+						<span class="count" id="checks-spot-count"></span>
+						<button
+							type="button"
+							class="info"
+							aria-expanded="false"
+							aria-controls="checks-hint"
+							aria-label="About the spot checks"
+						>
+							i
+						</button>
+					</div>
+					<p class="hint" id="checks-hint" hidden>
+						Places from the country notes, looked up when this dataset was built<span
+							id="checks-date"
+						></span
+						>.
+					</p>
+					<div class="row">
+						<label>
+							<input type="checkbox" id="checks-capital-toggle">
+							Capitals
+						</label>
+						<span class="count" id="checks-capital-count"></span>
+					</div>
+					<p class="warning" id="checks-stale" hidden>
+						The dataset is older than its input, so failures may already be
+						fixed in a newer build.
+					</p>
+					<ul id="check-legend" aria-label="Marker legend"></ul>
+				</div>
+			</section>
+
+			<section id="dataset" aria-labelledby="dataset-heading" hidden>
+				<h2 id="dataset-heading">Dataset</h2>
+
+				<div class="row">
+					<span id="data-precision"></span>
+					<button
+						type="button"
+						class="info"
+						aria-expanded="false"
+						aria-controls="data-precision-hint"
+						aria-label="About the cell size"
+					>
+						i
+					</button>
+				</div>
+				<p class="hint" id="data-precision-hint" hidden>
+					The size of the finest cell, east–west × north–south, at the equator.
+					Places smaller than that may have no cells of their own.
+				</p>
+
+				<div class="row">
+					<h3 id="downloads-heading">Downloads</h3>
+					<button
+						type="button"
+						class="info"
+						aria-expanded="false"
+						aria-controls="downloads-hint"
+						aria-label="About the downloads"
+					>
+						i
+					</button>
+				</div>
+				<p class="hint" id="downloads-hint" hidden>
+					Keep the file names: <code>openFile()</code> picks up the indexes next
+					to the <code>.bin</code>. They're optional, and
+					<code>cgeodata build-search-index</code>
+					/
+					<code>build-locate-index</code>
+					build them from the
+					<code>.bin</code>
+					too.
+				</p>
+				<ul id="download-list" aria-labelledby="downloads-heading"></ul>
+
+				<p id="docs-link" hidden><a href="/docs/">Reader API docs</a></p>
+			</section>
+		</aside>
+
+		<main id="map"></main>
+	</body>
+</html>

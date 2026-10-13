@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import express, { type Handler } from "express";
+import { buildWeb } from "../src/buildWeb.ts";
 import { ETAGS_FILE, listFiles } from "../src/etags.ts";
 import { prepareDir } from "../src/prepareStatic.ts";
 import {
@@ -32,25 +33,34 @@ async function withServer(
 	}
 }
 
-test("the page and every Leaflet file it needs are served", async () => {
+test("the built page and every file of its bundle are served, the bundle as immutable", async () => {
+	await buildWeb();
 	await withServer(staticRouter(), async (origin) => {
 		const resp = await fetch(`${origin}/`);
 		assert.equal(resp.status, 200);
 		assert.match(resp.headers.get("content-type")!, /^text\/html/);
+		assert.match(resp.headers.get("cache-control")!, /max-age=0/);
 		const page = await resp.text();
 		const refs = [...page.matchAll(/(?:src|href)="(\/[^"]*)"/g)].map(
 			([, ref]) => ref!,
 		);
-		assert.ok(refs.includes("/vendor/leaflet/leaflet.js"));
-		// Referenced from leaflet.css, relative to it.
-		refs.push(
-			"/vendor/leaflet/images/layers.png",
-			"/vendor/leaflet/images/marker-icon.png",
-			"/vendor/leaflet/images/marker-shadow.png",
-		);
+		const js = refs.find((ref) => /^\/assets\/main-\w+\.js$/.test(ref));
+		const css = refs.find((ref) => /^\/assets\/main-\w+\.css$/.test(ref));
+		assert.ok(js && css, `no bundle in ${refs.join(", ")}`);
+		// Leaflet's images, which its stylesheet and the JS refer to.
+		const bundled =
+			(await (await fetch(origin + css)).text()) +
+			(await (await fetch(origin + js)).text());
+		for (const [, ref] of bundled.matchAll(/(\/assets\/[\w-]+\.png)/g)) {
+			refs.push(ref!);
+		}
+		assert.ok(refs.some((ref) => ref.includes("marker-icon-")));
 		for (const ref of refs) {
 			const asset = await fetch(origin + ref, { method: "HEAD" });
 			assert.equal(asset.status, 200, `the page needs ${ref}, not served`);
+			if (ref.startsWith("/assets/")) {
+				assert.match(asset.headers.get("cache-control")!, /immutable/);
+			}
 		}
 	});
 });
