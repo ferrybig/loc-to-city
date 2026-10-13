@@ -149,6 +149,15 @@ tiles. `demo/test/tiles.test.ts`'s real-data case still needs
 cd demo && npx playwright install chromium && npx playwright test
 ```
 
+### Deploying the demo
+
+`./deploy.sh` builds the Docker image (serving
+`data/03-final/world-high-res.bin` unless `DATASET=<name>` is given),
+ships it to geodata.ferrybig.nl and restarts it there. When pointing the
+user at places to check after a deploy, link them with the map's
+`#map=zoom/lat/lon` hash (`demo/web/viewHash.ts`), e.g.
+[Campione d'Italia](https://geodata.ferrybig.nl/#map=12/45.9694/8.9736).
+
 ### Reading a `.bin` file
 
 `reader/src/cli.ts` (installed as `cgeodata`) is a thin layer over
