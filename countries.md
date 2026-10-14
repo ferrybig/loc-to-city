@@ -927,6 +927,12 @@ tessellates its country, so the bug was always grain, not coverage.
 - **Shire and Yebokile are place nodes only.** *(unsolvable)* See
   "Towns mapped only as place nodes".
 
+## France (FR)
+
+- **Suburbs do not beat their city.** 43.745057, 7.214584 (Bellet, a
+  quarter of Nice) resolves to `Nice`, not `Bellet`, on
+  `world-high-res.bin`. Spot-check in `verify/src/cases.ts`.
+
 ## Georgia (GE)
 
 `region [6]`, `city [8]` (4.3%).
@@ -947,6 +953,10 @@ tessellates its country, so the bug was always grain, not coverage.
   `place=city` relation at level 6 for the city itself, and `DE: { city:
   [8, 6] }` gap-fills it. Verified at the time that it leaked no Landkreis
   name into normal cities (Munich, Cologne, Frankfurt, Hannover unchanged).
+- **Suburbs do not beat their town.** Saarburg (not Kahren), Merzkirchen
+  (not Körrig, not Südlingen), Wadern (not Lockweiler) and Morbach (not
+  Morscheid-Riedenburg) resolve to the town on `world-high-res.bin`;
+  spot-checks in `verify/src/cases.ts`.
 - **Bremen does not resolve on the current builds.** *(open)* 53.079296,
   8.801694 returns `region Bremen`, `city -`, and
   `data/02-resolved/world/cities-filtered.geojsonseq` (built 2026-10-09
