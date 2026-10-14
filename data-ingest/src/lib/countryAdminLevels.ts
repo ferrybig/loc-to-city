@@ -49,6 +49,13 @@ export interface CountryAdminLevels {
    * at least `MIN_UNCOVERED_KM2` of it is uncovered, unless it is a county
    * that districts at a finer listed level tile (see `createGapFillTracker`). */
   coverageGapFill?: number[];
+  /** A candidate without `name:en` takes it from any relation of the country
+   * with the same `wikidata` tag, at any level. For a country whose chosen
+   * level has relations added "with a minimal set of tags" while the level
+   * above carries the names (BE: Brussels' level 9 has no `name:en`, the
+   * City of Brussels at level 8 does). Costs Pass 1 a small record for every
+   * relation of the country that has both tags. */
+  nameEnFromWikidata?: boolean;
 }
 
 /**
@@ -451,7 +458,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   BA: { region: [4], city: [9] }, // region 98.8%, city 61.3%
   BB: { region: [6], city: [9] }, // region 97.5%, city 19.6%
   BD: { region: [4], city: [6] }, // region 122.3%, city 111.4%
-  BE: { region: [4], city: [9] }, // region 100.1%, city 99.9%
+  BE: { region: [4], city: [9], nameEnFromWikidata: true }, // region 100.1%, city 99.9%
   BF: { region: [4], city: [6] }, // region 100.2%, city 67.2%
   BG: { region: [5], city: [8] }, // region 98.4%, city 46.5%
   BH: { region: [4], city: [10] }, // region 844.4%, city 0.6%

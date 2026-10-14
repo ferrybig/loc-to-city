@@ -570,7 +570,7 @@ below).
     (Rwanda); Apia (Samoa); Victoria (Seychelles); Kingstown (St. Vin. and
     Gren.); Khartoum (Sudan); Lomé (Togo); Tunis
     (Tunisia); Cockburn Town (Turks and Caicos Is.); Port-Vila (Vanuatu)
-  - **A district, ward or parish instead of the capital** (62): the
+  - **A district, ward or parish instead of the capital** (61; Brussels left on 2026-10-14, see Belgium): the
     country's city tier is finer than its capital (Beijing, Tokyo, Seoul,
     Bangkok, Lisbon, London and many more). The capital's own boundary
     exists in OSM for most of these, usually a level above the one the
@@ -578,8 +578,7 @@ below).
     assuming a data gap. Where the district polygons tile the capital, a
     whole-city gap-fill never wins (see Tallinn, Mexico City, Lisbon).
     Algiers (Algeria); Saint John’s (Antigua and Barb.); Buenos Aires
-    (Argentina); Yerevan (Armenia); Canberra (Australia); Brussels
-    (Belgium); Porto-Novo (Benin); Bandar Seri Begawan (Brunei); Phnom
+    (Argentina); Yerevan (Armenia); Canberra (Australia); Porto-Novo (Benin); Bandar Seri Begawan (Brunei); Phnom
     Penh (Cambodia); Beijing (China); Brazzaville (Congo); San José (Costa
     Rica); Havana (Cuba); Tallinn (Estonia); Accra (Ghana); Port-au-Prince
     (Haiti); Tegucigalpa (Honduras); Hong Kong (Hong Kong); Baghdad
@@ -761,16 +760,22 @@ tessellates its country, so the bug was always grain, not coverage.
 
 ## Belgium (BE)
 
-`region [4]` (100.1%), `city [9]` (99.9%).
+`region [4]` (100.1%), `city [9]` (99.9%), `nameEnFromWikidata`.
 
-- **Brussels is `Bruxelles - Brussel`, not Brussels.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`.
-  50.85045, 4.34878 returns `city Bruxelles - Brussel`, with no other
-  name, so the capital check ("named for Brussels") cannot match it: OSM's
-  `name` is the French and Dutch names joined with ` - `, and the city has
-  no `int_name`. It does carry `name:en=Brussels`. Idea: a place-level
-  fallback "use `name:en` as the international name when `int_name` is
-  missing" (the region next to it already has one, `Brussels-Capital`).
-  Whether that is a pipeline rule or a per-country option is undecided.
+- **Brussels is `Bruxelles - Brussel`, not Brussels.** Fixed 2026-10-14 by
+  `nameEnFromWikidata: true`. 50.85045, 4.34878 returned
+  `Bruxelles - Brussel` alone, so the capital check ("named for Brussels")
+  could not match. The city is OSM relation `a40226383` at level 9, which
+  was "added for completeness with a minimal set of tags": no `name:en`, no
+  `int_name`. The City of Brussels at level 8 (`a116549`) has
+  `name:en=Brussels`, and shares its `wikidata` tag (`Q239`) with it, but
+  Belgium is not configured at level 8. With the option, Pass 1 keeps a
+  small `wikidata -> name:en` record for every relation of the country that
+  has both tags (candidate or not), and `finish()` gives each candidate
+  without a `name:en` the one with its `wikidata`. It now answers
+  `Bruxelles - Brussel | Brussels`. Opt-in per country (the borrowing is a
+  data-wide change nobody measured elsewhere); only Belgium uses it. A
+  `name:en` an element has itself is never replaced.
 
 ## Belize (BZ)
 

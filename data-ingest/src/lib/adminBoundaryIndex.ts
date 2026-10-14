@@ -69,6 +69,8 @@ export interface CityCandidateMeta {
    * join/dedup key, so it can be missing or inconsistent without affecting
    * matching. */
   nameEn: string | undefined;
+  /** Only in a country with `nameEnFromWikidata`, until the index is finished: the key `nameEn` is borrowed by. */
+  wikidata?: string;
   country: string;
   level: number;
   area: number;
@@ -86,6 +88,8 @@ export interface RegionCandidate {
   name: string;
   /** OSM's `name:en` tag, when present -- see CityCandidateMeta.nameEn. */
   nameEn: string | undefined;
+  /** See CityCandidateMeta.wikidata. */
+  wikidata?: string;
   country: string;
   /** The admin_level this candidate was tagged at. A country's own
    * COUNTRY_ADMIN_LEVELS entry keeps its region and city level lists
@@ -129,15 +133,27 @@ interface AdminBoundaryProps {
   admin_level?: string;
   name?: string;
   "name:en"?: string;
+  wikidata?: string;
   natural?: string;
 }
 
 /** What Pass 1 keeps of one relation (`classifyAdminFeature`): null when
  * it is no candidate at all. */
-export type AdminFeatureClass = null | { noCountry: true } | AdminCandidate;
+export type AdminFeatureClass = null | { noCountry: true } | NameSource | AdminCandidate;
+
+/** A relation that is no candidate, in a country with `nameEnFromWikidata`,
+ * kept for the `name:en` it can lend to a candidate with the same
+ * `wikidata` (Brussels' minimal level-9 relation has none, the level-8
+ * City of Brussels it shares Q239 with has "Brussels"). */
+export interface NameSource {
+  noCountry?: undefined;
+  nameSource: { wikidata: string; nameEn: string };
+}
 
 export interface AdminCandidate {
   noCountry?: undefined;
+  nameSource?: undefined;
+  wikidata?: string;
   country: string;
   level: number;
   name: string | undefined;
@@ -207,13 +223,18 @@ export function classifyAdminFeature(
   const isCity = (levels?.city.includes(level) ?? false) || cachedOverrideLevels(country).includes(level);
   const name = props?.name;
   const isRegion = (levels?.region.includes(level) ?? false) && !!name;
-  if (!isCity && !isRegion) return null;
+  const wikidata = levels?.nameEnFromWikidata ? props?.wikidata : undefined;
+  if (!isCity && !isRegion) {
+    const lend = props?.["name:en"];
+    return wikidata && lend ? { nameSource: { wikidata, nameEn: lend } } : null;
+  }
 
   return {
     country,
     level,
     name,
     nameEn: props?.["name:en"],
+    ...(wikidata ? { wikidata } : {}),
     repPoint,
     ...(interiorPoint !== repPoint ? { regionPoint: interiorPoint } : {}),
     bbox: featureBbox,
@@ -260,6 +281,11 @@ class AdminBoundaryAccumulator {
       diagnostics.noCountry++;
       return;
     }
+    if (c.nameSource) {
+      this.lendNameEn(c.nameSource.wikidata, c.nameSource.nameEn);
+      return;
+    }
+    if (c.wikidata && c.nameEn) this.lendNameEn(c.wikidata, c.nameEn);
     const { country, level } = c;
 
     if (c.isCity) {
@@ -267,6 +293,7 @@ class AdminBoundaryAccumulator {
         id,
         name: c.name,
         nameEn: c.nameEn,
+        ...(c.wikidata ? { wikidata: c.wikidata } : {}),
         country,
         level,
         area: c.area,
@@ -292,6 +319,7 @@ class AdminBoundaryAccumulator {
         id,
         name,
         nameEn: c.nameEn,
+        ...(c.wikidata ? { wikidata: c.wikidata } : {}),
         country,
         level,
         bbox: c.bbox,
@@ -301,7 +329,23 @@ class AdminBoundaryAccumulator {
     diagnostics.keptRegion++;
   }
 
+  /** `wikidata` -> `name:en`, from every relation of a country with `nameEnFromWikidata`, at any level. */
+  private readonly nameEnByWikidata = new Map<string, string>();
+
+  private lendNameEn(wikidata: string, nameEn: string): void {
+    if (!this.nameEnByWikidata.has(wikidata)) this.nameEnByWikidata.set(wikidata, nameEn);
+  }
+
+  /** Gives each candidate without a `name:en` the one a relation sharing its `wikidata` has. */
+  private borrowNameEn(): void {
+    const borrowed = (c: { nameEn: string | undefined; wikidata?: string }): string | undefined =>
+      c.nameEn ?? (c.wikidata ? this.nameEnByWikidata.get(c.wikidata) : undefined);
+    for (const c of this.cityCandidates) c.nameEn = borrowed(c);
+    for (const r of this.regionsByCountryName.values()) r.nameEn = borrowed(r);
+  }
+
   finish(): AdminBoundaryIndex {
+    this.borrowNameEn();
     const { cityCandidates, areaByCountryLevel, regionAreaByCountryLevel, regionsByCountryName, diagnostics } = this;
     console.error(
       `adminBoundaryIndex: done -- ${diagnostics.scanned} scanned, ${diagnostics.keptCity} city candidates, ` +

@@ -489,6 +489,13 @@ uses it so far. It needs the compressor's max-depth rule (a candidate
 crossing a cell with >= 25% of it beats one containing it), or the added
 districts take every border cell between the parishes they contain.
 
+**Borrowed `name:en`** (`CountryAdminLevels.nameEnFromWikidata`): a candidate
+with no `name:en` takes it from any relation of its country with the same
+`wikidata` tag, at any level (BE: Brussels' level-9 relation has none, the
+level-8 City of Brussels does). Pass 1 keeps a small `NameSource` record for
+every non-candidate relation of such a country that has both tags; opt-in,
+only Belgium so far.
+
 **Per-region `city` overrides** (`CountryAdminLevels.overrides`, keyed by
 region name — see `countryAdminLevels.ts`'s doc comment): for the rare
 case where one level doesn't fit a whole country (New York's real

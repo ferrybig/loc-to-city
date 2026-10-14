@@ -1007,9 +1007,8 @@ export const CASES: Case[] = [
 		at: [50.85045, 4.34878],
 		country: "Belgium",
 		city: { namedFor: "Brussels" },
-		status: "open",
+		status: "fixed",
 		section: "Belgium",
-		entry: "Brussels is `Bruxelles - Brussel`, not Brussels.",
 	},
 	{
 		name: "Graz resolves to Styria only",
@@ -1063,6 +1062,7 @@ export type Capital = readonly [
 
 export const CAPITALS: Capital[] = [
 	["Afghanistan", "Kabul", 34.52813, 69.17233],
+	["Belgium", "Brussels", 50.85045, 4.34878],
 	["Guernsey", "Saint Peter Port", 49.45981, -2.53527],
 	["Åland", "Mariehamn", 60.09726, 19.93481],
 	["Albania", "Tirana", 41.32744, 19.81866],
@@ -1246,7 +1246,6 @@ export const OPEN_CAPITALS: Capital[] = [
 	["Argentina", "Buenos Aires", -34.61315, -58.37723],
 	["Armenia", "Yerevan", 40.17765, 44.5126],
 	["Australia", "Canberra", -35.28346, 149.12807],
-	["Belgium", "Brussels", 50.85045, 4.34878],
 	["Benin", "Porto-Novo", 6.49646, 2.60359],
 	["Brunei", "Bandar Seri Begawan", 4.89035, 114.94006],
 	["Cambodia", "Phnom Penh", 11.56245, 104.91601],
