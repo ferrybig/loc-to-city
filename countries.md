@@ -649,6 +649,16 @@ tessellates its country, so the bug was always grain, not coverage.
   `Kunduz Province / Kunduz District`, Kabul to `Kabul Province / Kabul
   Municipality` (the local name `کابل ښاروالۍ`).
 
+## Algeria (DZ)
+
+`region [4]` (100.2%), `city [8]` (99.9%).
+
+- **Algiers answers with a commune.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 36.73225, 3.08746 returns
+  `region Algiers`, `city Kouba`. The region tier looks like the city (the
+  wilaya of Algiers *is* the city), so the user suggests both tiers sit one
+  level too deep (region 4 → 5, city 8 → 9 or lower). Not checked against
+  the levels OSM actually has there; see "Capitals" for the shape.
+
 ## Andorra (AD)
 
 `region []`, `city [7]` (103.5%).
@@ -697,6 +707,12 @@ tessellates its country, so the bug was always grain, not coverage.
   the same way as Ashgabat and Minsk; no level fixes it. See "Capitals that
   are their own region".
 
+- **Yerevan answers with a district.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 40.17765, 44.5126
+  returns `region Yerevan`, `city Kentron`. Suspected: the region slot holds
+  what is really a city, so both tiers are one level too high (region 4 →
+  5, city 5 → 6). The existing Yerevan entry above (no lower duplicate) is
+  the evidence to re-check first.
+
 ## Austria (AT)
 
 `region [4]`, `city [8]` (98.0%), `REGION_CITIES` for Wien.
@@ -706,6 +722,23 @@ tessellates its country, so the bug was always grain, not coverage.
   with only its districts (level 9) below it. Fixed 2026-10-13 by
   `REGION_CITIES`, which emits the Land polygon as the city too (see
   "Capitals that are their own region").
+
+- **Graz resolves to its Land only.** *(open)* 47.072109, 15.436306
+  returns `region Steiermark / Styria`, `city -`; expected `Graz`. Looks
+  like the England case (see "United Kingdom"): the city is a statutory city
+  (a district-level relation) that a gap-fill at level 8 never adds, since a
+  level-8 municipality's representative point covers it. Not yet checked
+  which levels OSM holds for Graz.
+
+## Azerbaijan (AZ)
+
+`region [6]` (112.7%), `city [8]` (4.2%).
+
+- **Baku is a region with no city.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 40.37767, 49.89201
+  returns `region Baku`, `city -`. City coverage is 4.2% nationally, so the
+  city tier is mostly empty. The user's guess is that region and city need
+  to move one level *up* (what sits in the region slot looks like cities).
+  Not checked against OSM's levels.
 
 ## Belarus (BY)
 
@@ -727,6 +760,28 @@ tessellates its country, so the bug was always grain, not coverage.
   "Surrounding rural unit" pattern with a differently named rural unit
   (the council is named after a village, not after the town).
 
+## Belgium (BE)
+
+`region [4]` (100.1%), `city [9]` (99.9%).
+
+- **Brussels is `Bruxelles - Brussel`, not Brussels.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`.
+  50.85045, 4.34878 returns `city Bruxelles - Brussel`, with no other
+  name, so the capital check ("named for Brussels") cannot match it: OSM's
+  `name` is the French and Dutch names joined with ` - `, and the city has
+  no `int_name`. It does carry `name:en=Brussels`. Idea: a place-level
+  fallback "use `name:en` as the international name when `int_name` is
+  missing" (the region next to it already has one, `Brussels-Capital`).
+  Whether that is a pipeline rule or a per-country option is undecided.
+
+## Belize (BZ)
+
+`region [4]` (115.9%), `city [8]` (5.3%).
+
+- **Belmopan is a district with no city.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 17.25376,
+  -88.76401 returns `region Cayo`, `city -`. City coverage is 5.3%
+  nationally. The user suspects the city level is too *high* (too coarse a
+  number, the places sit at a finer level). Not checked.
+
 ## Brazil (BR)
 
 `region [4]`, `city [9]` (66.6% coverage).
@@ -742,6 +797,16 @@ tessellates its country, so the bug was always grain, not coverage.
   widening to `[9, 8]` fixes both this and the 6 villages the tie-break
   tool found.
 
+## Bulgaria (BG)
+
+`region [5]` (98.4%), `city [8]` (46.5%).
+
+- **Pazardzhik is a province with no city.** *(open)* 42.192662, 24.334030
+  returns `region Pazardzik`, `city -`; expected the city of Pazardzhik.
+  City coverage is 46.5%, and the user notes some places work (the capital
+  does) while others do not, which smells like OSM's levels being mixed
+  within the country. Not yet looked at which levels hold Pazardzhik.
+
 ## Burkina Faso (BF)
 
 `region [4]`, `city [6]` (67.2%).
@@ -752,6 +817,15 @@ tessellates its country, so the bug was always grain, not coverage.
   town), so all five already resolve under their own plain name. Gap-filling
   8 in would only put a finer level in contention for cells its container
   already names correctly (the New York / Arkansas risk). Not applied.
+
+## Cambodia (KH)
+
+`region [4]` (112.3%), `city [6]` (93.2%).
+
+- **Phnom Penh answers with a khan.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 11.56245, 104.91601
+  returns `region Phnom Penh`, `city Khan Prampir Makara`. Suspected: the
+  region slot already holds what is really a city, so both tiers move down
+  one level (region 4 → 5? city 6 → 7?). Not checked.
 
 ## Canada (CA)
 
@@ -811,6 +885,10 @@ tessellates its country, so the bug was always grain, not coverage.
   big rural municipality the unmodified config would name it). Found by the
   tie-break tool. The configured level already tessellates the country, so
   the bug was grain, not coverage.
+
+- **Havana answers with a municipality.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 23.13302, -82.38304
+  returns `region La Habana / Havana`, `city Plaza de la Revolución`. The
+  user suspects region and city sit one level too high.
 
 ## Cyprus (CY)
 
@@ -943,6 +1021,11 @@ tessellates its country, so the bug was always grain, not coverage.
   whether OSM simply lacks the polygons (possibly bad OSM data, as
   suspected from the map) or whether another level covers the towns.
 
+- **Tbilisi has no region or city.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 41.69143, 44.83412
+  returns the country only. The user suspects the region and city levels
+  need to move *up* (what is in the region slot looks like cities). See
+  "Capitals".
+
 ## Germany (DE)
 
 `region [4]`, `city [8, 6]` (97.8% at 8, gap-fill 6), `REGION_CITIES` for Berlin and Hamburg.
@@ -995,6 +1078,15 @@ tessellates its country, so the bug was always grain, not coverage.
   6 inside it. Fixed 2026-10-13 by `REGION_CITIES`, which emits the region
   polygon as the city too (see "Capitals that are their own region").
 
+## India (IN)
+
+`region [4]` (100.2%), `city [6]` (97.4%).
+
+- **New Delhi resolves to Delhi only.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 28.62137, 77.2148
+  returns `region Delhi`, `city -`. The user reads it as another London:
+  only the capital is affected. See "A region around it, no city" under
+  "Capitals".
+
 ## Indonesia (ID)
 
 `region [4]`, `city [5]`.
@@ -1025,12 +1117,30 @@ tessellates its country, so the bug was always grain, not coverage.
   covers them. Names are OSM's: `The Municipal District of Kilkenny City`,
   `The Municipal District of Clane — Maynooth`.
 
+## Japan (JP)
+
+`region [4]` (204.2%), `city [7]` (185.5%).
+
+- **Tokyo answers with a ward.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 35.6895, 139.69171 returns
+  `region Tokyo`, `city Shinjuku`. Suspected: what is in the region slot
+  looks like cities, so region and city need to move down a level. Coverage
+  is over 180% at both levels, which means overlapping candidates; worth
+  checking that before changing a level.
+
 ## Jersey and Guernsey (JE, GG)
 
 - **Natural Earth's outlines are 47 and 59 vertices.** Fixed: the country
   outlines are OSM's now (see "Natural Earth's outlines are too coarse").
   Saint Helier still answers `Jersey` with no region or city, one of the
   "Country only" capitals.
+
+- **`St Peter Port` is not `Saint Peter Port`.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`.
+  49.45981, -2.53527 returns `city St Peter Port`, which *is* the capital:
+  the capital check wants the word `Saint`. This is a matching problem in
+  `verify/src/evaluate.ts`, not a data one. The two spellings are the same
+  place; treating the prefixes `St ` / `St. ` and `Saint ` as the same
+  word would fix Guernsey, and Jersey's `Saint Helier` (`St Helier`) once
+  that resolves a city at all (it is "Country only", see "Capitals").
 
 ## Kazakhstan (KZ)
 
@@ -1040,6 +1150,20 @@ tessellates its country, so the bug was always grain, not coverage.
   returns `region Астана / Astana`, `city Есіл ауданы / Esil district`. The
   republican cities are level-4 regions, so the only thing below is the
   city's own districts. See "Capitals that are their own region".
+
+- **Region and city may sit one level too high.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. The user
+  suspects what is in the region slot is already cities; the Astana entry
+  above is the visible symptom (51.1801, 71.44598 returns `region Astana`,
+  `city Bayqoñır district`). Not checked against OSM's levels.
+
+## Kosovo (XK)
+
+`region [6]` (99.9%), `city [5]` (99.9%).
+
+- **Cities are missing.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 42.67272, 21.16688 returns `region
+  Municipality of Pristina`, `city -`. The city tier is configured one level
+  *above* the region tier (5 versus 6), which is backwards. The user's
+  report is simply that the country seems to miss cities. Not investigated.
 
 ## Laos (LA)
 
@@ -1051,6 +1175,11 @@ tessellates its country, so the bug was always grain, not coverage.
   4 is Laos's 18 provinces (100.7%); freed level 6 (148 muang, 100.8%) as a
   real city tier (Pakse resolves to `ເມືອງປາກເຊ`, Pak Sé District), where the
   city had previously been forced onto a 0.2%-coverage level 7.
+
+- **Vientiane answers with a district.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 17.96667, 102.6
+  returns `region Vientiane Prefecture`, `city Chanthabuly District`.
+  Suspected: both tiers a level too high (what is in the region slot looks
+  like cities). Not checked.
 
 ## Latvia (LV)
 
@@ -1186,6 +1315,15 @@ Putrajaya.
   city polygon covers more of that cell (the Vatican answers Rome there for
   the same reason).
 
+## Mongolia (MN)
+
+`region [4]` (100.0%), `city [6]` (100.1%).
+
+- **Ulaanbaatar answers with a district.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 47.90771,
+  106.88324 returns `region Ulaanbaatar`, `city Bayangol`. The user is not
+  sure, but thinks the region and city levels need to be lower. Not
+  checked.
+
 ## Namibia (NA)
 
 `region [4]`, `city [8]` (0.1%).
@@ -1316,6 +1454,20 @@ worldwide resolved data (`make netherlands`) and
   checked whether OSM lacks the municipality here. Note that `region -`
   everywhere in North Macedonia is by design.
 
+- **Skopje has neither region nor city.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 41.99646, 21.43141
+  returns the country only. The user reports the country is missing regions
+  and cities. The "Град Скопје" candidate above is the only region-tier
+  hit, and Skopje is a city split into municipalities, so it may be the
+  England pattern (the city is a bigger relation over smaller ones).
+
+## Pakistan (PK)
+
+`region [4]` (103.6%), `city [7]` (102.0%).
+
+- **Islamabad answers with a zone.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 33.72148, 73.04329
+  returns `region Islamabad Capital Territory`, `city Zone 1`. The user
+  says it is not clear what is going on. Not investigated.
+
 ## Poland (PL)
 
 `region [6]` (powiat), `city [7]` (gmina), 100.1%.
@@ -1387,6 +1539,11 @@ worldwide resolved data (`make netherlands`) and
   regions by relation id instead of name.
   (The `world-queries` todo tests encode all seven.)
 
+- **Poland may be another England.** *(open)* The user's note, with no
+  coordinate: the gmina tier probably misses cities that are their own
+  county-level relation. See "United Kingdom" for the mechanism and
+  "Town inside its own rural gmina" above for the six pairs already found.
+
 ## Portugal (PT)
 
 `region [6]`, `city [8]` (100.7%).
@@ -1452,6 +1609,15 @@ worldwide resolved data (`make netherlands`) and
   Governorate`, Jeddah -> `Makkah Region / Jeddah Governorate`. Level 10 was
   1.5% coverage and urban neighbourhoods (Thulaim).
 
+## Slovakia (SK)
+
+`region [6]` (101.2%), `city [8]` (99.4%).
+
+- **Bratislava is a district with no city.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 48.14816,
+  17.10674 returns `region okres Bratislava I`, `city -`. The user reports
+  cities seem to be missing entirely. The region is already a district
+  (`okres`), so the city tier at level 8 may be doing little. Not checked.
+
 ## Slovenia (SI)
 
 `region []` plus `VORONOI_REGION_FALLBACK`, `city [8]` (101.9%).
@@ -1479,6 +1645,14 @@ worldwide resolved data (`make netherlands`) and
   region names differ are legitimate. On `world-high-res.bin`, 46.0569,
   14.5058 returns `region Ljubljana`, `city -`: the same residue. A fix would
   use each city's own centroid, or bias the sites by extent. Not attempted.
+
+- **The Voronoi fake cities may land on the wrong layer.** *(open)* The
+  user, looking at the map, reads the region layer as holding both cities
+  and regions and the city layer as holding nothing, and suspects the
+  synthesized polygons are generated at the wrong layer. Ljubljana
+  (46.05108, 14.50513) returns `region Ljubljana`, `city -`. Not checked;
+  the entry above ("A handful of cities land in the wrong synthesized
+  region") is the same code path.
 
 ## Somalia (SO)
 
@@ -1536,6 +1710,23 @@ worldwide resolved data (`make netherlands`) and
   administered (Tanzania claims the median line). A photo taken on
   Tanzanian land answers Tanzania; one from a boat on the lake answers
   Malawi, the same rule as territorial waters elsewhere.
+
+## Thailand (TH)
+
+`region [4]` (121.8%), `city [6]` (100.1%).
+
+- **Bangkok answers with a khet.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 13.75398, 100.50144
+  returns `region Bangkok`, `city Phra Nakhon District`. The user thinks
+  the city slot is too specific: either Bangkok is a city and a province in
+  one, or it is the England case.
+
+## Turkey (TR)
+
+`region [4]` (109.8%), `city [6]` (100.0%).
+
+- **Ankara answers with a district.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 39.91987, 32.85427
+  returns `region Ankara`, `city Çankaya`. The regions are mapped correctly;
+  the user thinks the city tier needs to be one level lower.
 
 ## Turkmenistan (TM)
 
@@ -1791,6 +1982,15 @@ No `COUNTRY_ADMIN_LEVELS` entry (no region or city tier).
 - **Maracaibo.** *(open)* Venezuela's 2nd-largest city has no admin boundary
   above `place=neighbourhood` at level 9: a deeper bug of the Brazil shape,
   not reachable by this gap-fill.
+
+## Vietnam (VN)
+
+`region [4]` (170.3%), `city [6]` (99.6%).
+
+- **Hanoi answers with a ward.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 21.0245, 105.84117 returns
+  `region Hà Nội`, `city Phường Văn Miếu - Quốc Tử Giám`. Suspected: what
+  is in the region slot looks like cities, so region and city move down.
+  Region coverage of 170% means overlapping candidates; check that first.
 
 ## Yemen (YE)
 

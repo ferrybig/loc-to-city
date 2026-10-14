@@ -994,6 +994,42 @@ export const CASES: Case[] = [
 		section: "Canada",
 		entry: "Terrace does not resolve on the current builds.",
 	},
+	{
+		name: "Saint Peter Port is St Peter Port",
+		at: [49.45981, -2.53527],
+		country: "Guernsey",
+		city: { namedFor: "Saint Peter Port" },
+		status: "open",
+		section: "Jersey and Guernsey",
+		entry: "`St Peter Port` is not `Saint Peter Port`.",
+	},
+	{
+		name: "Brussels is named Bruxelles - Brussel",
+		at: [50.85045, 4.34878],
+		country: "Belgium",
+		city: { namedFor: "Brussels" },
+		status: "open",
+		section: "Belgium",
+		entry: "Brussels is `Bruxelles - Brussel`, not Brussels.",
+	},
+	{
+		name: "Graz resolves to Styria only",
+		at: [47.072109, 15.436306],
+		country: "Austria",
+		city: "Graz",
+		status: "open",
+		section: "Austria",
+		entry: "Graz resolves to its Land only.",
+	},
+	{
+		name: "Pazardzhik is a province with no city",
+		at: [42.192662, 24.33403],
+		country: "Bulgaria",
+		city: { namedFor: "Pazardzik", aliases: ["Pazardzhik", "Пазарджик"] },
+		status: "open",
+		section: "Bulgaria",
+		entry: "Pazardzhik is a province with no city.",
+	},
 ];
 
 // ---- Capitals ----
