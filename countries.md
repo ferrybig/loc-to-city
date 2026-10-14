@@ -713,7 +713,7 @@ tessellates its country, so the bug was always grain, not coverage.
 
 ## Austria (AT)
 
-`region [4]`, `city [8]` (98.0%), `REGION_CITIES` for Wien.
+`region [4]`, `city [8, 6]` (98.0% at 8, gap-fill 6), `REGION_CITIES` for Wien.
 
 - **Vienna was a region with no city.** 48.20849, 16.37208 returned `Wien /
   Vienna`, `city -`: Wien is a Land (level 4) and a municipality in one,
@@ -721,12 +721,18 @@ tessellates its country, so the bug was always grain, not coverage.
   `REGION_CITIES`, which emits the Land polygon as the city too (see
   "Capitals that are their own region").
 
-- **Graz resolves to its Land only.** *(open)* 47.072109, 15.436306
-  returns `region Steiermark / Styria`, `city -`; expected `Graz`. Looks
-  like the England case (see "United Kingdom"): the city is a statutory city
-  (a district-level relation) that a gap-fill at level 8 never adds, since a
-  level-8 municipality's representative point covers it. Not yet checked
-  which levels OSM holds for Graz.
+- **Graz resolves to its Land only.** Fixed 2026-10-14 with `city [8, 6]`.
+  47.072109, 15.436306 returned `region Steiermark / Styria`, `city -`. Not
+  the England pattern: the statutory cities (Statutarstädte: Graz, Linz,
+  Salzburg, Innsbruck, Klagenfurt, St. Pölten, Wels, Villach, Wiener
+  Neustadt, Steyr, Krems, Eisenstadt, Waidhofen an der Ybbs) are one level-6
+  relation each and have no level-8 municipality, so they are the 2.0% hole
+  in the level-8 coverage (98.0%). Level 6 is also the Bezirke, which the
+  point rule never adds (a Bezirk's representative point lies inside one of
+  its municipalities). Of 4,000 random points in Austria, 29 changed
+  against the old build, every one a statutory city that had no city before
+  (Linz 4, Waidhofen 4, Villach 3, Graz 3, ...); nothing else moved. Linz,
+  Salzburg, Innsbruck, Klagenfurt and St. Pölten are cases of their own.
 
 ## Azerbaijan (AZ)
 

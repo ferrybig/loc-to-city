@@ -450,7 +450,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   AO: { region: [4], city: [6] }, // region 102.9%, city 9.1%
   AR: { region: [4], city: [5] }, // region 101.1%, city 99.9%
   AS: { region: [4], city: [8] }, // region 834.7%, city 646.9%
-  AT: { region: [4], city: [8] }, // region 99.9%, city 98.0%
+  AT: { region: [4], city: [8, 6] }, // region 99.9%, city 98.0% (8) + gap-fill 6 -- see countries.md (statutory cities)
   AU: { region: [4], city: [9] }, // region 105.3%, city 100.3%
   AW: { region: [], city: [8] }, // region 0.0%, city 23.0%
   AX: { region: [4], city: [8] }, // region 1415.9%, city 919.8%
