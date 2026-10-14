@@ -1559,9 +1559,9 @@ worldwide resolved data (`make netherlands`) and
 
 ## United Kingdom (GB)
 
-`region [4]`, `city [6, 8, 10]`, with `overrides` for Wales, Northern Ireland
-and Scotland, `wholeUnits` for Wales, and `VORONOI_CITY_FALLBACK_WITHIN_REGIONS`
-for Scotland and Northern Ireland.
+`region [4]`, `city [6, 8, 10]`, with `overrides` for England, Wales, Northern
+Ireland and Scotland, `coverageGapFill: [6, 8]`, `wholeUnits` for Wales, and
+`VORONOI_CITY_FALLBACK_WITHIN_REGIONS` for Scotland and Northern Ireland.
 
 - **The country-wide pick.** City was level 10 (civil parishes) only, leaving
   London (51.507674, -0.130119), unitary towns and nearly all of Scotland
@@ -1573,30 +1573,64 @@ for Scotland and Northern Ireland.
   are unchanged (Guildford, Cambridge, Malvern). A two-tier county whose
   representative point is unparished (Worcestershire) is added but loses to
   the smaller district or parish wherever one exists.
-- **England has cities above its parishes.** *(open)* England's city tier
-  is level 10 (civil parishes) with 8 and 6 gap-filled only where no parish
-  covers a cell, so a city made of several districts, or one whose centre is
-  unparished, answers with a parish, a suburb or nothing. On
-  `world-high-res.bin` (2026-10-14): Portsmouth (50.800239, -1.088247),
-  Southampton (50.902275, -1.404018), Winchester centre (51.061034,
-  -1.315441), Basingstoke centre (51.263419, -1.087132), Maidenhead
-  (51.522576, -0.720034), Norwich (52.629312, 1.293468) and Great Yarmouth
-  (52.607635, 1.726227) return `city -`; 51.050352, -1.331964 (Winchester)
-  returns the suburb `Badger Farm` and 51.269890, -1.044946 (Basingstoke)
-  the parish `Old Basing and Lychpit`. Salhouse (52.677189, 1.409984) is
-  right and must stay so. Suspected cause: cities and districts are tagged
-  at different levels and a city can contain several districts, so only the
-  local tier is read. Idea: where a larger and a smaller "city" polygon
-  overlap, take the one with the lower `admin_level`. Not yet investigated.
-- **Level-6 gap-fill does not show up on the current builds.** *(open)*
-  On the 2026-10-10 builds Reading (51.4556, -0.9693), Brighton (50.8225, -0.1372) and Bristol
+- **England has cities above its parishes.** Fixed 2026-10-14. England's
+  city tier is level 10 (civil parishes), with districts (8) and unitary
+  authorities (6) gap-filled where the parishes leave land uncovered. Two
+  things kept that from working, found by scanning
+  `planet-latest-admin.geojson` for the failing points (the polygons all
+  exist: Portsmouth and Southampton are level 6, Winchester, Norwich and
+  Great Yarmouth level 8):
+  - **Level 6 was unavailable in England.** Wales and Scotland list 6 in
+    their `overrides`, and a level that is an override level of any region is
+    skipped for every region whose own list lacks it, so Portsmouth,
+    Southampton, Reading, Brighton and Bristol were never candidates (this
+    is the "Level-6 gap-fill does not show up" item below). England now has
+    its own `[10, 8, 6]`; Wales, Scotland and Northern Ireland got 8 added,
+    so they gap-fill exactly what they did before.
+  - **A district was dropped as soon as one parish covered its
+    representative point.** Norwich's point is in the parish Kirby Bedon,
+    Winchester's in Owslebury, Great Yarmouth's in Mautby, Basingstoke and
+    Deane's in Deane: none was a candidate, however much unparished town
+    they hold. `coverageGapFill` replaces the point test for those levels
+    with a grid (`coverageGrid.ts`, up to 128 x 128 cells over the bbox, one
+    byte each) that every primary clears where it contains the cell's
+    centre; a candidate with at least `MIN_UNCOVERED_KM2` (3) left is added.
+    A level-6 county that level-8 candidates tile (Hampshire, Norfolk) is
+    skipped: its leftover land is its districts' already.
+  - **Gap-fill candidates took the borders of the parishes they contain.**
+    At a max-depth cell a candidate containing the whole cell scores 100%,
+    so a district beat both parishes on every border cell between them
+    (`Heath Charnock` -> `Chorley`; on 4,000 random points of England, 142
+    changed against the old build, about 20 of them a parish turned into a
+    county or district). `quadtree.ts` now gives such a cell to a candidate
+    crossing it that holds at least a quarter of it. 30,000 random points
+    worldwide: 4 answers differ from the old build (border cells of Chad,
+    Vietnam, Cameroon and one in the UK).
+
+  Result on `world-high-res.bin` (2026-10-14), against the 9 cases that
+  were failing: Portsmouth, Southampton, Winchester centre, Norwich and Great
+  Yarmouth resolve to themselves; Basingstoke and Maidenhead resolve to their
+  districts `Basingstoke and Deane` and `Windsor and Maidenhead` (the checks
+  use `namedFor`: OSM has no polygon for the towns themselves). City of
+  London, Potters Bar, Bristol, Reading and Brighton, open below until now,
+  resolve too. 56 more GB cities in the build, none fewer.
+- **A parish that is a suburb of a town names the parish.** *(open)*
+  51.050352, -1.331964 returns `Badger Farm` (Winchester) and 51.269890,
+  -1.044946 `Old Basing and Lychpit` (Basingstoke). Both are civil parishes
+  with no `place` tag or anything else telling them from a village parish
+  like Salhouse (52.677189, 1.409984), which must stay a parish; the only
+  difference is that a town has grown over them. Ideas, none tried: a parish
+  whose border is mostly shared with an unparished district area; GeoNames
+  population/feature class for the parish's name against the town's.
+- **Level-6 gap-fill does not show up on the current builds.** Fixed
+  2026-10-14, see "England has cities above its parishes". On the 2026-10-10 builds Reading (51.4556, -0.9693), Brighton (50.8225, -0.1372) and Bristol
   (51.453900, -2.595348) all return `England`, `city -`, and
   `cities-filtered.geojsonseq` has no GB feature named `Reading`, `Bristol`
   or `Brighton and Hove`. Level-8 gap-fill still works (`City of Westminster`
   is there and resolves). Same symptom as Bremen and Terrace; whether it is a
   regression or a stale input is undetermined, see Germany. (Kinross, 56.128332, -3.306370, now resolves to
   `Lochgelly` through the Scottish Voronoi cells, not to `Fife`.)
-- **London and Potters Bar.** *(open)* 51.515046, -0.093212 (City of London)
+- **London and Potters Bar.** Fixed 2026-10-14 by the same change (City of London and Potters Bar now have a city). 51.515046, -0.093212 (City of London)
   and 51.695597, -0.187626 (Potters Bar) return `England`, `city -`. London
   is the quirk: there is no "London" polygon, only its boroughs, and the City
   of London is not a borough. Potters Bar is in Hertfordshire (an

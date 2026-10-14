@@ -1,6 +1,9 @@
 import { mortonEncode } from "@ferrybig/cgeodata-reader/format";
 import type { IndexedCandidate } from "./candidateIndex.ts";
-import { type CellBounds, classifyCell, countContainedSamples } from "./geometry.ts";
+import { AREA_SHARE_SAMPLE_COUNT, type CellBounds, classifyCell, countContainedSamples } from "./geometry.ts";
+
+/** Share of a max-depth cell a candidate crossing it needs to take it from one containing it. */
+const CROSSING_MIN_SHARE = 0.25;
 
 export interface ChunkRecord {
   code: number;
@@ -147,13 +150,33 @@ export function buildChunkRecords(
       return;
     }
 
-    let best = relevant[0]!;
+    // A candidate that contains the whole cell scores 100% by definition, so
+    // whenever a bigger one overlaps smaller ones it beats every one of them
+    // on every border cell (a district over the parishes it holds: each
+    // parish border turned district-named). A candidate whose boundary crosses
+    // the cell and that holds a real share of it takes the cell instead.
+    let best: IndexedCandidate | undefined;
     let bestScore = -1;
-    for (const candidate of relevant) {
-      const score = countContainedSamples(candidate.geometry, bounds);
-      if (score > bestScore || (score === bestScore && preferred(candidate, best) === candidate)) {
-        bestScore = score;
-        best = candidate;
+    const crossing = relevant.filter((candidate) => !containsCell.has(candidate.globalId));
+    if (crossing.length < relevant.length) {
+      for (const candidate of crossing) {
+        const score = countContainedSamples(candidate.geometry, bounds);
+        if (score < CROSSING_MIN_SHARE * AREA_SHARE_SAMPLE_COUNT) continue;
+        if (score > bestScore || (score === bestScore && preferred(candidate, best!) === candidate)) {
+          bestScore = score;
+          best = candidate;
+        }
+      }
+    }
+    if (!best) {
+      best = relevant[0]!;
+      bestScore = -1;
+      for (const candidate of relevant) {
+        const score = countContainedSamples(candidate.geometry, bounds);
+        if (score > bestScore || (score === bestScore && preferred(candidate, best) === candidate)) {
+          bestScore = score;
+          best = candidate;
+        }
       }
     }
     emit(cellX, cellY, depth, best.globalId);

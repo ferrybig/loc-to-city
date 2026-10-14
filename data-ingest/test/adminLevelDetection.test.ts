@@ -284,7 +284,7 @@ test("selectPrimaryLevels: a non-overridden region in the same country is unaffe
 });
 
 test("whole units: Welsh Cardiff is promoted to primary and its communities are suppressed, Pontypridd is not", () => {
-  assert.deepEqual(COUNTRY_ADMIN_LEVELS.GB?.overrides?.["Cymru / Wales"], [10, 6], "test assumes Wales' real override");
+  assert.deepEqual(COUNTRY_ADMIN_LEVELS.GB?.overrides?.["Cymru / Wales"], [10, 6, 8], "test assumes Wales' real override");
   const unit = (id: string, level: number, name: string, repPoint: [number, number], bbox: [number, number, number, number]) => ({
     ...fakeCandidate("GB", level, 1),
     id,

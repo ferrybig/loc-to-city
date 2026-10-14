@@ -7,6 +7,13 @@ import type { CountryIndex } from "./countryIndex.ts";
 import { splitOsmiumFeature } from "./geojsonseqStream.ts";
 import { streamMergedAdminRecords } from "./mergeAdminBoundaries.ts";
 import { preparePolygon } from "./preparedPolygon.ts";
+import { coverGrid, uncoveredKm2 } from "./coverageGrid.ts";
+
+/** Uncovered area (km^2) from which a `coverageGapFill` candidate is added. */
+export const MIN_UNCOVERED_KM2 = 3;
+/** A level-6 county is not a city when finer candidates of the country tile
+ * at least this share of its area (by bbox containment, a cheap stand-in). */
+const TILED_BY_FINER_SHARE = 0.5;
 
 const DEFAULT_COVERAGE_THRESHOLD = 0.6;
 
@@ -234,6 +241,7 @@ export function createGapFillTracker(
   const primaryById = new Map<string, CityCandidateMeta>();
   const points: GapFillPoint[] = [];
   const overrideLevelsByCountry = new Map<string, Set<number>>();
+  const coverageCandidates: CityCandidateMeta[] = [];
 
   for (const candidate of index.cityCandidates) {
     if (primary.primaryIds.has(candidate.id)) {
@@ -258,6 +266,10 @@ export function createGapFillTracker(
       }
     }
 
+    if (candidate.coverage) {
+      coverageCandidates.push(candidate);
+      continue;
+    }
     const [x, y] = candidate.repPoint;
     points.push({ minX: x, minY: y, maxX: x, maxY: y, candidate, covered: false });
   }
@@ -265,10 +277,48 @@ export function createGapFillTracker(
   const tree = new RBush<GapFillPoint>();
   tree.load(points);
 
+  // `coverageGapFill` candidates: judged by uncovered area instead (see
+  // `CountryAdminLevels.coverageGapFill`). A county that finer candidates
+  // tile (Hampshire = its districts) is no city: its uncovered land is
+  // already some district's, and left in it would only name slivers.
+  const finerArea = (candidate: CityCandidateMeta): number => {
+    const [minX, minY, maxX, maxY] = candidate.bbox;
+    let total = 0;
+    for (const other of index.cityCandidates) {
+      if (other.country !== candidate.country || other.level <= candidate.level) continue;
+      if (!COUNTRY_ADMIN_LEVELS[other.country]?.coverageGapFill?.includes(other.level)) continue;
+      const [x0, y0, x1, y1] = other.bbox;
+      if (x0 >= minX && y0 >= minY && x1 <= maxX && y1 <= maxY) total += other.area;
+    }
+    return total;
+  };
+  const coverageTree = new RBush<{ minX: number; minY: number; maxX: number; maxY: number; candidate: CityCandidateMeta }>();
+  const eligibleCoverage = coverageCandidates.filter((c) => finerArea(c) < TILED_BY_FINER_SHARE * c.area);
+  coverageTree.load(
+    eligibleCoverage.map((candidate) => ({
+      minX: candidate.bbox[0],
+      minY: candidate.bbox[1],
+      maxX: candidate.bbox[2],
+      maxY: candidate.bbox[3],
+      candidate,
+    })),
+  );
+
   return {
     primaryById,
-    observePrimary(primaryCandidate, geometry) {
+    observePrimary(primaryCandidate, parse) {
+      let parsed: Polygon | MultiPolygon | undefined;
+      const geometry = (): Polygon | MultiPolygon => (parsed ??= parse());
       const [minX, minY, maxX, maxY] = primaryCandidate.bbox;
+      const grids = coverageTree
+        .search({ minX, minY, maxX, maxY })
+        .filter((g) => g.candidate.country === primaryCandidate.country);
+      if (grids.length > 0) {
+        const prepared = preparePolygon(geometry());
+        for (const { candidate } of grids) {
+          coverGrid(candidate.coverage!, candidate.bbox, prepared, primaryCandidate.bbox);
+        }
+      }
       const open = tree
         .search({ minX, minY, maxX, maxY })
         .filter((p) => !p.covered && p.candidate.country === primaryCandidate.country);
@@ -286,7 +336,11 @@ export function createGapFillTracker(
       }
     },
     gapFill() {
-      return points.filter((p) => !p.covered).map((p) => p.candidate);
+      const byPoint = new Set(points.filter((p) => !p.covered).map((p) => p.candidate));
+      const byCoverage = new Set(
+        eligibleCoverage.filter((c) => uncoveredKm2(c.coverage!, c.bbox) >= MIN_UNCOVERED_KM2),
+      );
+      return index.cityCandidates.filter((c) => byPoint.has(c) || byCoverage.has(c));
     },
   };
 }

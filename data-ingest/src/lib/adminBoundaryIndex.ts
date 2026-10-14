@@ -9,6 +9,7 @@ import { streamMergedAdminBoundaries, streamMergedAdminRecords } from "./mergeAd
 import { withOsmCountryBorders } from "./osmCountryBorders.ts";
 import type { TaskHandler, WorkerPool } from "./workerPool.ts";
 import { bboxAndPointOnFeature } from "./pointOnFeature.ts";
+import { buildCoverageGrid, type CoverageGrid } from "./coverageGrid.ts";
 import { resolvePolygonCountry } from "./polygonCountry.ts";
 
 // Regions are kept at full precision, like the country outlines. At 0.01
@@ -76,6 +77,8 @@ export interface CityCandidateMeta {
    * which region assignment uses instead (see `interiorPoint`). */
   regionPoint?: LonLat;
   bbox: BBox;
+  /** Only for a level in the country's `coverageGapFill`. */
+  coverage?: CoverageGrid;
 }
 
 export interface RegionCandidate {
@@ -142,6 +145,7 @@ export interface AdminCandidate {
   repPoint: LonLat;
   regionPoint?: LonLat;
   bbox: BBox;
+  coverage?: CoverageGrid;
   /** km^2. */
   area: number;
   isCity: boolean;
@@ -213,6 +217,7 @@ export function classifyAdminFeature(
     repPoint,
     ...(interiorPoint !== repPoint ? { regionPoint: interiorPoint } : {}),
     bbox: featureBbox,
+    ...(isCity && levels?.coverageGapFill?.includes(level) ? { coverage: buildCoverageGrid(geometry.geometry, featureBbox) } : {}),
     area: area(geometry) / 1_000_000, // m^2 -> km^2
     isCity,
     // Area accumulates only for the country-wide `city` vote -- an
@@ -268,6 +273,7 @@ class AdminBoundaryAccumulator {
         repPoint: c.repPoint,
         ...(c.regionPoint ? { regionPoint: c.regionPoint } : {}),
         bbox: c.bbox,
+        ...(c.coverage ? { coverage: c.coverage } : {}),
       });
       // `cityCandidates` above still holds an override-only candidate;
       // routing happens once each candidate's region is known, in

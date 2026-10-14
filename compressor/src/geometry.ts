@@ -409,6 +409,8 @@ export function classifyCell(
 // 5x5 = 25 sample points per ambiguous max-depth cell. At most 31: a row's
 // samples are tracked as the bits of one int (see countContainedSamples).
 const AREA_SHARE_SAMPLE_GRID = 5;
+/** The most `countContainedSamples` can return. */
+export const AREA_SHARE_SAMPLE_COUNT = AREA_SHARE_SAMPLE_GRID * AREA_SHARE_SAMPLE_GRID;
 // The current cell's sample longitudes, shared by every row.
 const sampleLons = new Float64Array(AREA_SHARE_SAMPLE_GRID);
 

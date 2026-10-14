@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { Feature, Polygon } from "geojson";
 import { CandidateIndex, packFeature, type CandidateEntry, type IndexedCandidate } from "../src/candidateIndex.ts";
 import { buildChunkRecords } from "../src/quadtree.ts";
+import { mortonDecode } from "@ferrybig/cgeodata-reader/format";
 
 function polygon(ring: [number, number][]): Feature<Polygon> {
   return { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [ring] } };
@@ -56,4 +57,29 @@ test("identical polygons go to the finer tier, then the lower id", () => {
     assert.ok(ids.has(12), "the city beats the region drawn the same");
     assert.ok(!ids.has(2), "the region drawn like a city gets none");
   }
+});
+
+test("a district holding two parishes does not take their border cells", () => {
+  // Parishes meet at x = 2.01, inside a depth-6 cell, so that cell is decided
+  // by share; the district contains it whole and used to win it by scoring 100%.
+  const parishEntries: CandidateEntry[] = [
+    { globalId: 20, shape: packFeature(square(0, 0, 4, 4)), ancestorIds: [] },
+    { globalId: 21, shape: packFeature(square(0, 0, 2.01, 2)), ancestorIds: [] },
+    { globalId: 22, shape: packFeature(square(2.01, 0, 4, 2)), ancestorIds: [] },
+  ];
+  const candidates = new CandidateIndex(parishEntries).candidatesForBbox(0, 0, 4, 4);
+  const records = buildChunkRecords(candidates, bounds, 6);
+  const cellOf = (lon: number, lat: number) => {
+    const x = Math.floor((lon / 4) * 64);
+    const y = Math.floor((lat / 4) * 64);
+    return records.find((r) => {
+      const { x: cx, y: cy } = mortonDecode(r.code, 6);
+      const size = 2 ** (6 - r.depth);
+      return x >= cx && x < cx + size && y >= cy && y < cy + size;
+    })!.globalId;
+  };
+  assert.equal(cellOf(2.03, 1), 22, "the border cell goes to the parish holding most of it");
+  assert.equal(cellOf(1, 1), 21);
+  assert.equal(cellOf(3, 1), 22);
+  assert.equal(cellOf(2, 3), 20, "the district keeps the land no parish covers");
 });

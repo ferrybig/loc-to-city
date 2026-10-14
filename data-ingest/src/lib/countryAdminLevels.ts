@@ -41,6 +41,14 @@ export interface CountryAdminLevels {
    * only neighbourhoods ("Castle", "Uplands"). Without the exception the
    * choice is Pontypridd or Cardiff, never both. */
   wholeUnits?: Record<string, { level: number; names: readonly string[] }>;
+  /** Gap-fill levels judged by how much of the candidate the primaries leave
+   * uncovered (`coverageGrid.ts`), not by whether they cover its
+   * representative point. A district is dropped by the point rule as soon as
+   * one parish covers its point, however much of it is unparished town (GB:
+   * Norwich, Winchester). A candidate at one of these levels is added when
+   * at least `MIN_UNCOVERED_KM2` of it is uncovered, unless it is a county
+   * that districts at a finer listed level tile (see `createGapFillTracker`). */
+  coverageGapFill?: number[];
 }
 
 /**
@@ -176,8 +184,13 @@ export interface CountryAdminLevels {
  *     makes communities primary; `wholeUnits` keeps Cardiff, Swansea and
  *     Newport (cities whose communities are only neighbourhoods) as single
  *     units. Tradeoff: Swansea's rural Gower resolves to "Swansea" too.
- *   Level 6/7 stay unavailable everywhere else in GB, so England (where 10
- *   is the right grain) is unaffected.
+ *   - England: `[10, 8, 6]`. Parishes stay primary; districts (8) and
+ *     unitary authorities (6: Portsmouth, Southampton, Reading) gap-fill.
+ *     Without its own list, level 6 was unavailable there (it is an override
+ *     level of Wales and Scotland, which skips it everywhere else), and the
+ *     rest of `coverageGapFill` is why a district with one parish at its
+ *     representative point is still added (countries.md, "England has cities
+ *     above its parishes").
  * - IE: level 10 is 51,414 townlands (Galway resolved to "Townparks").
  *   `[8, 7]`: 98 municipal districts primary (97% of the land), level 7
  *   (the `place=city` relations Dublin, Cork, ...; no district covers
@@ -498,10 +511,15 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
     // only: level 6/7 stay unavailable everywhere else in GB, where 10
     // (parishes) is the right grain.
     overrides: {
-      "Cymru / Wales": [10, 6],
-      "Northern Ireland / Tuaisceart Éireann": [7, 10],
-      "Alba / Scotland": [6, 10],
+      // England is listed for level 6 (unitary authorities: Portsmouth,
+      // Southampton, Reading), which is otherwise only a level of Wales and
+      // Scotland. 8 stays gap-fill everywhere, as under the country-wide list.
+      England: [10, 8, 6],
+      "Cymru / Wales": [10, 6, 8],
+      "Northern Ireland / Tuaisceart Éireann": [7, 10, 8],
+      "Alba / Scotland": [6, 10, 8],
     },
+    coverageGapFill: [6, 8],
     // Wales' communities (level 10) are the town grain everywhere except
     // inside its three cities -- see `CountryAdminLevels.wholeUnits`.
     wholeUnits: { "Cymru / Wales": { level: 6, names: ["Cardiff", "Swansea", "Newport"] } },

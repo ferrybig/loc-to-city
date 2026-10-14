@@ -479,6 +479,16 @@ Australia → gazetted localities) — the algorithm is finding whatever OSM
 admin level actually tessellates each country, not applying one fixed
 level worldwide.
 
+**Coverage gap-fill** (`CountryAdminLevels.coverageGapFill`, `coverageGrid.ts`):
+the representative-point test above drops a district as soon as one parish
+covers its point, however much unparished town it holds (GB: Norwich,
+Winchester). For the levels a country lists there, each candidate carries a
+grid over its bbox that every primary clears where it contains a cell
+centre, and the candidate is added when `MIN_UNCOVERED_KM2` is left. Only GB
+uses it so far. It needs the compressor's max-depth rule (a candidate
+crossing a cell with >= 25% of it beats one containing it), or the added
+districts take every border cell between the parishes they contain.
+
 **Per-region `city` overrides** (`CountryAdminLevels.overrides`, keyed by
 region name — see `countryAdminLevels.ts`'s doc comment): for the rare
 case where one level doesn't fit a whole country (New York's real
