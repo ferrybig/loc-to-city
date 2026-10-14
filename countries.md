@@ -1619,9 +1619,17 @@ Ireland and Scotland, `coverageGapFill: [6, 8]`, `wholeUnits` for Wales, and
   -1.044946 `Old Basing and Lychpit` (Basingstoke). Both are civil parishes
   with no `place` tag or anything else telling them from a village parish
   like Salhouse (52.677189, 1.409984), which must stay a parish; the only
-  difference is that a town has grown over them. Ideas, none tried: a parish
-  whose border is mostly shared with an unparished district area; GeoNames
-  population/feature class for the parish's name against the town's.
+  difference is that a town has grown over them. Researched 2026-10-14, no
+  fix: for each of the 10,450 English parishes, the share of points 300-450
+  m outside its border that fall in no parish at all (sampled every ~60th
+  vertex, four directions). Badger Farm scores 0.64 (rank 147), but Old
+  Basing and Lychpit scores 0.12 (rank 1459, level with Sprowston 0.15 and
+  Costessey 0.13) and Salhouse 0.00. The top of the list is mostly coastal
+  parishes (Zennor, Sennen, Portland: sea counts as unparished), so a
+  threshold that catches Badger Farm would also need a land mask and still
+  misses Old Basing, which really is a village (Old Basing) joined to a
+  Basingstoke suburb (Lychpit) in one parish. Untried: GeoNames population
+  of the parish's name against the town's.
 - **Level-6 gap-fill does not show up on the current builds.** Fixed
   2026-10-14, see "England has cities above its parishes". On the 2026-10-10 builds Reading (51.4556, -0.9693), Brighton (50.8225, -0.1372) and Bristol
   (51.453900, -2.595348) all return `England`, `city -`, and
