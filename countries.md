@@ -123,7 +123,9 @@ country (see "Capitals" under Cross-cutting patterns).
 - **Voronoi fallbacks** synthesize polygons from GeoNames `cities500.txt`
   points where OSM has none: `VORONOI_CITY_FALLBACK` (whole country),
   `VORONOI_CITY_FALLBACK_WITHIN_REGIONS` (clipped to a region's district
-  polygons), `VORONOI_REGION_FALLBACK` (Slovenia).
+  polygons), `VORONOI_REGION_FALLBACK` (Slovenia), and
+  `VORONOI_CITY_FALLBACK_HOLES` (only the land no real city covers, 21
+  countries, see "Countries with a thin city tier").
 - A **city whose region cannot be determined is dropped**, not kept
   region-less (`emitCity` in `prepare-world.ts`).
 - Anything no polygon covers falls back one tier: a point with no city
@@ -505,9 +507,42 @@ below).
   GE 4.3, LR 0.2, ME 9.6, MP 3.1, MV 9.7, MW 10.2, NA 0.1, QA 1.2, SX 11.7,
   TT 0.1, UG 6.4, UY 1.3, WS 0.3 (and empty city lists: BM, ER, FJ, GD, GL,
   GW, HM, KN, LC, LS, LY, MR, MS, NE, NR, PW, SC, SH, SZ, TC, VC, VG, VU).
-  Egypt, Chad, Eritrea and Libya were handled with the Voronoi fallback;
-  none of the others have been examined for whether OSM has a better level
-  or whether the fallback is the right tool. *(open)*
+  Egypt, Chad, Eritrea and Libya were handled with the Voronoi fallback.
+  **A Voronoi hole fill** (`VORONOI_CITY_FALLBACK_HOLES`, `holeFill.ts`),
+  added 2026-10-14, handles 21 more: AO, AZ, BF, BI, BW, CD, CF, GE, LR, LS,
+  MR, MW, NA, NE, PH, QA, SD, SZ, TG, TT, UG. What it found: in each of
+  them OSM has no relation at all for most towns (Angola's Benguela; the
+  Philippines' Pagadian; Cebu province has about 20 of its 50 municipalities;
+  an Overpass search for Pagadian finds schools and a fish port), so no
+  `admin_level` choice can name them. The fill leaves every real city alone
+  and gives each cities500 point no real city polygon contains a Voronoi
+  cell, clipped to its region (a cell never crosses a region border, since
+  the city's region is the one a lookup then reports) and with the real
+  cities cut out. A region with no point keeps answering with the region.
+  Unlike `VORONOI_CITY_FALLBACK` nothing real is replaced, and unlike a
+  level choice the result is nearest-populated-place inside its region, not a
+  boundary: a point is named after the nearest cities500 place that has no
+  polygon (Benguela's own point, 2.8 km from the GeoNames centre, lands in
+  Navegantes' cell). It needs regions that do not overlap, so Fiji and
+  Bahrain (region coverage 516% and 844%) are left out; a `regionGapFill`
+  region is cut down to the land its provinces leave first (PH, GE). A region
+  in `REGION_CITIES` is skipped (Tbilisi is one city already). Measured
+  against cities500 places of 50,000+ (named for the point's city / no city,
+  before → after): AO 8/50 → 58/0, AZ 1/12 → 13/0, BF 8/7 → 15/0, BI 1/4 →
+  5/0, BW 0/9 → 9/0, CD 32/28 → 60/0, CF 0/9 → 9/0, GE 0/5 → 5/0, LR 0/3 →
+  3/0, LS 0/2 → 2/0, MR 1/6 → 7/0, MW 0/7 → 7/0, NA 1/3 → 4/0, NE 1/12 →
+  13/0, PH 204/49 → 253/0, QA 2/3 → 5/0, SD 17/16 → 33/0, SZ 0/2 → 2/0,
+  TG 1/4 → 5/0, TT 0/3 → 3/0, UG 2/39 → 40/1. No other country changed.
+  Also checked: 5,000+ places and random points within half a degree of
+  every cities500 point of these countries (about 40,000) kept their
+  region except 38 on a region border (22 in PH, 16 in GE, cell edges).
+  Fifteen capitals resolve now (see "Capitals."). Remaining open in the
+  group: Togo and Liberia keep their real level-6/8 polygons (prefectures,
+  "Zone 3"), which the fill does not override, so Sokodé answers
+  "Tchaoudjo"; Guinea-Bissau's Bissau has no region at all, so the fill
+  has no region to put a cell in; BB, BH, BZ, CV, DM, ME, MP, MV, SX, UY, WS,
+  the other empty lists and the countries not in the table (the 5-20% ones)
+  are not examined. *(open)*
 - **Capitals.** *(open)* `verify/test/world-queries.test.ts` looks up
   the capital of every country and dependency GeoNames lists one for
   (232; `verify/src/cases.ts`'s `CAPITALS` and `OPEN_CAPITALS` tables carry the
@@ -524,22 +559,22 @@ below).
   fifth, **no country or the wrong one**, is gone since the OSM country
   outlines: Vatican City and Monaco resolve, and Gibraltar and the three
   atolls get their country; see "Natural Earth's outlines are too coarse".)
-  - **Country only** (24): neither a region nor a city covers the point.
-    Microstates and small territories, and also Tbilisi (Georgia), which
-    has its own section (Skopje and Manila left on 2026-10-14). `CITY_STATES` (Monaco, Vatican) is the mechanism for the
+  - **Country only** (23): neither a region nor a city covers the point.
+    Microstates and small territories (Skopje, Manila and Tbilisi left on
+    2026-10-14). `CITY_STATES` (Monaco, Vatican) is the mechanism for the
     microstates among them (Andorra, Malta and San Marino were added
     2026-10-13 and are out of this list).
     The Valley (Anguilla); Oranjestad (Aruba);
     Nassau (Bahamas); George Town (Cayman Is.); Willemstad (Curaçao);
     Stanley (Falkland Is.); Port-aux-Français (Fr. S. Antarctic Lands);
-    Tbilisi (Georgia); Gibraltar (Gibraltar); Bissau (Guinea-Bissau); Saint
+    Gibraltar (Gibraltar); Bissau (Guinea-Bissau); Saint
     Helier (Jersey); Tarawa (Kiribati); Majuro (Marshall Is.); Alofi (Niue);
     Adamstown (Pitcairn Is.); Grytviken (S. Geo. and
     the Is.); Jamestown (Saint Helena); Philipsburg
     (Sint Maarten); Gustavia (St-Barthélemy); Marigot (St-Martin);
     Saint-Pierre (St. Pierre and Miquelon); Funafuti (Tuvalu); Mata-Utu
     (Wallis and Futuna Is.)
-  - **The capital is only a region** (25): the region carries the
+  - **The capital is only a region** (16; nine left on 2026-10-14, see "Countries with a thin city tier"): the region carries the
     capital's name and no city covers the point. This is the previous
     entry ("Capitals that are their own region"). Its `REGION_CITIES`
     took 13 capitals off this list on 2026-10-13 (Vienna, Minsk, Prague,
@@ -549,18 +584,12 @@ below).
     city now beats a region drawn the same (see "Cities drawn twice").
     The rest are either a province named after its seat or not checked
     yet (that entry says which).
-    Baku (Azerbaijan); Hamilton
-    (Bermuda); Thimphu (Bhutan); Gaborone (Botswana); Gitega (Burundi);
-    Praia (Cabo Verde); Bangui (Central African Rep.); Yamoussoukro (Côte
-    d'Ivoire); Djibouti (Djibouti); Mbabane (eSwatini); Banjul (Gambia);
-    Maseru (Lesotho); Monrovia (Liberia); Vilnius (Lithuania); Lilongwe
-    (Malawi); Male (Maldives);
-    Saipan (N. Mariana Is.); Yaren (Nauru);
-    Castries (Saint Lucia);
-    Ljubljana (Slovenia); Honiara (Solomon Is.);
-    Basseterre (St. Kitts and Nevis); Port of Spain
-    (Trinidad and Tobago)
-  - **A region around it, no city** (22; Brasília moved on 2026-10-14, see Brazil; Guernsey left on 2026-10-14, it has a city and only the spelling differed): the region is a province,
+    Hamilton (Bermuda); Thimphu (Bhutan); Praia (Cabo Verde); Yamoussoukro
+    (Côte d'Ivoire); Djibouti (Djibouti); Banjul (Gambia); Vilnius
+    (Lithuania); Male (Maldives); Saipan (N. Mariana Is.); Yaren (Nauru);
+    Castries (Saint Lucia); Ljubljana (Slovenia); Honiara (Solomon Is.);
+    Basseterre (St. Kitts and Nevis)
+  - **A region around it, no city** (20; Khartoum and Lomé left on 2026-10-14; Brasília moved on 2026-10-14, see Brazil; Guernsey left on 2026-10-14, it has a city and only the spelling differed): the region is a province,
     parish or federal district (New Delhi is "Delhi"), and no city covers the point. Washington
     ("District of Columbia") was one and resolves since 2026-10-13
     (`REGION_CITIES` with a `city` name). New Delhi is not
@@ -569,7 +598,7 @@ below).
     (Fiji); Nuuk (Greenland); Saint George's (Grenada); New Delhi (India); Macau (Macao); Antananarivo
     (Madagascar); Plymouth (Montserrat); Ngerulmud (Palau); Kigali
     (Rwanda); Apia (Samoa); Victoria (Seychelles); Kingstown (St. Vin. and
-    Gren.); Khartoum (Sudan); Lomé (Togo); Tunis
+    Gren.); Tunis
     (Tunisia); Cockburn Town (Turks and Caicos Is.); Port-Vila (Vanuatu)
   - **A district, ward or parish instead of the capital** (62; Brussels left on 2026-10-14, see Belgium): the
     country's city tier is finer than its capital (Beijing, Tokyo, Seoul,
@@ -674,14 +703,19 @@ tessellates its country, so the bug was always grain, not coverage.
 
 `region [4]`, `city [6]` (9.1% coverage).
 
-- **Benguela and Huambo resolve to their province only.** *(open)*
-  -12.600135, 13.393707 (expected city Benguela) returns `Benguela
-  Province` with `city -`; -12.775308, 15.732937 (expected Huambo) returns
-  `Huambo Province` with `city -`. With 9.1% of the country covered by the
-  chosen level, most of Angola answers with its province. Unexamined:
-  whether OSM has a better level (municipios vs comunas), and whether
-  Angola belongs in `VORONOI_CITY_FALLBACK` (see "Countries with a thin
-  city tier"). Check the OSM extract for these two relations first.
+`VORONOI_CITY_FALLBACK_HOLES` fills the land no real city covers.
+
+- **Huambo resolved to its province only.** Fixed 2026-10-14.
+  -12.775308, 15.732937 returned `Huambo Province` with `city -`. OSM has
+  no municipality or commune relation for Huambo or Benguela (only the
+  provinces at level 4, 70 relations at level 6 and few at 8), so no level
+  helps; the Voronoi hole fill names the land the real cities leave
+  (cities500 places of 50,000+ named 8 → 58 of 77, no city 50 → 0).
+- **Benguela answers with the neighbouring cell.** *(open)* -12.600135,
+  13.393707 (expected Benguela) returns `Navegantes`: the point is 2.8 km
+  from the GeoNames centre of Benguela, in the cell of the nearer place
+  Navegantes. That is what a Voronoi cell is, nearest populated place
+  with no boundary behind it; fixing it needs the town's real outline.
 
 ## Argentina (AR)
 
@@ -739,11 +773,17 @@ tessellates its country, so the bug was always grain, not coverage.
 
 `region [6]` (112.7%), `city [8]` (4.2%).
 
-- **Baku is a region with no city.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 40.37767, 49.89201
-  returns `region Baku`, `city -`. City coverage is 4.2% nationally, so the
-  city tier is mostly empty. The user's guess is that region and city need
-  to move one level *up* (what sits in the region slot looks like cities).
-  Not checked against OSM's levels.
+- **Baku was a region with no city.** Fixed 2026-10-14. Reported while
+  improving capitals: 40.37767, 49.89201 returned `region Baku`, `city -`.
+  The guess was that region and city sit one level too low. They do not:
+  OSM has no level 4 for Azerbaijan, level 6 holds the 66 rayons and the
+  cities of republic subordination ("Bakı İnzibati Ərazisi" and 10 more,
+  137 relations in all), level 7 the Iranian-style quarters, level 8 a few
+  towns (Sumqayıt), and level 9 Baku's `siəd` blocks. So the regions are
+  right and the city tier is simply not mapped. The Voronoi hole fill
+  (`VORONOI_CITY_FALLBACK_HOLES`) names the land the 217 level-8 relations
+  leave: places of 50,000+ named 1 → 13 of 14, no city 12 → 0, Baku
+  resolves.
 
 ## Belarus (BY)
 
@@ -792,6 +832,16 @@ tessellates its country, so the bug was always grain, not coverage.
   -88.76401 returns `region Cayo`, `city -`. City coverage is 5.3%
   nationally. The user suspects the city level is too *high* (too coarse a
   number, the places sit at a finer level). Not checked.
+
+## Botswana (BW)
+
+`region [4]`, `city [6]` (18.1%), `VORONOI_CITY_FALLBACK_HOLES`.
+
+- **No city polygons for the towns.** Fixed 2026-10-14. All 9 places of
+  50,000+ had a region and no city, Gaborone included (level 4 holds Gaborone
+  and Francistown as regions; the 35 level-6 relations are not towns). The
+  Voronoi hole fill names the land they leave: named 0 → 9 of 9, no city 9
+  → 0. Gaborone resolves. Places of 5,000+: 3 → 63 of 63 named.
 
 ## Brazil (BR)
 
@@ -855,6 +905,19 @@ tessellates its country, so the bug was always grain, not coverage.
   town), so all five already resolve under their own plain name. Gap-filling
   8 in would only put a finer level in contention for cells its container
   already names correctly (the New York / Arkansas risk). Not applied.
+- **Towns without a department polygon.** Fixed 2026-10-14. Of 16
+  places of 50,000+ only 8 were named for their city and 7 had none: OSM's
+  level-6 departments (67.2% of the country) leave towns uncovered.
+  `VORONOI_CITY_FALLBACK_HOLES` names the land they leave: 15 of 16 named,
+  no city 7 → 0.
+
+## Burundi (BI)
+
+`region [4]`, `city [6]` (25.3%), `VORONOI_CITY_FALLBACK_HOLES`.
+
+- **Communes cover a quarter of the country.** Fixed 2026-10-14. Of 5
+  places of 50,000+ one was named and 4 had none, Gitega among them. Hole
+  fill: 5 of 5 named, none without a city. Gitega resolves.
 
 ## Cambodia (KH)
 
@@ -894,6 +957,15 @@ tessellates its country, so the bug was always grain, not coverage.
 - **Surrounding rural municipality.** *(open)* 49.952987, -98.299484 is
   `Portage la Prairie` (the city); 49.888884, -98.170395 is `Rural
   Municipality of Portage la Prairie`. See "Surrounding rural unit".
+
+## Central African Republic (CF)
+
+`region [4]`, `city [8]` (0.2%), `VORONOI_CITY_FALLBACK_HOLES`.
+
+- **No city tier.** Fixed 2026-10-14. 9 of 10 places of 50,000+ had a
+  region and no city, Bangui among them (Bangui is a level-4 region with no
+  city inside it). Hole fill: 9 of 10 named, none without a city. Bangui
+  resolves.
 
 ## Chad (TD)
 
@@ -973,6 +1045,9 @@ tessellates its country, so the bug was always grain, not coverage.
   province polygon as the city too (see "Capitals that are their own
   region"). The polygon includes the rural Maluku commune in the east,
   which is legally part of the city.
+- **Cities outside the 42.6% of level-6 polygons.** Fixed 2026-10-14. 81
+  places of 50,000+: named 32 → 60, no city 28 → 0 by
+  `VORONOI_CITY_FALLBACK_HOLES`.
 
 ## Egypt (EG)
 
@@ -1031,6 +1106,14 @@ tessellates its country, so the bug was always grain, not coverage.
   mechanism the primary/gap-fill model lacks: a named polygon overriding the
   label for cells its own primary children cover.
 
+## Eswatini (SZ)
+
+`region [6]`, `city []`, `VORONOI_CITY_FALLBACK_HOLES`.
+
+- **No city tier.** Fixed 2026-10-14. Both places of 50,000+ had no city
+  (Mbabane is a region named after its seat); hole fill: 2 of 2 named.
+  Mbabane resolves.
+
 ## Ethiopia (ET)
 
 `region [4]`, `city [5]`.
@@ -1051,18 +1134,24 @@ tessellates its country, so the bug was always grain, not coverage.
 
 ## Georgia (GE)
 
-`region [6]`, `city [8]` (4.3%).
+`region [6]` (municipalities), `regionGapFill: [4]`, `city [8]` (4.3%), `REGION_CITIES` for Tbilisi, `VORONOI_CITY_FALLBACK_HOLES`.
 
-- **Khobi Municipality has no city.** *(open)* 42.316670, 41.903229
-  returns `Khobi Municipality`, `city -`. City coverage is 4.3% nationally,
-  so most of the country answers with its municipality. Not yet checked
-  whether OSM simply lacks the polygons (possibly bad OSM data, as
-  suspected from the map) or whether another level covers the towns.
-
-- **Tbilisi has no region or city.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 41.69143, 44.83412
-  returns the country only. The user suspects the region and city levels
-  need to move *up* (what is in the region slot looks like cities). See
-  "Capitals".
+- **Khobi Municipality had no city.** Fixed 2026-10-14. 42.316670,
+  41.903229 returned `Khobi Municipality`, `city -`. OSM's levels in
+  Georgia: 4 = the mkhare (regions, and Tbilisi, tagged `place=city`), 6 =
+  the municipalities (172 relations, the big cities Kutaisi and Batumi
+  among them), 8 = a few towns (4.3%). So the municipalities are the
+  right region tier and the towns have no polygons; the Voronoi hole fill
+  names the land they leave (places of 50,000+ named 0 → 5 of 5).
+- **Tbilisi had no region or city.** Fixed 2026-10-14. 41.69143, 44.83412
+  returned the country only. Tbilisi is a level-4 relation and no
+  municipality (level 6) holds it, so a city there had no region and was
+  dropped. `regionGapFill: [4]` makes the mkhare regions too (where they
+  overlap the municipalities the municipality wins), which gives Tbilisi
+  its region, and `REGION_CITIES` emits the region polygon as its city (the
+  fill skips a `REGION_CITIES` region). 16 of about 1,200 random points
+  near Georgian places changed region: cells on municipality borders and
+  the Abkhazia relations.
 
 ## Germany (DE)
 
@@ -1248,6 +1337,24 @@ tessellates its country, so the bug was always grain, not coverage.
   emits each region polygon as the city too (see "Capitals that are their
   own region").
 
+## Lesotho (LS)
+
+`region [5]`, `city [10]` (0.0%), `VORONOI_CITY_FALLBACK_HOLES`.
+
+- **No city tier.** Fixed 2026-10-14. Both places of 50,000+ had no
+  city (Maseru is a district named after its seat). Hole fill: 2 of 2 named.
+  Maseru resolves.
+
+## Liberia (LR)
+
+`region [6]`, `city [8]` (0.2%), `VORONOI_CITY_FALLBACK_HOLES`.
+
+- **No city tier.** Fixed 2026-10-14. Hole fill: places of 50,000+ named
+  0 → 3 of 5, no city 3 → 0. Monrovia resolves. *(open)* The other two are
+  Gbarnga and Ganta, which answer `Zone 3` and `Zone 4`: real level-8
+  relations (zones of a town, 0.2% of the country) win the land, and the
+  fill never overrides a real polygon.
+
 ## Libya (LY)
 
 `region [4]`, `city []` (0%), in `VORONOI_CITY_FALLBACK`.
@@ -1286,6 +1393,14 @@ tessellates its country, so the bug was always grain, not coverage.
   artifacts": 49.947409, 6.159039 resolves to Germany instead of
   Luxembourg; 49.446226, 5.977764 resolves to Luxembourg instead of France.
 
+## Malawi (MW)
+
+`region [4]`, `city [5]` (10.2%), `VORONOI_CITY_FALLBACK_HOLES`.
+
+- **Few city polygons.** Fixed 2026-10-14. All 7 places of 50,000+ had a
+  region and no city, Lilongwe among them. Hole fill: 7 of 7 named. Places of
+  5,000+: 4 → 33 of 34. Lilongwe resolves.
+
 ## Malaysia (MY)
 
 `region [4]`, `city [6]` (100.8%), `REGION_CITIES` for Kuala Lumpur and
@@ -1309,6 +1424,14 @@ Putrajaya.
   councils become the cities (measured on `world-high-res.bin`, built
   2026-10-13: 35.89968, 14.5148 is `Il-Belt Valletta | Valletta`, 36.044,
   14.2397 `Ir-Rabat | Victoria`, on Gozo).
+
+## Mauritania (MR)
+
+`region [4]`, `city [6]` (0.0%), `VORONOI_CITY_FALLBACK_HOLES`.
+
+- **No city tier.** Fixed 2026-10-14. Places of 50,000+: named 1 → 7 of 9,
+  no city 6 → 0. (Nouakchott, a region of its own, is still a district in
+  the capital list.)
 
 ## Mauritius (MU)
 
@@ -1376,11 +1499,11 @@ Putrajaya.
 
 `region [4]`, `city [8]` (0.1%).
 
-- **Okahandja resolves to its region only.** *(open)* -21.979981,
-  16.910706 returns `Otjozondjupa Region`, `city -`. City coverage is 0.1%
-  nationally, so Namibia effectively has no city tier. Candidate for
-  `VORONOI_CITY_FALLBACK` after confirming OSM has nothing better (see
-  "Countries with a thin city tier").
+- **Okahandja resolved to its region only.** Fixed 2026-10-14.
+  -21.979981, 16.910706 returned `Otjozondjupa Region`, `city -`. City
+  coverage is 0.1%, so Namibia has no real city tier; the Voronoi hole fill
+  (`VORONOI_CITY_FALLBACK_HOLES`) names every cities500 place's land
+  (places of 50,000+ named 1 → 4 of 4).
 
 ## Netherlands (NL)
 
@@ -1505,6 +1628,13 @@ worldwide resolved data (`make netherlands`) and
   (hamlets, isolated dwellings, neighbourhoods), which the tie-break
   signal's own `place` filter excludes by tag rather than by level.
 
+## Niger (NE)
+
+`region [6]`, `city [8]` (0.0%), `VORONOI_CITY_FALLBACK_HOLES`.
+
+- **No city tier.** Fixed 2026-10-14. Places of 50,000+: named 1 → 13 of
+  13, no city 12 → 0.
+
 ## North Macedonia (MK)
 
 `region [7]` (municipalities), `city [8]` (settlements).
@@ -1553,16 +1683,19 @@ worldwide resolved data (`make netherlands`) and
   170 → 204, no city 100 → 49. No other country changed. Manila (the
   capital) resolves. All 17 level-3 regions enter the hierarchy; one with
   no bare land never wins a cell.
-- **Municipalities with no OSM polygon.** *(open)* The 49 places left
-  with no city (Toledo, Talisay and Naga in Cebu, Pagadian, Sorsogon,
-  Santiago, Laoag, Jolo, Surigao, Borongan, ...) have a province and no
-  city: OSM has no administrative relation for them. Level 6 holds 908
-  relations for the Philippines' ~1,640 municipalities and cities
-  (Cebu province: 20 of about 50), and an Overpass search for Pagadian finds
-  only schools and a fish port. Not fixable by an `admin_level` choice. A
-  Voronoi fill from cities500 points restricted to land no real municipality
-  covers (like `VORONOI_CITY_FALLBACK_WITHIN_REGIONS`, but for the holes
-  instead of replacing a container) would name them; not built.
+- **Municipalities with no OSM polygon.** Fixed 2026-10-14 by
+  `VORONOI_CITY_FALLBACK_HOLES`. The 49 places left with no city (Toledo,
+  Talisay and Naga in Cebu, Pagadian, Sorsogon, Santiago, Laoag, Jolo,
+  Surigao, Borongan, ...) had a province and no city: OSM has no
+  administrative relation for them. Level 6 holds 908 relations for the
+  Philippines' ~1,640 municipalities and cities (Cebu province: 20 of about
+  50), and an Overpass search for Pagadian finds only schools and a fish
+  port. Not fixable by an `admin_level` choice. The hole fill (see "Countries
+  with a thin city tier"; the level-3 regions are cut down to the land the
+  provinces leave first) gives each cities500 point no real municipality
+  covers a cell inside its province: named 204 → 253 of 284, no city 49 → 0.
+  A point is named after the nearest such place, so a town without a polygon
+  next to a municipality that has one gets the land the polygon does not.
 - Places named with a district (Santa Cruz, Paco and Port Area answer
   "Manila"; Tunasan and Putatan "Muntinlupa") are correct at the city tier.
 
@@ -1652,6 +1785,14 @@ worldwide resolved data (`make netherlands`) and
   Applied as `city: [8, 7]`, verified no effect, reverted. The other 291
   concelhos already resolve through an identically-named level-8 entry. See
   Estonia.
+
+## Qatar (QA)
+
+`region [4]`, `city [10]` (1.2%), `VORONOI_CITY_FALLBACK_HOLES`.
+
+- **Thin city tier.** Fixed 2026-10-14. Places of 50,000+: named 2 → 5 of
+  6, no city 3 → 0. The sixth is Old Airport (`المطار القديم`), a real
+  level-10 polygon around a place GeoNames calls differently.
 
 ## Romania (RO)
 
@@ -1779,16 +1920,15 @@ worldwide resolved data (`make netherlands`) and
 
 `region [4]`, `city [6]` (72.2%).
 
-- **No city tier, and the zero-region drop is not fully explained.**
-  *(open)* Khartoum resolves to neither region nor city although the config
-  records 100.5% region coverage, the same pattern the "Regions with no
-  cities were dropped" fix (README) was supposed to cover, not yet
-  distinguished from it. Deliberately not in `VORONOI_CITY_FALLBACK` yet:
-  adding a fallback on top of an unexplained bug risks hiding the second
-  issue, the way Slovenia's region gap once masked its city tier being fine.
-  Coverage is patchy, not uniformly zero, across this class of country:
-  Niamey (Niger) and Nouakchott (Mauritania) resolve all the way to city
-  despite low national percentages.
+- **No city tier.** Fixed 2026-10-14. Khartoum resolved to a region and no
+  city (the earlier note that it had neither was stale: the capital check
+  showed the region). Sudan has a patchy city tier (72.2% by area, 17 of 35
+  places of 50,000+ named); `VORONOI_CITY_FALLBACK_HOLES` names the land
+  the real polygons leave: named 17 → 33, no city 16 → 0, Khartoum
+  resolves. The earlier worry that a fallback would hide an unexplained
+  zero-region drop did not hold: the region is there. Coverage is patchy
+  across this class of country (Niamey and Nouakchott resolved to city
+  before despite low national percentages).
 
 ## Taiwan (TW)
 
@@ -1831,6 +1971,23 @@ worldwide resolved data (`make netherlands`) and
   the city slot is too specific: either Bangkok is a city and a province in
   one, or it is the England case.
 
+## Togo (TG)
+
+`region [4]`, `city [6]` (58.6%), `VORONOI_CITY_FALLBACK_HOLES`.
+
+- **Prefecture-grain cities.** Partly fixed 2026-10-14. Places of 50,000+:
+  named 1 → 5 of 8, no city 4 → 0, Lomé resolves. *(open)* The other three
+  (Sokodé, Kara, Dapaong) answer the prefecture (`Tchaoudjo`, `Kozah`, `Préfecture
+  de Kpendjal`): the configured level 6 is prefectures, not towns, and the
+  fill does not override a real polygon.
+
+## Trinidad and Tobago (TT)
+
+`region [4]`, `city [9]` (0.1%), `VORONOI_CITY_FALLBACK_HOLES`.
+
+- **No city tier.** Fixed 2026-10-14. All 3 places of 50,000+ had no
+  city; hole fill: 3 of 3 named. Port of Spain resolves.
+
 ## Turkey (TR)
 
 `region [4]` (109.8%), `city [6]` (100.0%).
@@ -1849,6 +2006,17 @@ worldwide resolved data (`make netherlands`) and
   (all tags compared), unlike Astana's districts. The one capital-is-region
   case that turned out fixable. Minsk and Yerevan were checked the same way
   and have no duplicate.
+
+## Uganda (UG)
+
+`region [4]`, `city [6]` (6.4%), `VORONOI_CITY_FALLBACK_HOLES`.
+
+- **No city tier below the districts.** Fixed 2026-10-14. The level-4
+  relations are the districts (and the new city councils, Mbale City,
+  Mbarara City), which overlap each other; 41 places of 50,000+ were
+  named 2, with no city 39. Hole fill: 40 of 41 named, no city 1. The
+  remaining miss is Mbale: its point is in the overlap of `Mbale` and
+  `Mbale City`, and a few sites there end up with no cell.
 
 ## Ukraine (UA)
 

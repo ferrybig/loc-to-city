@@ -550,7 +550,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
     wholeUnits: { "Cymru / Wales": { level: 6, names: ["Cardiff", "Swansea", "Newport"] } },
   },
   GD: { region: [6], city: [] }, // region 101.8%, city 0.0%
-  GE: { region: [6], city: [8] }, // region 102.9%, city 4.3%
+  GE: { region: [6], city: [8], regionGapFill: [4] }, // region 102.9%, city 4.3%; level 4 holds Tbilisi
   GG: { region: [4], city: [8] }, // region 107.6%, city 88.2%
   GH: { region: [4], city: [6] }, // region 100.1%, city 100.1%
   GL: { region: [4], city: [5] }, // region 71.9%, city 0.0%
@@ -759,6 +759,24 @@ export const VORONOI_CITY_FALLBACK_WITHIN_REGIONS: ReadonlyMap<string, readonly 
   ["GB", ["Alba / Scotland", "Northern Ireland / Tuaisceart Éireann"]],
 ]);
 
+/** The Voronoi hole fill (`holeFill.ts`): for a country whose OSM city tier
+ * has polygons for only some of its towns, every `cities500.txt` point that no
+ * real city polygon contains gets a cell of its own, clipped to its region and
+ * with the real cities cut out, so the land between the real polygons answers
+ * with the nearest populated place instead of its region. Unlike
+ * `VORONOI_CITY_FALLBACK`, which replaces a tier OSM has none of, the real
+ * polygons stay and win where they are. Opt-in, after confirming the missing
+ * towns have no relation at all in the extract (Angola's Benguela, the
+ * Philippines' Pagadian), not a level that could be picked instead. Needs
+ * regions that do not overlap, apart from a `regionGapFill` level (cut down
+ * to the land the others leave); not for a country like Fiji or Bahrain,
+ * whose region level covers the country several times over. A region in
+ * `REGION_CITIES` is left out: it is one city already. See countries.md,
+ * "Countries with a thin city tier". */
+export const VORONOI_CITY_FALLBACK_HOLES: ReadonlySet<string> = new Set([
+  "AO", "AZ", "BF", "BI", "BW", "CD", "CF", "GE", "LR", "LS", "MR", "MW", "NA", "NE", "PH", "QA", "SD", "SZ", "TG", "TT", "UG",
+]);
+
 /** Countries with `region: []` -- no usable region tier in OSM at all --
  * where `voronoiFallback.ts`'s `buildRegionFallback` synthesizes one from
  * `cities500.txt`, grouped by GeoNames admin1 code (see that function's
@@ -811,6 +829,7 @@ export const REGION_CITIES: ReadonlyMap<string, readonly { region: string; city?
   ["CD", [{ region: "Kinshasa" }]],
   ["CZ", [{ region: "Praha" }]],
   ["DE", [{ region: "Berlin" }, { region: "Hamburg" }]],
+  ["GE", [{ region: "თბილისი" }]],
   ["GN", [{ region: "Conakry" }]],
   [
     "LV",

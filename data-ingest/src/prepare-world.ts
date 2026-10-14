@@ -57,11 +57,13 @@ import type { Cities500Row } from "./lib/cities500.ts";
 import type { VoronoiCityCandidate } from "./lib/voronoiFallback.ts";
 import { loadAdmin1Names } from "./lib/admin1Codes.ts";
 import { buildCityFallback, buildContainerFallback, buildRegionFallback } from "./lib/voronoiFallback.ts";
+import { buildHoleFill, type RealCity } from "./lib/holeFill.ts";
 import {
   CITY_STATES,
   COUNTRY_ADMIN_LEVELS,
   REGION_CITIES,
   VORONOI_CITY_FALLBACK,
+  VORONOI_CITY_FALLBACK_HOLES,
   VORONOI_CITY_FALLBACK_WITHIN_REGIONS,
   VORONOI_REGION_FALLBACK,
 } from "./lib/countryAdminLevels.ts";
@@ -397,12 +399,24 @@ async function main(): Promise<void> {
   // Primaries are written as they stream past, straight from their source
   // text, while the same read marks which other candidates they cover --
   // no primary geometry is ever held (see createGapFillTracker).
+  // The real cities of a hole-fill country (VORONOI_CITY_FALLBACK_HOLES),
+  // kept to cut out of its synthesized cells.
+  const realCitiesByCountry = new Map<string, RealCity[]>();
+  const emitReal = async (candidate: CityCandidateMeta, geometryJson: string): Promise<boolean> => {
+    if (!(await emitCity(candidate, geometryJson))) return false;
+    if (VORONOI_CITY_FALLBACK_HOLES.has(candidate.country)) {
+      let real = realCitiesByCountry.get(candidate.country);
+      if (!real) realCitiesByCountry.set(candidate.country, (real = []));
+      real.push({ bbox: candidate.bbox, geometry: JSON.parse(geometryJson) as Polygon | MultiPolygon });
+    }
+    return true;
+  };
   const tracker = createGapFillTracker(index, primary, resolveCandidateRegion);
   const primariesFound = await streamPrimaries(files, tracker, async (candidate, geometryJson) => {
     if (suppressed.has(candidate.id)) return;
     const cells = (await cellsByContainer.get(candidate.id)) ?? [];
     if (cells.length === 0) {
-      if (await emitCity(candidate, geometryJson)) cityCount++;
+      if (await emitReal(candidate, geometryJson)) cityCount++;
       return;
     }
     for (const cell of cells) {
@@ -423,7 +437,54 @@ async function main(): Promise<void> {
   console.error(`  ${gapFillById.size.toLocaleString()} gap-fill cities`);
 
   for await (const { id, geometryJson } of streamGeometries(files, gapFillById)) {
-    if (await emitCity(gapFillById.get(id)!, geometryJson)) cityCount++;
+    if (await emitReal(gapFillById.get(id)!, geometryJson)) cityCount++;
+  }
+
+  // The Voronoi hole fill (VORONOI_CITY_FALLBACK_HOLES' doc comment).
+  if (VORONOI_CITY_FALLBACK_HOLES.size > 0) {
+    console.error(`Voronoi hole fill: ${[...VORONOI_CITY_FALLBACK_HOLES].join(", ")}...`);
+    const pointsByCountry = new Map<string, Cities500Row[]>();
+    for await (const row of streamCities500(CITIES500_SOURCE)) {
+      if (!VORONOI_CITY_FALLBACK_HOLES.has(row.countryCode)) continue;
+      let points = pointsByCountry.get(row.countryCode);
+      if (!points) pointsByCountry.set(row.countryCode, (points = []));
+      points.push(row);
+    }
+    const holeCells = await Promise.all(
+      [...pointsByCountry].map(async ([code, points]) => {
+        const gapLevels = COUNTRY_ADMIN_LEVELS[code]?.regionGapFill ?? [];
+        const wholeCity = new Set((REGION_CITIES.get(code) ?? []).map((r) => r.region));
+        const own = [...finalRegions.values()].filter((r) => r.country === code && !wholeCity.has(r.name));
+        const primaryRegions = own.filter((r) => !gapLevels.includes(r.level));
+        const regions = new Map<string, Feature<Polygon | MultiPolygon>>();
+        for (const r of own) {
+          if (!gapLevels.includes(r.level)) {
+            regions.set(r.name, r.feature);
+            continue;
+          }
+          // A region-gap-fill region overlaps the primary ones: its own land
+          // is what they leave.
+          const outline = (g: Polygon | MultiPolygon): Outline => (g.type === "Polygon" ? [g.coordinates] : g.coordinates);
+          const inner = primaryRegions
+            .filter((p) => p.bbox[0] < r.bbox[2] && p.bbox[2] > r.bbox[0] && p.bbox[1] < r.bbox[3] && p.bbox[3] > r.bbox[1])
+            .flatMap((p) => outline(p.feature.geometry));
+          const rest = inner.length > 0 ? await clip.difference(outline(r.feature.geometry), inner) : outline(r.feature.geometry);
+          if (rest.length === 0) continue;
+          regions.set(r.name, { type: "Feature", properties: {}, geometry: { type: "MultiPolygon", coordinates: rest } });
+        }
+        return buildHoleFill(regions, realCitiesByCountry.get(code) ?? [], points, (point) => regionAt(point, code), clip);
+      }),
+    );
+    let holeCount = 0;
+    for (const cells of holeCells) {
+      for (const cell of cells) {
+        if (await emitCity(cell, JSON.stringify(cell.geometry))) {
+          cityCount++;
+          holeCount++;
+        }
+      }
+    }
+    console.error(`Voronoi hole fill: ${holeCount.toLocaleString()} synthesized cities emitted`);
   }
 
   // The Voronoi-from-cities500 fallback (countries.md, Libya; VORONOI_CITY_FALLBACK's
