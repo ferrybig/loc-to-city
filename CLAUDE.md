@@ -496,6 +496,12 @@ level-8 City of Brussels does). Pass 1 keeps a small `NameSource` record for
 every non-candidate relation of such a country that has both tags; opt-in,
 only Belgium so far.
 
+**Pinned primary level** (`CountryAdminLevels.primaryLevel`): skips the
+area vote, for a country whose finest real city tier covers little (BG:
+settlements at 8, 46.5%) with a coarser filler above it (municipalities at
+5, in `coverageGapFill`). Without it the vote picks the filler and hides
+the cities the finer tier has (Sofia).
+
 **Per-region `city` overrides** (`CountryAdminLevels.overrides`, keyed by
 region name — see `countryAdminLevels.ts`'s doc comment): for the rare
 case where one level doesn't fit a whole country (New York's real

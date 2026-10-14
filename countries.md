@@ -350,20 +350,28 @@ below).
   needed refining), and `make world-high-res` took 6:10 wall / 11.7 GB
   peak, sidecars included.
 - **A city inside two overlapping regions gets whichever the R-tree returns
-  first.** *(open)* `assignCityRegion` (`regionPolygons.ts`) returns the
-  first region in `regionIndex`'s R-tree order whose polygon contains the
-  city's point. This used to be common, since simplified region polygons
-  overlapped along their borders; with full-precision regions and
-  `interiorPoint` (see "Simplified region polygons") it is down to regions
-  that really overlap in OSM. The text below predates that. The order depends on the whole tree: adding two
-  regions (Monaco's and the Vatican's) moved 593 cities500 points to
-  another region, Ninghe District from Tianjin to Hebei among them, and
-  cost Taipa (Macau) its city. The city-states are kept out of the tree for
-  that reason, so the order is as before, but any other change to the
-  region set reshuffles it. A deterministic rule (the region containing
-  most of the city's own polygon, or the smallest containing region) would
-  end this; it changes the region of every such border city, so it needs
-  its own measurement.
+  first.** Fixed 2026-10-14. `assignCityRegion` (`regionPolygons.ts`) used
+  to return the first region in `regionIndex`'s R-tree order whose polygon
+  contains the city's point, and that order depends on the whole tree: adding
+  Monaco's and the Vatican's regions moved 593 cities500 points to another
+  region (Ninghe District from Tianjin to Hebei) and cost Taipa (Macau) its
+  city; the city-states were kept out of the tree for that reason. It bit
+  again when Slovakia's regions changed from districts to kraje: 63 places
+  outside Slovakia changed region (the Crimean cities between the two
+  Crimea relations, Abkhazia, New Caledonia's provinces, Shan State, where
+  Kēng Tung even lost its city, and Bamako). Now of the regions of the
+  city's country that contain its point the smaller bbox wins, then the
+  name, so no region set elsewhere can move a city. Measured on 69,235
+  cities500 places of 5,000+ against the build before the rebuilds of
+  2026-10-14: outside the four countries whose levels changed, 78 changed
+  region and none lost a city or changed country. Vietnam 21 (Yên Bình and
+  Yên Bái moved from Lào Cai to Yên Bái province, where they are),
+  Russia 44 (Crimea: the Ukrainian-named relation `Автономна Республіка
+  Крим` now holds the cities of Russian Crimea, where `Республика Крым` did
+  before, the smaller bbox being the Ukrainian one: both are Russian
+  regions in this build and the choice between two overlapping
+  relations of one place is arbitrary), New Caledonia 11 (the "(terres)"
+  variants of the provinces), Myanmar 2.
 - **Surrounding rural unit named after its town** *(open)*. Poland, Belarus,
   Canada, the US (Michigan), Russia (Crimea): a town or city polygon sits as
   a hole in a larger rural unit that carries the same name (`Kościan` inside
@@ -518,15 +526,15 @@ below).
   atolls get their country; see "Natural Earth's outlines are too coarse".)
   - **Country only** (25): neither a region nor a city covers the point.
     Microstates and small territories, and also Manila (Philippines),
-    Tbilisi (Georgia) and Skopje (North Macedonia), which have their own
-    sections. `CITY_STATES` (Monaco, Vatican) is the mechanism for the
+    Tbilisi (Georgia), which has its own section (Skopje left on
+    2026-10-14). `CITY_STATES` (Monaco, Vatican) is the mechanism for the
     microstates among them (Andorra, Malta and San Marino were added
     2026-10-13 and are out of this list).
     The Valley (Anguilla); Oranjestad (Aruba);
     Nassau (Bahamas); George Town (Cayman Is.); Willemstad (Curaçao);
     Stanley (Falkland Is.); Port-aux-Français (Fr. S. Antarctic Lands);
     Tbilisi (Georgia); Gibraltar (Gibraltar); Bissau (Guinea-Bissau); Saint
-    Helier (Jersey); Tarawa (Kiribati); Majuro (Marshall Is.); Alofi (Niue); Skopje (North Macedonia);
+    Helier (Jersey); Tarawa (Kiribati); Majuro (Marshall Is.); Alofi (Niue);
     Manila (Philippines); Adamstown (Pitcairn Is.); Grytviken (S. Geo. and
     the Is.); Jamestown (Saint Helena); Philipsburg
     (Sint Maarten); Gustavia (St-Barthélemy); Marigot (St-Martin);
@@ -546,12 +554,11 @@ below).
     (Bermuda); Thimphu (Bhutan); Gaborone (Botswana); Gitega (Burundi);
     Praia (Cabo Verde); Bangui (Central African Rep.); Yamoussoukro (Côte
     d'Ivoire); Djibouti (Djibouti); Mbabane (eSwatini); Banjul (Gambia);
-    Pristina (Kosovo);
     Maseru (Lesotho); Monrovia (Liberia); Vilnius (Lithuania); Lilongwe
     (Malawi); Male (Maldives);
     Saipan (N. Mariana Is.); Yaren (Nauru);
     Castries (Saint Lucia);
-    Bratislava (Slovakia); Ljubljana (Slovenia); Honiara (Solomon Is.);
+    Ljubljana (Slovenia); Honiara (Solomon Is.);
     Basseterre (St. Kitts and Nevis); Port of Spain
     (Trinidad and Tobago)
   - **A region around it, no city** (23; Guernsey left on 2026-10-14, it has a city and only the spelling differed): the region is a province,
@@ -809,13 +816,25 @@ tessellates its country, so the bug was always grain, not coverage.
 
 ## Bulgaria (BG)
 
-`region [5]` (98.4%), `city [8]` (46.5%).
+`region [4]` (provinces), `city [8, 5]` (settlements, municipalities fill the gaps), `primaryLevel: 8`, `coverageGapFill: [5]`.
 
-- **Pazardzhik is a province with no city.** *(open)* 42.192662, 24.334030
-  returns `region Pazardzik`, `city -`; expected the city of Pazardzhik.
-  City coverage is 46.5%, and the user notes some places work (the capital
-  does) while others do not, which smells like OSM's levels being mixed
-  within the country. Not yet looked at which levels hold Pazardzhik.
+- **Pazardzhik is a province with no city.** Fixed 2026-10-14. 42.192662,
+  24.334030 returned `region Pazardzik`, `city -`. OSM's levels in Bulgaria:
+  4 = the 28 provinces (oblasti), 5 = the 265 municipalities (obshtini,
+  each named for its seat), 6 = the districts of Sofia, Plovdiv and Varna,
+  8 = settlements (towns and villages, 2,239 relations, 46.5% of the area
+  because only some settlements have a boundary), 9 and 10 = quarters. The
+  old config had the municipalities as the *region* and the settlements as
+  the city, so Plovdiv, Pazardzhik, Stara Zagora, Pleven and 6 more of the
+  17 cities with 50,000+ people (GeoNames cities500) had no city. Now the
+  provinces are the regions, the settlements stay the city where they exist
+  (`primaryLevel: 8` pins them as primary: the vote would pick the
+  municipalities, which cover everything, and hide Sofia, a level-8
+  settlement whose municipality is "Столична"), and a municipality is added
+  wherever the settlements leave at least 3 km² of it uncovered
+  (`coverageGapFill: [5]`, see "United Kingdom"). Measured against
+  cities500 places of 50,000+: named for the point's city 7 → 17 of 17, no
+  city 10 → 0.
 
 ## Burkina Faso (BF)
 
@@ -1040,6 +1059,12 @@ tessellates its country, so the bug was always grain, not coverage.
 
 `region [4]`, `city [8, 6]` (97.8% at 8, gap-fill 6), `REGION_CITIES` for Berlin and Hamburg.
 
+- **A city-state exclave is its own state.** Neuwerk, 53.948004, 8.404541,
+  is Hamburg's, 100 km from Hamburg in the Wadden Sea off Cuxhaven, and
+  resolves `Germany / Hamburg / Hamburg`, which a fixed case now pins.
+  Hamburg, Berlin and Bremen are states and cities at once (see "Capitals
+  that are their own region").
+
 - **Bremen is a city-state with a second relation.** Germany's three
   city-states are `admin_level=4`, the same level as every other Land, so
   they lost the city slot to the region tier. Bremen has a separate
@@ -1169,12 +1194,15 @@ tessellates its country, so the bug was always grain, not coverage.
 
 ## Kosovo (XK)
 
-`region [6]` (99.9%), `city [5]` (99.9%).
+`region [5]` (the 7 districts), `city [6]` (the 38 municipalities).
 
-- **Cities are missing.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 42.67272, 21.16688 returns `region
-  Municipality of Pristina`, `city -`. The city tier is configured one level
-  *above* the region tier (5 versus 6), which is backwards. The user's
-  report is simply that the country seems to miss cities. Not investigated.
+- **Cities are missing.** Fixed 2026-10-14 by swapping the two tiers. 42.67272,
+  21.16688 returned `region Municipality of Pristina`, `city -`. The config
+  had the municipalities (level 6, 38 of them, "Komuna e Prishtinës /
+  Opština Priština") as the region and the 7 districts (level 5, "Rajoni i
+  Prishtinës") as the city, and since the city is never finer than its
+  region, most places got no city. Measured against cities500 places of
+  50,000+: named for the point's city 4 → 9 of 9, no city 5 → 0.
 
 ## Laos (LA)
 
@@ -1359,6 +1387,25 @@ worldwide resolved data (`make netherlands`) and
 - 52.333399, 5.237517: Almere, not Huizen.
 - 52.131565, 5.277514: Soest, not Soesterberg.
 
+- **A German region covered the Dutch Dollart.** Fixed 2026-10-14.
+  53.653388, 6.440220 and 53.653363, 6.486011 are in the Netherlands'
+  outline only (the final outlines are disjoint; OSM's `admin_level=2`
+  relations of both countries overlap there) but answered `Germany /
+  Niedersachsen`, in a string of cells between 6.44 and 6.49 that flipped
+  between the two countries (tile 11/1060/660). Not the compressor's
+  crossing rule (the same answer with the older quadtree, checked on chunk
+  13122): the Niedersachsen *region* polygon reaches into the water, and
+  where it and the Dutch country polygon both contain a cell, the smaller
+  one (the region) wins. `cutCountriesOutOfForeignRegions` already cut a
+  country out of a foreign region where `ownerAt` (Natural Earth) names the
+  country; at sea it names nobody, and those overlaps were deliberately left
+  alone. They no longer are: a sampled point is counted for the outline it
+  was sampled from. 13 regions are cut now (10 before): Niedersachsen by the
+  Netherlands, Santa Cruz (AR) by Chile, Osječko-baranjska by Serbia, a
+  Myanmar district by Thailand, three Slovenian Voronoi regions by Italy,
+  Croatia and Austria, and a South Sudan state by Sudan. 30,000 random world
+  points: no change.
+
 - **Lelystad is huge.** *(false positive)* 52.683459, 5.295410 (open water
   off Enkhuizen, near the Houtribdijk) genuinely resolves to Lelystad, not
   Enkhuizen or generic Flevoland. Lelystad's official municipal boundary is
@@ -1451,25 +1498,23 @@ worldwide resolved data (`make netherlands`) and
 
 ## North Macedonia (MK)
 
-`region []`, `city [8]` (98.8%).
+`region [7]` (municipalities), `city [8]` (settlements).
 
-- **Region tier removed by hand.** The only level 4/5/6 candidate was
-  "Град Скопје" (City of Skopje, 2.3%), one municipality's boundary that
-  happens to carry a lower admin level, not a region tier. Set to `region:
-  []`. The city tier (level 8) already resolved correctly.
-- **41.432573, 22.011393 returns only the country.** *(open)* Reported with
-  "missing everything except country": `city -` (and `region -` is
-  expected given the line above). At this location the lookup cell is large
-  (lat 41.31..41.48, lon 21.80..22.15), which suggests the leaf stopped
-  subdividing over a region where no level-8 polygon covers; not yet
-  checked whether OSM lacks the municipality here. Note that `region -`
-  everywhere in North Macedonia is by design.
+- **Region tier removed by hand.** Reverted 2026-10-14. The only level
+  4/5/6 candidate was "Град Скопје" (City of Skopje, 2.3%), one
+  municipality's boundary that happens to carry a lower admin level, not a
+  region tier, so the region list was set to `[]`. That was the bug: a city
+  with no region is dropped (`emitCity`'s "no region, no city" rule, the
+  reason Slovenia has a Voronoi region fallback), so *no* North Macedonian
+  city resolved (0 of 9 cities500 places of 50,000+), however good the
+  level-8 settlements were. The municipalities (level 7, "Општина …", about
+  80) are the region tier; level 8 stays the city. 0 → 7 of 9 named, no
+  city 9 → 1.
+- **41.432573, 22.011393 returns only the country.** Fixed 2026-10-14 by the
+  region tier above (the reported cell had a level-8 settlement all along).
 
-- **Skopje has neither region nor city.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 41.99646, 21.43141
-  returns the country only. The user reports the country is missing regions
-  and cities. The "Град Скопје" candidate above is the only region-tier
-  hit, and Skopje is a city split into municipalities, so it may be the
-  England pattern (the city is a bigger relation over smaller ones).
+- **Skopje has neither region nor city.** Fixed 2026-10-14 by the region tier
+  above. 41.99646, 21.43141 returned the country only.
 
 ## Pakistan (PK)
 
@@ -1622,12 +1667,25 @@ worldwide resolved data (`make netherlands`) and
 
 ## Slovakia (SK)
 
-`region [6]` (101.2%), `city [8]` (99.4%).
+`region [4]` (the 8 kraje), `city [8, 5]`, `coverageGapFill: [5]`.
 
-- **Bratislava is a district with no city.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 48.14816,
-  17.10674 returns `region okres Bratislava I`, `city -`. The user reports
-  cities seem to be missing entirely. The region is already a district
-  (`okres`), so the city tier at level 8 may be doing little. Not checked.
+- **Bratislava is a district with no city.** Fixed 2026-10-14. 48.14816,
+  17.10674 returned `region okres Bratislava I`, `city -`. Slovakia's two
+  statutory cities, Bratislava and Košice, are single relations at level 5
+  (`place=city`; the other level-5 relations in the corpus are Czech or
+  Hungarian), with their boroughs at 9 and no level-8 relation at all, so
+  they were the hole in the level-8 municipalities (the Graz pattern, see
+  Austria). The representative-point gap-fill did not add them (tried
+  first: no change), so level 5 is a coverage gap-fill level
+  (`coverageGapFill: [5]`).
+  That was still not enough with the districts (okres, level 6) as the
+  regions: a city is assigned to one region, and Bratislava spans five
+  okresy, so in the other four the smaller okres polygon beat the city in
+  every cell both contain (the compressor takes the smaller). The regions
+  are now the 8 kraje (level 4), each containing its cities. Measured
+  against cities500 places of 50,000+: named 7 → 10 of 10, no city 3 → 0.
+  The region tier is coarser than before; `okres` names are no longer
+  anywhere in the result.
 
 ## Slovenia (SI)
 

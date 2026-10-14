@@ -81,15 +81,28 @@ test("selectRegionLevels: a level with real area data is still ignored if the co
   assert.equal(regionLevelByCountry.has("SI"), false);
 });
 
-test("selectRegionLevels: North Macedonia's hand-reviewed override (empty region list) is respected even with area data present", () => {
-  assert.deepEqual(COUNTRY_ADMIN_LEVELS.MK?.region, [], "test assumes MK's override is still in place");
+test("selectRegionLevels: North Macedonia's region level is 7, not the 2.3% Skopje relation at 6", () => {
+  assert.deepEqual(COUNTRY_ADMIN_LEVELS.MK?.region, [7], "test assumes MK's table entry is still [7]");
   const countries = fakeCountries({ MK: 25349 });
-  // The real corpus does have a level-6 region candidate for MK (Град
-  // Скопје / City of Skopje, ~2.3% coverage) -- the override must still
-  // win over it, since the table lists no region levels for MK at all.
-  const index = fakeIndex({ regionAreaByCountryLevel: new Map([["MK", new Map([[6, 571]])]]) });
+  // The real corpus has a level-6 candidate for MK (Град Скопје / City of
+  // Skopje, ~2.3% coverage); the table doesn't list 6, so it must not win.
+  const index = fakeIndex({ regionAreaByCountryLevel: new Map([["MK", new Map([[6, 571], [7, 25000]])]]) });
   const { regionLevelByCountry } = selectRegionLevels(index, countries);
-  assert.equal(regionLevelByCountry.has("MK"), false);
+  assert.equal(regionLevelByCountry.get("MK"), 7);
+});
+
+test("selectPrimaryLevels: primaryLevel wins over the area vote (Bulgaria: 8 at 46%, 5 at 100%)", () => {
+  assert.equal(COUNTRY_ADMIN_LEVELS.BG?.primaryLevel, 8, "test assumes BG's table entry still pins level 8");
+  const countries = fakeCountries({ BG: 110000 });
+  const settlement = fakeCandidate("BG", 8, 50000);
+  const municipality = fakeCandidate("BG", 5, 110000);
+  const index = fakeIndex({
+    areaByCountryLevel: new Map([["BG", new Map([[8, 50000], [5, 110000]])]]),
+    cityCandidates: [settlement, municipality],
+  });
+  const { primaryLevelByCountry, primaryIds } = selectPrimaryLevels(index, countries);
+  assert.equal(primaryLevelByCountry.get("BG"), 8);
+  assert.deepEqual([...primaryIds], [settlement.id]);
 });
 
 test("selectPrimaryLevels: uses whatever level the country's own table entry lists (Iceland: city=[6])", () => {

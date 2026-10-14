@@ -138,9 +138,11 @@ test("cutCountriesOutOfForeignRegions: a microstate is cut out of the neighbour'
   assert.ok(contains(geometryByRegion.get("FR paca")!, [2, 7]));
 });
 
-test("cutCountriesOutOfForeignRegions: land ownerAt gives to the region's country, and sea, stay", async () => {
+test("cutCountriesOutOfForeignRegions: land ownerAt gives to the region's country stays, a neighbour's waters are cut", async () => {
   // Western Sahara's outline inside Morocco's region, which ownerAt (Natural
-  // Earth) agrees with; and a region overlapping a neighbour's waters only.
+  // Earth) agrees with stays; a region overlapping a neighbour's waters,
+  // where ownerAt names nobody, is cut out of them (Niedersachsen over the
+  // Dollart).
   const outlines = new Map<string, Outline>([
     ["EH", [[ring(0, 0, 4, 4)]]],
     ["NL", [[ring(10, 0, 14, 4)]]],
@@ -151,6 +153,10 @@ test("cutCountriesOutOfForeignRegions: land ownerAt gives to the region's countr
   ]);
   const ownerAt = ([x]: LonLat) => (x < 5 ? "MA" : null);
   const { geometryByRegion, cuts } = await cutCountriesOutOfForeignRegions(regions, outlines, ownerAt);
-  assert.deepEqual(cuts, []);
-  assert.equal(geometryByRegion.size, 0);
+  assert.deepEqual(
+    cuts.map(({ region, country }) => [region, country]),
+    [["BE coast", "NL"]],
+  );
+  assert.ok(!contains(geometryByRegion.get("BE coast")!, [13, 2]));
+  assert.ok(contains(geometryByRegion.get("BE coast")!, [15, 2]));
 });

@@ -53,10 +53,20 @@ export function buildRegionIndex(regionsByCountryName: Map<string, RegionCandida
 export function assignCityRegion(repPoint: LonLat, country: string, index: RegionIndex): string | null {
   const [x, y] = repPoint;
   const hits = index.tree.search({ minX: x, minY: y, maxX: x, maxY: y });
+  // Where regions of one country overlap (Crimea's two relations, Shan
+  // State's special regions), the smaller bbox wins, then the name: the
+  // R-tree's search order is not stable, and it moved cities between
+  // regions whenever any region anywhere was added or removed.
+  let best: IndexedRegion | undefined;
+  let bestArea = Infinity;
   for (const hit of hits) {
     if (hit.country !== country) continue;
+    const area = (hit.maxX - hit.minX) * (hit.maxY - hit.minY);
+    if (best && (area > bestArea || (area === bestArea && hit.name >= best.name))) continue;
     hit.prepared ??= preparePolygon(hit.feature.geometry);
-    if (hit.prepared.contains(x, y)) return hit.name;
+    if (!hit.prepared.contains(x, y)) continue;
+    best = hit;
+    bestArea = area;
   }
-  return null;
+  return best?.name ?? null;
 }

@@ -123,12 +123,15 @@ export interface RegionCut {
  *
  * Each country's outline is sampled as in `resolveCountryOverlaps`; a
  * point inside a foreign region is a vote for whichever of the two
- * countries `ownerAt` names there. The country is cut out of the region
- * when it has at least two votes and more than the region's own country.
- * At sea `ownerAt` names neither, so a coastal region simply overlapping a
- * neighbour's territorial waters is left alone, and so is a disputed area
- * `ownerAt` gives to the region's country (Western Sahara inside
- * Morocco's regions). Only the regions that change are returned. */
+ * countries `ownerAt` names there, and a point `ownerAt` names neither for
+ * (at sea) goes to the outline it was sampled from, so Niedersachsen is cut
+ * out of the Dollart that the Dutch outline owns (2026-10-14; before, a
+ * coastal region overlapping a neighbour's waters was left alone, and won
+ * every cell both contained). The country is cut out of the region when it
+ * has at least two votes and more than the region's own country. A
+ * disputed area `ownerAt` gives to the region's country stays (Western
+ * Sahara inside Morocco's regions). Only the regions that change are
+ * returned. */
 export async function cutCountriesOutOfForeignRegions(
   regions: ReadonlyMap<string, { country: string; geometry: Polygon | MultiPolygon }>,
   outlines: ReadonlyMap<string, Outline>,
@@ -145,8 +148,12 @@ export async function cutCountriesOutOfForeignRegions(
     for (const key of regionIndex.codesAt(point[0], point[1])) {
       const regionCountry = regions.get(key)!.country;
       if (regionCountry === code) continue;
-      const owner = ownerAt(point);
-      vote(votesByPair, `${key}\t${code}`, owner === code || owner === regionCountry ? owner : "-");
+      // The outlines are disjoint, so the sampled point is `code`'s whatever
+      // `ownerAt` says at sea, where it names nobody: a region overlapping
+      // a neighbour's waters would otherwise win every cell it and the
+      // country both contain (smaller area), answering with its own
+      // country inside the neighbour's outline.
+      vote(votesByPair, `${key}\t${code}`, ownerAt(point) === regionCountry ? regionCountry : code);
     }
   });
 

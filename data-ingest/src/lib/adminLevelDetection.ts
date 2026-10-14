@@ -106,12 +106,15 @@ export function selectPrimaryLevels(
     if (!countryArea) continue;
     const candidateLevels = [...(COUNTRY_ADMIN_LEVELS[country]?.city ?? [])].sort((a, b) => b - a);
 
-    let chosen: number | undefined;
-    for (const level of candidateLevels) {
-      const levelArea = byLevel.get(level);
-      if (levelArea !== undefined && levelArea / countryArea >= threshold) {
-        chosen = level;
-        break;
+    // A pinned level skips the vote (`CountryAdminLevels.primaryLevel`).
+    let chosen: number | undefined = COUNTRY_ADMIN_LEVELS[country]?.primaryLevel;
+    if (chosen === undefined) {
+      for (const level of candidateLevels) {
+        const levelArea = byLevel.get(level);
+        if (levelArea !== undefined && levelArea / countryArea >= threshold) {
+          chosen = level;
+          break;
+        }
       }
     }
     if (chosen === undefined) {

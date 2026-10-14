@@ -49,6 +49,15 @@ export interface CountryAdminLevels {
    * at least `MIN_UNCOVERED_KM2` of it is uncovered, unless it is a county
    * that districts at a finer listed level tile (see `createGapFillTracker`). */
   coverageGapFill?: number[];
+  /** The `city` level that is primary, instead of the finest one covering at
+   * least 60% of the country (or, failing that, the largest). For a country
+   * whose finest real city tier covers little but is right where it exists,
+   * with a coarser level above it as the filler (BG: settlements at 8 cover
+   * 46.5%, municipalities at 5 cover it all but are named for a town that
+   * sometimes is a settlement of its own, Sofia). The other `city` levels
+   * are gap-fill; list the filler in `coverageGapFill` too, or a
+   * municipality whose representative point lies in a settlement is dropped. */
+  primaryLevel?: number;
   /** A candidate without `name:en` takes it from any relation of the country
    * with the same `wikidata` tag, at any level. For a country whose chosen
    * level has relations added "with a minimal set of tags" while the level
@@ -460,7 +469,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   BD: { region: [4], city: [6] }, // region 122.3%, city 111.4%
   BE: { region: [4], city: [9], nameEnFromWikidata: true }, // region 100.1%, city 99.9%
   BF: { region: [4], city: [6] }, // region 100.2%, city 67.2%
-  BG: { region: [5], city: [8] }, // region 98.4%, city 46.5%
+  BG: { region: [4], city: [8, 5], primaryLevel: 8, coverageGapFill: [5] }, // city 46.5% at 8, 5 fills -- see countries.md
   BH: { region: [4], city: [10] }, // region 844.4%, city 0.6%
   BI: { region: [4], city: [6] }, // region 92.7%, city 25.3%
   BJ: { region: [4], city: [6] }, // region 99.2%, city 99.2%
@@ -591,7 +600,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   ME: { region: [6], city: [8] }, // region 99.5%, city 9.6%
   MF: { region: [], city: [8] }, // region 0.0%, city 78.4%
   MG: { region: [4], city: [6] }, // region 99.9%, city 99.8%
-  MK: { region: [], city: [8] }, // region 2.3%, city 98.8% -- see override note above
+  MK: { region: [7], city: [8] }, // see countries.md (was region [], which dropped every city)
   ML: { region: [4], city: [6] }, // region 100.0%, city 86.3%
   MM: { region: [6], city: [7] }, // region 115.3%, city 113.5%
   MN: { region: [4], city: [6] }, // region 100.0%, city 100.1%
@@ -645,7 +654,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   SG: { region: [5], city: [7] }, // region 153.1%, city 119.4%
   SH: { region: [4], city: [10] }, // region 43.9%, city 0.0%
   SI: { region: [], city: [8] }, // region 0.0%, city 101.9%
-  SK: { region: [6], city: [8] }, // region 101.2%, city 99.4%
+  SK: { region: [4], city: [8, 5], coverageGapFill: [5] }, // region 101.2%, city 99.4% (8) + gap-fill 5 (Bratislava, Košice) -- see countries.md
   SL: { region: [4], city: [5] }, // region 101.4%, city 101.4%
   SM: { region: [], city: [8] }, // region 0.0%, city 84.2%
   SN: { region: [5], city: [8] }, // region 100.3%, city 100.1%
@@ -695,7 +704,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   VU: { region: [4], city: [] }, // region 1030.2%, city 0.0%
   WF: { region: [], city: [8] }, // region 0.0%, city 99.9%
   WS: { region: [4], city: [8] }, // region 102.0%, city 0.3%
-  XK: { region: [6], city: [5] }, // region 99.9%, city 99.9%
+  XK: { region: [5], city: [6] }, // see countries.md (was swapped: region 6 / city 5)
   YE: { region: [4], city: [6] }, // region 115.4%, city 110.0%
   ZA: { region: [4], city: [10] }, // region 105.9%, city 99.5%
   ZM: { region: [4], city: [5] }, // region 99.8%, city 99.8%
