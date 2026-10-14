@@ -59,6 +59,7 @@ import { loadAdmin1Names } from "./lib/admin1Codes.ts";
 import { buildCityFallback, buildContainerFallback, buildRegionFallback } from "./lib/voronoiFallback.ts";
 import {
   CITY_STATES,
+  COUNTRY_ADMIN_LEVELS,
   REGION_CITIES,
   VORONOI_CITY_FALLBACK,
   VORONOI_CITY_FALLBACK_WITHIN_REGIONS,
@@ -174,7 +175,11 @@ async function main(): Promise<void> {
   // output. (In practice almost every entry lists exactly one level, so
   // this filter is close to a no-op for most countries.)
   const finalRegions = new Map(
-    [...index.regionsByCountryName].filter(([, r]) => region.regionLevelByCountry.get(r.country) === r.level),
+    [...index.regionsByCountryName].filter(
+      ([, r]) =>
+        region.regionLevelByCountry.get(r.country) === r.level ||
+        COUNTRY_ADMIN_LEVELS[r.country]?.regionGapFill?.includes(r.level),
+    ),
   );
 
   // The Voronoi-from-cities500 fallback (countries.md, Slovenia), region half

@@ -31,7 +31,7 @@ const REGION_SIMPLIFY_TOLERANCE = 0; // 0 = keep every vertex
 // -- it only decides whether a feature is worth resolving at all, never
 // which role it plays once resolved (that's COUNTRY_ADMIN_LEVELS, purely
 // per-country, see there for why that separation matters).
-const PLAUSIBLE_ADMIN_LEVELS = new Set([4, 5, 6, 7, 8, 9, 10, 11]);
+const PLAUSIBLE_ADMIN_LEVELS = new Set([3, 4, 5, 6, 7, 8, 9, 10, 11]);
 // Levels any country ever uses as a *region* candidate -- used only to
 // decide `resolvePolygonCountry`'s sampling care (regions matter more to
 // get right than an ordinary city), not to decide role or acceptance.
@@ -222,7 +222,7 @@ export function classifyAdminFeature(
   // vs. country-wide) happens there, not here.
   const isCity = (levels?.city.includes(level) ?? false) || cachedOverrideLevels(country).includes(level);
   const name = props?.name;
-  const isRegion = (levels?.region.includes(level) ?? false) && !!name;
+  const isRegion = ((levels?.region.includes(level) ?? false) || (levels?.regionGapFill?.includes(level) ?? false)) && !!name;
   const wikidata = levels?.nameEnFromWikidata ? props?.wikidata : undefined;
   if (!isCity && !isRegion) {
     const lend = props?.["name:en"];

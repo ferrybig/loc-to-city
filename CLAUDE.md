@@ -502,6 +502,14 @@ settlements at 8, 46.5%) with a coarser filler above it (municipalities at
 5, in `coverageGapFill`). Without it the vote picks the filler and hides
 the cities the finer tier has (Sofia).
 
+**Region gap-fill** (`CountryAdminLevels.regionGapFill`): relations at these
+levels are regions too, next to the `region` level, and the compressor and
+`assignCityRegion` give a cell to the smaller of two regions, so they show only
+where no primary region covers. For a country whose cities sit in holes of the
+region level (PH: Metro Manila and the independent cities are not in any
+province, and a city with no region is dropped; level 3 holds them). Only the
+Philippines so far.
+
 **Per-region `city` overrides** (`CountryAdminLevels.overrides`, keyed by
 region name — see `countryAdminLevels.ts`'s doc comment): for the rare
 case where one level doesn't fit a whole country (New York's real

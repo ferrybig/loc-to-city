@@ -4,6 +4,15 @@ export interface CountryAdminLevels {
   region: number[];
   /** admin_level candidates for the country's city tier, same tie-break. */
   city: number[];
+  /** Region levels that only name what the `region` level leaves bare: a
+   * relation at one of these is a region too, and where it overlaps a
+   * primary region the smaller one wins (the compressor, `assignCityRegion`),
+   * so it shows only on land no primary region covers. For a country whose
+   * cities sit outside every province (PH: Metro Manila and the independent
+   * cities are holes in the level-4 provinces, and a city with no region is
+   * dropped), with the level above holding them (PH level 3, the 17
+   * regions). Never part of the area vote that picks `region`. */
+  regionGapFill?: number[];
   /** Per-region city level override, keyed by the exact region name this
    * country's regions resolve to (the same string `region` above's chosen
    * level produces). A region listed here ignores `city`/the country-wide
@@ -632,7 +641,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   PE: { region: [4], city: [8] }, // region 99.8%, city 99.7%
   PF: { region: [6], city: [10] }, // region 79.4%, city 567.6%
   PG: { region: [4], city: [5] }, // region 227.6%, city 99.5%
-  PH: { region: [4], city: [6] }, // region 202.6%, city 113.8%
+  PH: { region: [4], city: [6], regionGapFill: [3] }, // region 202.6%, city 113.8%; level 3 regions name the cities outside every province
   PK: { region: [4], city: [7] }, // region 103.6%, city 102.0%
   PL: { region: [6], city: [7] }, // region 100.2%, city 100.1%
   PM: { region: [], city: [8] }, // region 0.0%, city 96.1%

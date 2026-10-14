@@ -524,10 +524,9 @@ below).
   fifth, **no country or the wrong one**, is gone since the OSM country
   outlines: Vatican City and Monaco resolve, and Gibraltar and the three
   atolls get their country; see "Natural Earth's outlines are too coarse".)
-  - **Country only** (25): neither a region nor a city covers the point.
-    Microstates and small territories, and also Manila (Philippines),
-    Tbilisi (Georgia), which has its own section (Skopje left on
-    2026-10-14). `CITY_STATES` (Monaco, Vatican) is the mechanism for the
+  - **Country only** (24): neither a region nor a city covers the point.
+    Microstates and small territories, and also Tbilisi (Georgia), which
+    has its own section (Skopje and Manila left on 2026-10-14). `CITY_STATES` (Monaco, Vatican) is the mechanism for the
     microstates among them (Andorra, Malta and San Marino were added
     2026-10-13 and are out of this list).
     The Valley (Anguilla); Oranjestad (Aruba);
@@ -535,7 +534,7 @@ below).
     Stanley (Falkland Is.); Port-aux-Français (Fr. S. Antarctic Lands);
     Tbilisi (Georgia); Gibraltar (Gibraltar); Bissau (Guinea-Bissau); Saint
     Helier (Jersey); Tarawa (Kiribati); Majuro (Marshall Is.); Alofi (Niue);
-    Manila (Philippines); Adamstown (Pitcairn Is.); Grytviken (S. Geo. and
+    Adamstown (Pitcairn Is.); Grytviken (S. Geo. and
     the Is.); Jamestown (Saint Helena); Philipsburg
     (Sint Maarten); Gustavia (St-Barthélemy); Marigot (St-Martin);
     Saint-Pierre (St. Pierre and Miquelon); Funafuti (Tuvalu); Mata-Utu
@@ -1533,6 +1532,39 @@ worldwide resolved data (`make netherlands`) and
 - **Islamabad answers with a zone.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 33.72148, 73.04329
   returns `region Islamabad Capital Territory`, `city Zone 1`. The user
   says it is not clear what is going on. Not investigated.
+
+## Philippines (PH)
+
+`region [4]` (provinces), `regionGapFill: [3]`, `city [6]` (municipalities and cities, 113.8%).
+
+- **Metro Manila and the independent cities had no city.** Fixed
+  2026-10-14. Manila, Quezon City, Taguig, Zamboanga City, Tacloban, Olongapo
+  and 45 more of the 284 GeoNames places (cities500) of 50,000+ answered with
+  no region and no city. OSM's levels: 3 = the 17 regions (Metro Manila
+  among them), 4 = the 81 provinces, 5 = Metro Manila's four districts, 6 =
+  municipalities and cities, 10 = barangays. Metro Manila and the highly
+  urbanized and independent cities are not in any province, so the level-4
+  polygons have holes there, no region contained those cities and a city
+  with no region is dropped. New option `regionGapFill: [3]`: the level-3
+  regions are regions too, and a province, being smaller, wins wherever
+  both cover the cell, so a region name shows only on land no province
+  covers (Metro Manila, the holes of Zamboanga City, Tacloban, Iligan, Baguio).
+  Measured against cities500 places of 50,000+: named for the point's city
+  170 → 204, no city 100 → 49. No other country changed. Manila (the
+  capital) resolves. All 17 level-3 regions enter the hierarchy; one with
+  no bare land never wins a cell.
+- **Municipalities with no OSM polygon.** *(open)* The 49 places left
+  with no city (Toledo, Talisay and Naga in Cebu, Pagadian, Sorsogon,
+  Santiago, Laoag, Jolo, Surigao, Borongan, ...) have a province and no
+  city: OSM has no administrative relation for them. Level 6 holds 908
+  relations for the Philippines' ~1,640 municipalities and cities
+  (Cebu province: 20 of about 50), and an Overpass search for Pagadian finds
+  only schools and a fish port. Not fixable by an `admin_level` choice. A
+  Voronoi fill from cities500 points restricted to land no real municipality
+  covers (like `VORONOI_CITY_FALLBACK_WITHIN_REGIONS`, but for the holes
+  instead of replacing a container) would name them; not built.
+- Places named with a district (Santa Cruz, Paco and Port Area answer
+  "Manila"; Tunasan and Putatan "Muntinlupa") are correct at the city tier.
 
 ## Poland (PL)
 
