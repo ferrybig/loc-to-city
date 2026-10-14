@@ -999,9 +999,8 @@ export const CASES: Case[] = [
 		at: [49.45981, -2.53527],
 		country: "Guernsey",
 		city: { namedFor: "Saint Peter Port" },
-		status: "open",
+		status: "fixed",
 		section: "Jersey and Guernsey",
-		entry: "`St Peter Port` is not `Saint Peter Port`.",
 	},
 	{
 		name: "Brussels is named Bruxelles - Brussel",
@@ -1064,6 +1063,7 @@ export type Capital = readonly [
 
 export const CAPITALS: Capital[] = [
 	["Afghanistan", "Kabul", 34.52813, 69.17233],
+	["Guernsey", "Saint Peter Port", 49.45981, -2.53527],
 	["Åland", "Mariehamn", 60.09726, 19.93481],
 	["Albania", "Tirana", 41.32744, 19.81866],
 	["American Samoa", "Pago Pago", -14.27806, -170.7025],
@@ -1225,7 +1225,6 @@ export const OPEN_CAPITALS: Capital[] = [
 	["Fiji", "Suva", -18.13683, 178.42531],
 	["Greenland", "Nuuk", 64.18347, -51.72157],
 	["Grenada", "Saint George's", 12.05288, -61.75226],
-	["Guernsey", "Saint Peter Port", 49.45981, -2.53527],
 	["India", "New Delhi", 28.62137, 77.2148],
 	["Macao", "Macau", 22.20056, 113.54611],
 	["Madagascar", "Antananarivo", -18.91368, 47.53613],

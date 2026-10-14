@@ -554,7 +554,7 @@ below).
     Bratislava (Slovakia); Ljubljana (Slovenia); Honiara (Solomon Is.);
     Basseterre (St. Kitts and Nevis); Port of Spain
     (Trinidad and Tobago)
-  - **A region around it, no city** (24): the region is a province,
+  - **A region around it, no city** (23; Guernsey left on 2026-10-14, it has a city and only the spelling differed): the region is a province,
     parish or federal district (New Delhi is "Delhi", Brasília is
     "Distrito Federal"), and no city covers the point. Washington
     ("District of Columbia") was one and resolves since 2026-10-13
@@ -565,8 +565,7 @@ below).
     city.
     Manama (Bahrain); Bridgetown (Barbados); Belmopan (Belize); Brasília
     (Brazil); Road Town (British Virgin Is.); Quito (Ecuador); Suva
-    (Fiji); Nuuk (Greenland); Saint George's (Grenada); Saint Peter Port
-    (Guernsey); New Delhi (India); Macau (Macao); Antananarivo
+    (Fiji); Nuuk (Greenland); Saint George's (Grenada); New Delhi (India); Macau (Macao); Antananarivo
     (Madagascar); Plymouth (Montserrat); Ngerulmud (Palau); Kigali
     (Rwanda); Apia (Samoa); Victoria (Seychelles); Kingstown (St. Vin. and
     Gren.); Khartoum (Sudan); Lomé (Togo); Tunis
@@ -1134,13 +1133,14 @@ tessellates its country, so the bug was always grain, not coverage.
   Saint Helier still answers `Jersey` with no region or city, one of the
   "Country only" capitals.
 
-- **`St Peter Port` is not `Saint Peter Port`.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`.
-  49.45981, -2.53527 returns `city St Peter Port`, which *is* the capital:
-  the capital check wants the word `Saint`. This is a matching problem in
-  `verify/src/evaluate.ts`, not a data one. The two spellings are the same
-  place; treating the prefixes `St ` / `St. ` and `Saint ` as the same
-  word would fix Guernsey, and Jersey's `Saint Helier` (`St Helier`) once
-  that resolves a city at all (it is "Country only", see "Capitals").
+- **`St Peter Port` is not `Saint Peter Port`.** Fixed 2026-10-14, in the
+  matcher. 49.45981, -2.53527 returns `city St Peter Port`, which *is* the
+  capital, but the capital check wanted the word `Saint`. `verify/src/evaluate.ts`
+  now folds `St`, `St.` and `Saint` to one word before comparing, so Guernsey
+  passes (it was listed under "A region around it, no city" but already had
+  a city) and so will Jersey's `Saint Helier` (`St Helier`) once that
+  resolves a city at all (it is "Country only", see "Capitals"). The data
+  keeps the names OSM gives; only the check treats them as equal.
 
 ## Kazakhstan (KZ)
 

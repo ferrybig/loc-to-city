@@ -79,6 +79,12 @@ test("matches: names, lists, ANY, NONE and capitals", () => {
 	assert.ok(!matches(place(4, "Dongcheng District"), { namedFor: "Beijing" }));
 	// Whole words only.
 	assert.ok(!matches(place(5, "Sofiatown"), { namedFor: "Sofia" }));
+	// St, St. and Saint are one word.
+	for (const name of ["St Peter Port", "St. Peter Port", "Saint Peter Port"]) {
+		assert.ok(matches(place(6, name), { namedFor: "Saint Peter Port" }), name);
+		assert.ok(matches(place(6, name), { namedFor: "St Peter Port" }), name);
+	}
+	assert.ok(!matches(place(7, "Stockholm"), { namedFor: "Saint Peter Port" }));
 });
 
 test("evaluate: reports the failing tier and what came back", async () => {

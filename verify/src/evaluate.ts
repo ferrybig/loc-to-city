@@ -84,7 +84,9 @@ const fold = (s: string) =>
 		.normalize("NFD")
 		.replace(/\p{M}/gu, "")
 		.toLowerCase()
-		.replace(/[‘’`]/g, "'");
+		.replace(/[‘’`]/g, "'")
+		// "Saint Peter Port" and "St Peter Port" are one place.
+		.replace(/(^|[^\p{L}\p{N}])(?:saint|st\.?)(?=$|[^\p{L}\p{N}])/gu, "$1st");
 
 function isNamedFor(
 	e: Expected,
