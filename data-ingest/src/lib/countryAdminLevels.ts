@@ -477,7 +477,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   BM: { region: [6], city: [] }, // region 86.8%, city 0.0%
   BN: { region: [4], city: [6] }, // region 155.6%, city 25.6%
   BO: { region: [4], city: [8] }, // region 99.7%, city 99.0%
-  BR: { region: [4], city: [9] }, // region 103.1%, city 66.6%
+  BR: { region: [4], city: [8] }, // region 103.1%; municipalities (8), districts (9) only exist in some
   BS: { region: [], city: [8] }, // region 0.0%, city 759.4%
   BT: { region: [4], city: [8] }, // region 93.0%, city 91.2%
   BW: { region: [4], city: [6] }, // region 99.8%, city 18.1%

@@ -122,17 +122,17 @@ test("findPlaceTagMismatches: a country with an empty city list is still scored 
   assert.equal(result?.isMismatch, true);
 });
 
-test("findPlaceTagMismatches: Brazil -- a place=village level not configured is NOT a mismatch when the same name already resolves at the configured level", () => {
-  // Real shape (Mombuca, SP): the whole municipality is admin_level=8,
+test("findPlaceTagMismatches: a single-district municipality -- a place=village level not configured is NOT a mismatch when the same name already resolves at the configured level", () => {
+  // The shape Brazil had before it moved to level 8 (Mombuca, SP): the whole municipality is admin_level=8,
   // place=village -- not configured ([9]) -- but its own single
   // municipal-seat district carries the identical name at admin_level=9,
   // the already-configured level, with no place tag at all. The
   // settlement already resolves correctly today via the district; the
   // place tag on the municipality relation isn't evidence of anything
   // broken, so this must NOT be flagged as a mismatch.
-  assert.deepEqual(COUNTRY_ADMIN_LEVELS.BR?.city, [9], "test assumes BR's real table entry is still [9]");
-  const municipality = fakeCandidate({ name: "Mombuca", country: "BR", level: 8, place: "village" });
-  const district = fakeCandidate({ name: "Mombuca", country: "BR", level: 9 });
+  assert.deepEqual(COUNTRY_ADMIN_LEVELS.NP?.city, [9], "test assumes NP's real table entry is still [9]");
+  const municipality = fakeCandidate({ name: "Mombuca", country: "NP", level: 8, place: "village" });
+  const district = fakeCandidate({ name: "Mombuca", country: "NP", level: 9 });
   const [result] = findPlaceTagMismatches([municipality, district]);
   assert.equal(result?.isMismatch, false);
   assert.equal(result?.alreadyResolvedAtLevel, 9);

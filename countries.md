@@ -561,23 +561,18 @@ below).
     Ljubljana (Slovenia); Honiara (Solomon Is.);
     Basseterre (St. Kitts and Nevis); Port of Spain
     (Trinidad and Tobago)
-  - **A region around it, no city** (23; Guernsey left on 2026-10-14, it has a city and only the spelling differed): the region is a province,
-    parish or federal district (New Delhi is "Delhi", Brasília is
-    "Distrito Federal"), and no city covers the point. Washington
+  - **A region around it, no city** (22; Brasília moved on 2026-10-14, see Brazil; Guernsey left on 2026-10-14, it has a city and only the spelling differed): the region is a province,
+    parish or federal district (New Delhi is "Delhi"), and no city covers the point. Washington
     ("District of Columbia") was one and resolves since 2026-10-13
-    (`REGION_CITIES` with a `city` name). New Delhi and Brasília are not
-    that simple: Delhi holds New Delhi and more, and Distrito Federal
-    already holds one city polygon (`Nucleo rural Morro da Cruz`, a rural
-    settlement), which `REGION_CITIES` refuses next to a region-sized
-    city.
-    Manama (Bahrain); Bridgetown (Barbados); Belmopan (Belize); Brasília
-    (Brazil); Road Town (British Virgin Is.); Quito (Ecuador); Suva
+    (`REGION_CITIES` with a `city` name). New Delhi is not
+    that simple: Delhi holds New Delhi and more.
+    Manama (Bahrain); Bridgetown (Barbados); Belmopan (Belize); Road Town (British Virgin Is.); Quito (Ecuador); Suva
     (Fiji); Nuuk (Greenland); Saint George's (Grenada); New Delhi (India); Macau (Macao); Antananarivo
     (Madagascar); Plymouth (Montserrat); Ngerulmud (Palau); Kigali
     (Rwanda); Apia (Samoa); Victoria (Seychelles); Kingstown (St. Vin. and
     Gren.); Khartoum (Sudan); Lomé (Togo); Tunis
     (Tunisia); Cockburn Town (Turks and Caicos Is.); Port-Vila (Vanuatu)
-  - **A district, ward or parish instead of the capital** (61; Brussels left on 2026-10-14, see Belgium): the
+  - **A district, ward or parish instead of the capital** (62; Brussels left on 2026-10-14, see Belgium): the
     country's city tier is finer than its capital (Beijing, Tokyo, Seoul,
     Bangkok, Lisbon, London and many more). The capital's own boundary
     exists in OSM for most of these, usually a level above the one the
@@ -585,7 +580,7 @@ below).
     assuming a data gap. Where the district polygons tile the capital, a
     whole-city gap-fill never wins (see Tallinn, Mexico City, Lisbon).
     Algiers (Algeria); Saint John’s (Antigua and Barb.); Buenos Aires
-    (Argentina); Yerevan (Armenia); Canberra (Australia); Porto-Novo (Benin); Bandar Seri Begawan (Brunei); Phnom
+    (Argentina); Yerevan (Armenia); Canberra (Australia); Porto-Novo (Benin); Brasília (Brazil); Bandar Seri Begawan (Brunei); Phnom
     Penh (Cambodia); Beijing (China); Brazzaville (Congo); San José (Costa
     Rica); Havana (Cuba); Tallinn (Estonia); Accra (Ghana); Port-au-Prince
     (Haiti); Tegucigalpa (Honduras); Hong Kong (Hong Kong); Baghdad
@@ -801,18 +796,33 @@ tessellates its country, so the bug was always grain, not coverage.
 
 ## Brazil (BR)
 
-`region [4]`, `city [9]` (66.6% coverage).
+`region [4]`, `city [8]` (municipalities).
 
-- **Major cities missing despite 66.6% city coverage.** *(open)* Neither
-  São Paulo nor Rio de Janeiro (the city, not the state) resolves: `lookup`
-  at each city's own coordinates returned `city -`. Re-checked on
-  `world-high-res.bin`: -23.5505, -46.6333 now returns `Sé`, a distrito
-  (district) of São Paulo, so level 9 is the district tier in the big
-  metros and the municipality is level 8 with no competing same-name
-  candidate at level 9 at all. Not a tie the tie-break tool's
-  (country, name) grouping can resolve. Not yet investigated whether
-  widening to `[9, 8]` fixes both this and the 6 villages the tie-break
-  tool found.
+- **Major cities missing despite 66.6% city coverage.** Fixed 2026-10-14.
+  Neither São Paulo nor Rio de Janeiro (the city, not the state) resolved:
+  `lookup` at each city's own coordinates returned `city -`, or `Sé`, a
+  distrito of São Paulo. OSM's levels in Brazil: 4 = the 27 states, 8 = the
+  municípios (all of them, ~5,570), 9 = distritos, which exist only where a
+  municipality has real subdivisions (10,213 relations, and the small
+  municipalities' single district just carries the municipality's name).
+  The old config had `city [9]`, so the metros resolved at district grain
+  and every municipality without a level-9 district had no city: Teresina,
+  São Luís, Timon, Imperatriz and most of Maranhão, Ceará and Piauí.
+  Now `city [8]`. Measured against cities500 places of 50,000+ (765): named
+  for the point's city 507 → 674 (66.3% → 88.1%), no city 232 → 0; of
+  places of 5,000+ (4,423): 2,494 → 4,254 named, 1,866 → 0 without a
+  city. No other country's score changed. The remaining 91 "misses" are
+  GeoNames places that are districts or neighbourhoods inside a
+  municipality (Vila Mariana, Copacabana, Botafogo answer "São Paulo" and
+  "Rio de Janeiro"), correct at the city tier. The cost is that the
+  districts of a big municipality (São Paulo's Sé, Rio's Zona Oeste) no
+  longer show as the city; they are not city-grain places either.
+- **Brasília answers with a district.** *(open)* -15.77972, -47.92972
+  returns `region Distrito Federal`, `city Plano Piloto`. The Federal
+  District has no municipalities: its level-8 relations are the
+  administrative regions (regiões administrativas), Plano Piloto among
+  them, and Brasília itself is not a polygon of its own. A `REGION_CITIES`
+  entry is refused because the region already holds city polygons.
 
 ## Bulgaria (BG)
 
@@ -2049,7 +2059,7 @@ No `COUNTRY_ADMIN_LEVELS` entry (no region or city tier).
   name. "Los Robles", the one candidate to survive the strict filter, does
   not benefit.
 - **Maracaibo.** *(open)* Venezuela's 2nd-largest city has no admin boundary
-  above `place=neighbourhood` at level 9: a deeper bug of the Brazil shape,
+  above `place=neighbourhood` at level 9: a deeper bug than the Brazil one (fixed: municipalities were there, only the config skipped them),
   not reachable by this gap-fill.
 
 ## Vietnam (VN)
