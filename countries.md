@@ -1615,21 +1615,26 @@ Ireland and Scotland, `coverageGapFill: [6, 8]`, `wholeUnits` for Wales, and
   London, Potters Bar, Bristol, Reading and Brighton, open below until now,
   resolve too. 56 more GB cities in the build, none fewer.
 - **A parish that is a suburb of a town names the parish.** *(open)*
-  51.050352, -1.331964 returns `Badger Farm` (Winchester) and 51.269890,
-  -1.044946 `Old Basing and Lychpit` (Basingstoke). Both are civil parishes
-  with no `place` tag or anything else telling them from a village parish
-  like Salhouse (52.677189, 1.409984), which must stay a parish; the only
-  difference is that a town has grown over them. Researched 2026-10-14, no
+  51.050352, -1.331964 returns `Badger Farm` (Winchester). It is a civil
+  parish with no `place` tag or anything else telling it from a village
+  parish like Salhouse (52.677189, 1.409984), which must stay a parish; the
+  only difference is that a town has grown over it. Researched 2026-10-14, no
   fix: for each of the 10,450 English parishes, the share of points 300-450
   m outside its border that fall in no parish at all (sampled every ~60th
-  vertex, four directions). Badger Farm scores 0.64 (rank 147), but Old
-  Basing and Lychpit scores 0.12 (rank 1459, level with Sprowston 0.15 and
-  Costessey 0.13) and Salhouse 0.00. The top of the list is mostly coastal
-  parishes (Zennor, Sennen, Portland: sea counts as unparished), so a
-  threshold that catches Badger Farm would also need a land mask and still
-  misses Old Basing, which really is a village (Old Basing) joined to a
-  Basingstoke suburb (Lychpit) in one parish. Untried: GeoNames population
-  of the parish's name against the town's.
+  vertex, four directions). Badger Farm scores 0.64 (rank 147) and Salhouse
+  0.00, but the top of the list is mostly coastal parishes (Zennor, Sennen,
+  Portland: sea counts as unparished), so a threshold that catches Badger
+  Farm also needs a land mask. Untried: GeoNames population of the parish's
+  name against the town's.
+- **Old Basing and Lychpit is not a mistake.** *(false positive)*
+  51.269890, -1.044946 returns `Old Basing and Lychpit`, where Basingstoke
+  was expected. The parish is a village (Old Basing) joined to a Basingstoke
+  suburb (Lychpit), so the parish name is a legitimate answer; the same
+  research as above scores it 0.12, level with ordinary parishes such as
+  Sprowston, so no geometric rule would single it out anyway. Postal
+  addresses there say Basingstoke, which is the town to show when the
+  question is "which town would a letter go to"; that is not what this tier
+  records (the civil parish is), so it stays as it is.
 - **Level-6 gap-fill does not show up on the current builds.** Fixed
   2026-10-14, see "England has cities above its parishes". On the 2026-10-10 builds Reading (51.4556, -0.9693), Brighton (50.8225, -0.1372) and Bristol
   (51.453900, -2.595348) all return `England`, `city -`, and

@@ -163,13 +163,13 @@ export const CASES: Case[] = [
 		section: "United Kingdom",
 	},
 	{
-		name: "Basingstoke, not the parish Old Basing and Lychpit",
+		name: "Old Basing and Lychpit is one parish, a village and a suburb",
 		at: [51.269890, -1.044946],
 		region: "England",
-		city: "Basingstoke",
-		status: "open",
+		city: "Old Basing and Lychpit",
+		status: "false-positive",
 		section: "United Kingdom",
-		entry: "A parish that is a suburb of a town names the parish.",
+		entry: "Old Basing and Lychpit is not a mistake.",
 	},
 	{
 		name: "Maidenhead (England district)",
