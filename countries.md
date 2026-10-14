@@ -1573,6 +1573,21 @@ for Scotland and Northern Ireland.
   are unchanged (Guildford, Cambridge, Malvern). A two-tier county whose
   representative point is unparished (Worcestershire) is added but loses to
   the smaller district or parish wherever one exists.
+- **England has cities above its parishes.** *(open)* England's city tier
+  is level 10 (civil parishes) with 8 and 6 gap-filled only where no parish
+  covers a cell, so a city made of several districts, or one whose centre is
+  unparished, answers with a parish, a suburb or nothing. On
+  `world-high-res.bin` (2026-10-14): Portsmouth (50.800239, -1.088247),
+  Southampton (50.902275, -1.404018), Winchester centre (51.061034,
+  -1.315441), Basingstoke centre (51.263419, -1.087132), Maidenhead
+  (51.522576, -0.720034), Norwich (52.629312, 1.293468) and Great Yarmouth
+  (52.607635, 1.726227) return `city -`; 51.050352, -1.331964 (Winchester)
+  returns the suburb `Badger Farm` and 51.269890, -1.044946 (Basingstoke)
+  the parish `Old Basing and Lychpit`. Salhouse (52.677189, 1.409984) is
+  right and must stay so. Suspected cause: cities and districts are tagged
+  at different levels and a city can contain several districts, so only the
+  local tier is read. Idea: where a larger and a smaller "city" polygon
+  overlap, take the one with the lower `admin_level`. Not yet investigated.
 - **Level-6 gap-fill does not show up on the current builds.** *(open)*
   On the 2026-10-10 builds Reading (51.4556, -0.9693), Brighton (50.8225, -0.1372) and Bristol
   (51.453900, -2.595348) all return `England`, `city -`, and
