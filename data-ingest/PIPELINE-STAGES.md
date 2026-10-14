@@ -12,17 +12,14 @@ documentation and the one hand-crafted spec fixture (2026-09-28).
 **Almost nothing under `data/` is tracked in git any more.** Every stage
 is a local, reproducible build artifact -- raw downloads, osmium
 extractions, resolved hierarchy/geometry, and all three `.bin` files are
-gitignored. The only two tracked files under `data/` are
-`data/00-raw/orphan/README.md` (documentation) and
+gitignored. The only tracked file under `data/` is
 `data/03-final/appendix-a-example.bin` (a hand-extracted `reader/binary-format.md`
 spec fixture, not pipeline output). A fresh clone has an essentially
 empty `data/` and must run the download + build scripts to populate it.
 
 ```
 data/00-raw/          external downloads (including the ~80GB
-                       planet-latest.osm.pbf) + one orphan Python-prototype
-                       output (nl_cities.geojson, gitignored -- see
-                       "Orphan inputs" below)
+                       planet-latest.osm.pbf)
 data/01-extracted/    osmium-exported admin boundaries (World only, now)
 data/02-resolved/     resolved hierarchy + geometry (per dataset: nl/eu/world)
 data/03-final/        the final .bin files + reader sidecar indexes
@@ -53,14 +50,7 @@ data/02-resolved/{nl,eu}/{hierarchy.json, regions.geojsonseq,
 data/03-final/{zuid-holland,europe,world}.bin
 ```
 
-The pipeline is **strictly linear, no cycles**. One structural quirk
-survives and is documented below rather than fixed:
-
-- `data/00-raw/orphan/nl_cities.geojson` looks like mid-pipeline output
-  but is actually **irreplaceable raw input** from a deleted Python
-  prototype — nothing in the current repo can regenerate it, though it is
-  no longer load-bearing for any build (see "Orphan inputs" below). It's
-  gitignored, kept on disk only as a reference sample.
+The pipeline is **strictly linear, no cycles**.
 
 ## Why `prepare-zuid-holland.ts`/`prepare-europe.ts` were deleted
 
@@ -68,16 +58,18 @@ Both scripts existed because the Zuid-Holland/Europe test datasets used
 to come from the deleted Python prototype's own output
 (`nl_cities.geojson`, `eu_cities.geojson`) rather than from
 `prepare-world.ts`'s worldwide resolution. Investigating why
-`eu_cities.geojson` (313MB, gitignored, un-backed-up — see "Orphan
-inputs") couldn't be replaced surfaced that it didn't need to be: both
+`eu_cities.geojson` (313MB, gitignored, un-backed-up) couldn't be replaced surfaced that it didn't need to be: both
 files are OSM `admin_level=10`-equivalent data resolved per-country, and
 `prepare-world.ts`'s own per-country `COUNTRY_ADMIN_LEVELS` resolution
 already does the same job, more accurately, for every country in the
 world (confirmed: `data/03-final/world.bin`'s NL data resolves real
 cities in every Dutch province, where the old Zuid-Holland fixture only
-ever had cities in Zuid-Holland itself — see "Orphan inputs" below and
+ever had cities in Zuid-Holland itself — see
 `compressor/test/zuid-holland.test.ts`'s "every province has real cities"
-test).
+test). Both prototype files have since been deleted (`eu_cities.geojson`
+with `prepare-europe.ts`, `nl_cities.geojson` on 2026-10-14); neither
+was recoverable from git, and nothing in the current pipeline can
+regenerate them.
 
 `data-ingest/src/filter-by-scope.ts` replaces both scripts with one tool:
 given `--only-country <CODE[,CODE...]>` or `--only-continent <name>`
@@ -100,15 +92,9 @@ data/00-raw/
 │                            download: scripts/download-osm.sh
 ├── geonames/                cities500.txt, admin1CodesASCII.txt
 │                            download: scripts/download-geonames-naturalearth.sh
-├── natural-earth/           ne_10m_admin_0_countries.geojson
-│                            download: scripts/download-geonames-naturalearth.sh
-└── orphan/                  nl_cities.geojson -- NOT downloadable, not
-                              currently read by anything, see "Orphan
-                              inputs" below (eu_cities.geojson used to
-                              live here too; deleted along with
-                              prepare-europe.ts, the only thing that read it)
-        (all of data/00-raw/ is gitignored, including orphan/'s data file --
-        only orphan/README.md is committed -- see "Gitignore quick reference")
+└── natural-earth/           ne_10m_admin_0_countries.geojson
+                             download: scripts/download-geonames-naturalearth.sh
+        (all of data/00-raw/ is gitignored -- see "Gitignore quick reference")
 
         │ Dockerfile.tools (repo root) + osmium, via
         │ data-ingest/scripts/extract-boundaries.sh
@@ -205,38 +191,6 @@ explicit, visible step, so run `make download` (or `download-osm.sh`) on
 purpose and confirm it finished before kicking off a `make world` on a
 machine that doesn't already have the input.
 
-## Orphan input: `data/00-raw/orphan/nl_cities.geojson`
-
-Produced by `scripts/extract_boundaries.py` — the deleted Python
-prototype (see `history.md` and this repo's
-`CLAUDE.md`, which explicitly forbids resurrecting `scripts/`/`webapp/`).
-Nothing in the current TypeScript pipeline regenerates it, and — since
-`prepare-zuid-holland.ts`'s deletion — nothing reads it either any more.
-Gitignored (2026-09-28, alongside a full history rewrite that dropped it
-from git entirely -- it isn't recoverable from this repo's git history
-any more, only from a pre-rewrite backup); kept on disk purely as a
-reference sample. `data/00-raw/orphan/README.md` (the one file this
-directory still commits) has the full investigation history.
-
-`eu_cities.geojson` (313MB, produced by the equivalent
-`scripts/extract_boundaries_europe.py`) was deleted from disk entirely
-along with `prepare-europe.ts`, the only thing that ever read it -- it
-was gitignored even before the history rewrite, so it was never
-recoverable from git; only from whatever local/backup copies exist
-outside this repo.
-
-Both were OSM `admin_level=10`-equivalent polygons, spatially resolved to
-their containing municipality/region — see README.md's "Data source"
-section for the original NL extraction method. This is **exactly** what
-`prepare-world.ts`'s generic per-country `COUNTRY_ADMIN_LEVELS`
-resolution already does for all 239 countries (confirmed:
-`data/03-final/world.bin` resolves NL at least as well as the old
-Zuid-Holland fixture did — e.g. Utrecht gets a real city name,
-`Achterveld`, where the old fixture had no city data there at all, since
-it only ever had Zuid-Holland's own 187 cities). `filter-by-scope.ts` is
-the tool that made both orphan files unnecessary — see "Why
-prepare-zuid-holland.ts/prepare-europe.ts were deleted" above.
-
 ## `agent-resources/`
 
 Kept separate from `data/00-raw/` on purpose: it now holds only
@@ -253,19 +207,17 @@ or `demo/`) and the redundant `cities500.zip` (only the unzipped
 
 ## Gitignore quick reference
 
-`data/*` is gitignored wholesale; only two paths are explicitly
+`data/*` is gitignored wholesale; only one path is explicitly
 un-ignored (root `.gitignore`, see its own comments for the exact
 negation-pattern mechanics):
 
 ```
-data/00-raw/orphan/README.md         COMMITTED (documentation)
 data/03-final/appendix-a-example.bin COMMITTED (reader/binary-format.md spec fixture)
 
-(everything else under data/ is gitignored, including
- data/00-raw/orphan/nl_cities.geojson and all of data/02-resolved/ --
- both were dropped from git entirely by the 2026-09-28 history rewrite,
- having been briefly re-committed after that rewrite, then removed again
- once it was confirmed neither is actually needed in git)
+(everything else under data/ is gitignored, including all of
+ data/02-resolved/ -- dropped from git entirely by the 2026-09-28 history
+ rewrite, having been briefly re-committed after that rewrite, then
+ removed again once it was confirmed it isn't actually needed in git)
 
 agent-resources/                gitignored (whole dir -- reference material)
 data/search-index/  *.pbf  *.pbf.part  .venv/  __pycache__/  *.pyc

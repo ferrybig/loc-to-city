@@ -1,16 +1,9 @@
 # data/ is gitignored wholesale -- it's almost entirely large, reproducible
 # build artifacts (raw downloads, osmium extractions, resolved geojson,
-# rebuildable .bin files). Only a small, explicit allowlist of
-# irreplaceable/spec files is un-ignored below. See
+# rebuildable .bin files). Only the spec fixture below is un-ignored. See
 # data-ingest/PIPELINE-STAGES.md for the full directory layout and how
 # each stage is produced.
 data/*
-
-!data/00-raw/
-data/00-raw/*
-!data/00-raw/orphan/
-data/00-raw/orphan/*
-!data/00-raw/orphan/README.md
 
 # data/02-resolved/, data/03-final/*.bin (except appendix-a-example.bin)
 # are entirely build artifacts now -- rebuild locally via

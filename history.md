@@ -288,7 +288,7 @@ datasets from it plus the Python prototype's `nl_cities.geojson`/
 `data-ingest/src/filter-by-scope.ts` made them redundant: the worldwide
 pipeline's own per-country `admin_level` resolution already covers the
 Netherlands and Europe more accurately than either script did (see
-`data/00-raw/orphan/README.md` for the investigation), so `zuid-holland.bin`
+`data-ingest/PIPELINE-STAGES.md` for the investigation), so `zuid-holland.bin`
 and `europe.bin` are now built by filtering the worldwide pipeline's
 already-resolved output down to a country or continent, not by a separate
 extraction pass. No Docker/osmium step is needed for either dataset any
@@ -365,7 +365,7 @@ plus a streamed pass over `data/01-extracted/eu/eu-admin.geojson`.
 `prepare-europe.ts` was deleted (2026-09-28) in favor of
 `data-ingest/src/filter-by-scope.ts --only-continent Europe`, which
 filters the worldwide pipeline's own already-resolved output instead (see
-`data/00-raw/orphan/README.md`) -- the current `data/03-final/europe.bin`
+`data-ingest/PIPELINE-STAGES.md`) -- the current `data/03-final/europe.bin`
 covers 51 countries (Natural Earth's `CONTINENT == "Europe"`, a
 different, and differently-bounded, set than `eu_cities.geojson`'s
 Geofabrik-extract-shaped coverage) and 183,970 cities, not the numbers
@@ -506,7 +506,7 @@ rather than silently swallowed.
 `data/03-final/world.bin` from `data/02-resolved/world/hierarchy.json`,
 `regions.geojson`, and `country-polygons.geojson`. As of the 2026-09-28
 history rewrite, none of `data/` is committed to git any more except
-`data/00-raw/orphan/README.md` and `data/03-final/appendix-a-example.bin`
+`data/03-final/appendix-a-example.bin`
 (see `data-ingest/PIPELINE-STAGES.md`) -- `world.bin` and its inputs,
 including the 4.0GB `cities-filtered.geojsonseq`, are all local,
 reproducible build output, rebuilt via `make world` rather than tracked in

@@ -12,7 +12,7 @@ const BIN_PATH = path.resolve(__dirname, "../../data/03-final/zuid-holland.bin")
 
 // This dataset is produced by `data-ingest/src/filter-by-scope.ts --only-country NL`
 // (filtering the worldwide pipeline's already-resolved output down to the
-// Netherlands, see data/00-raw/orphan/README.md) followed by the
+// Netherlands, see data-ingest/PIPELINE-STAGES.md) followed by the
 // compressor CLI (see README for the exact command). Skip gracefully
 // rather than failing if it hasn't been built yet.
 const skip = !existsSync(BIN_PATH);

@@ -4,9 +4,10 @@
 // (zuid-holland.bin, europe.bin) without either resurrecting the deleted
 // Python prototype or re-deriving per-country admin_level resolution
 // separately for just that scope -- prepare-world.ts's resolution is
-// already correct for every country (see data/00-raw/orphan/README.md
-// for the investigation that led here), so this is a pure post-hoc
-// filter over its output, not a second resolution pass.
+// already correct for every country (see data-ingest/PIPELINE-STAGES.md's
+// "Why prepare-zuid-holland.ts/prepare-europe.ts were deleted" for the
+// investigation that led here), so this is a pure post-hoc filter over
+// its output, not a second resolution pass.
 //
 // Reads data/02-resolved/world/{hierarchy.json,regions.geojsonseq,
 // country-polygons.geojson,cities-filtered.geojsonseq} and writes the
