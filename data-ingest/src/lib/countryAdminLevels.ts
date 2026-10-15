@@ -487,7 +487,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   BN: { region: [4], city: [6] }, // region 155.6%, city 25.6%
   BO: { region: [4], city: [8] }, // region 99.7%, city 99.0%
   BR: { region: [4], city: [8] }, // region 103.1%; municipalities (8), districts (9) only exist in some
-  BS: { region: [], city: [8] }, // region 0.0%, city 759.4%
+  BS: { region: [8], city: [] }, // the districts (8) are the regions; no town relations, the hole fill names them
   BT: { region: [4], city: [8] }, // region 93.0%, city 91.2%
   BW: { region: [4], city: [6] }, // region 99.8%, city 18.1%
   BY: { region: [4], city: [8, 6] }, // region 100.0%, city 99.5% (8) + gap-fill 6 -- see override note above
@@ -609,6 +609,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   ME: { region: [6], city: [8] }, // region 99.5%, city 9.6%
   MF: { region: [], city: [8] }, // region 0.0%, city 78.4%
   MG: { region: [4], city: [6] }, // region 99.9%, city 99.8%
+  MH: { region: [4], city: [8] }, // the two chains (4), the atolls (8)
   MK: { region: [7], city: [8] }, // see countries.md (was region [], which dropped every city)
   ML: { region: [4], city: [6] }, // region 100.0%, city 86.3%
   MM: { region: [6], city: [7] }, // region 115.3%, city 113.5%
@@ -711,7 +712,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   VI: { region: [4], city: [6] }, // region 536.0%, city 536.0%
   VN: { region: [4], city: [6] }, // region 170.3%, city 99.6%
   VU: { region: [4], city: [] }, // region 1030.2%, city 0.0%
-  WF: { region: [], city: [8] }, // region 0.0%, city 99.9%
+  WF: { region: [8], city: [] }, // the three kingdoms (8) are the regions; the hole fill names the villages
   WS: { region: [4], city: [8] }, // region 102.0%, city 0.3%
   XK: { region: [5], city: [6] }, // see countries.md (was swapped: region 6 / city 5)
   YE: { region: [4], city: [6] }, // region 115.4%, city 110.0%
@@ -776,8 +777,8 @@ export const VORONOI_CITY_FALLBACK_WITHIN_REGIONS: ReadonlyMap<string, readonly 
  * Bugisa sub-region, `shareInOtherRegions`). See countries.md,
  * "Countries with a thin city tier". */
 export const VORONOI_CITY_FALLBACK_HOLES: ReadonlySet<string> = new Set([
-  "AE", "AO", "AW", "AZ", "BF", "BI", "BW", "CD", "CF", "GE", "GW", "LR", "LS", "MR", "MW", "NA", "NE", "PH", "PY", "QA", "SD", "SX", "SZ", "TG", "TT",
-  "UG",
+  "AE", "AI", "AO", "AW", "AZ", "BF", "BI", "BS", "BW", "CD", "CF", "CW", "GE", "GW", "LR", "LS", "MR", "MW", "NA", "NE", "PH", "PY", "QA",
+  "SD", "SX", "SZ", "TG", "TT", "UG", "WF",
 ]);
 
 /** Countries with `region: []` -- no usable region tier in OSM at all --
@@ -791,6 +792,30 @@ export const VORONOI_CITY_FALLBACK_HOLES: ReadonlySet<string> = new Set([
  * `VORONOI_CITY_FALLBACK`: added only after confirming no real OSM region
  * tier exists, not automatically. */
 export const VORONOI_REGION_FALLBACK: ReadonlySet<string> = new Set(["SI"]);
+
+/** The region hole fill (`regionHoles.ts`): for a country whose regions leave
+ * populated land uncovered, a city there is dropped for having no region.
+ * The `cities500.txt` places there get Voronoi cells, which join the region
+ * whose places share their GeoNames admin1 code or else become a region
+ * named after the admin1; the value names a region for places with no named
+ * admin1. Opt-in, after checking what is missing: Bissau's sector has no
+ * relation at any level, Baku's relation is only the core, Karakalpakstan,
+ * Madeira and the Azores are not at Uzbekistan's and Portugal's region level.
+ * Not for northern Cyprus: its regions are the south's new municipalities,
+ * which the north would extend across the line. See countries.md, "Land no
+ * region covers". */
+export const VORONOI_REGION_HOLES: ReadonlyMap<string, string> = new Map([
+  ["AZ", "Azərbaycan"],
+  ["GW", "Guiné-Bissau"],
+  ["KM", "Comores"],
+  ["MG", "Madagasikara"],
+  ["MU", "Mauritius"],
+  ["PF", "Polynésie française"],
+  ["PT", "Portugal"],
+  ["SH", "Saint Helena"],
+  ["TZ", "Tanzania"],
+  ["UZ", "Oʻzbekiston"],
+]);
 
 /** City-states: a country that is one city, so a lookup in it should read
  * `Monaco / Monaco / Monaco`, not `Monaco / - / -` -- someone filtering on
@@ -822,6 +847,11 @@ export const CITY_STATES: ReadonlyMap<string, { region: string; city?: string }>
   ["PM", { region: "Saint-Pierre-et-Miquelon" }],
   ["SX", { region: "Sint Maarten" }],
   ["TV", { region: "Tuvalu" }],
+  ["AI", { region: "Anguilla" }],
+  ["BL", { region: "Saint-Barthélemy" }],
+  ["CW", { region: "Curaçao" }],
+  ["GI", { region: "Gibraltar", city: "Gibraltar" }],
+  ["MF", { region: "Saint-Martin" }],
 ]);
 
 /** Regions that are one city: a capital or other city with the status of a

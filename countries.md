@@ -575,12 +575,44 @@ below).
   no city 0 everywhere. No other country's answer changed for any cities500
   place of 1,000+. Ten capitals resolve: Oranjestad, Hamilton, Stanley,
   Saint Helier, Tarawa, Alofi, Philipsburg, Saint-Pierre, Funafuti and
-  George Town. Not done: the Bahamas (level 8 is its districts, a region
-  tier, with New Providence for Nassau, and Freeport inside one), Wallis
-  and Futuna (level 8 is the three kingdoms; Mata-Utu is a village in
-  Uvea), St-Barthélemy and St-Martin (each one commune, named for the
-  island, not Gustavia or Marigot) and Curaçao (no relation below the
-  country).
+  George Town. The Bahamas, Wallis and Futuna, St-Barthélemy, St-Martin,
+  Curaçao, Anguilla, Gibraltar and the Marshall Islands followed the same
+  day (see "Land no region covers").
+- **Land no region covers.** Fixed 2026-10-15. A city with no region is
+  dropped, so a town on land none of its country's regions covers lost its
+  city too. Measured with every cities500 place: 43 countries had places
+  answering a country with no region. Two shapes, two fixes:
+  - **Region names without polygons** (`VORONOI_REGION_HOLES`,
+    `regionHoles.ts`): a country whose regions leave populated land out.
+    Every cities500 place of the country is a Voronoi site, and the cells of
+    the places no region holds, minus the regions, go by GeoNames admin1:
+    to the region of the nearest covered place with the same admin1 code
+    (Baku's outer districts join `Bakı`; Comoros', Madagascar's, Mauritius'
+    and Lake Victoria's offshore islands join theirs), else to a new region
+    named for the admin1 (`Bissau`, `Karakalpakstan`, `Madeira`, `Azores`,
+    `Rodrigues`, `Saint Helena`, `Ascension`), else, with no named admin1, to
+    the nearest covered place's region. Land in the hole nearer a covered
+    place stays as it was. A first rule gave a code to the region whose
+    places mostly carry it, which split Baku into `Bakı` and a new `Baki`
+    (two regions both mostly carry admin1 Baku) and made tiny regions from
+    the unnamed code 00. AZ, GW, KM, MG, MU, PF, PT, SH, TZ, UZ.
+    Not for Cyprus: its regions are the south's new municipalities, which
+    the north's places would extend across the line, and not for Western
+    Sahara, whose places have no admin1.
+  - **No region at all**: the country's name, as for Monaco and Malta
+    (`CITY_STATES`): Anguilla, Curaçao, Gibraltar (city `Gibraltar` too),
+    Saint-Barthélemy, Saint-Martin; Anguilla and Curaçao also get the city
+    hole fill. Where OSM has the tier at another level, that level instead:
+    the Bahamas' districts and Wallis and Futuna's three kingdoms (level 8)
+    are the regions, with the city hole fill for the towns; the Marshall
+    Islands' two chains (4) and atolls (8).
+
+  No other country's answer changed for any cities500 place of 1,000+.
+  Seven capitals resolve: Bissau, Nassau, Willemstad, Gibraltar, The
+  Valley, Majuro, Mata-Utu. Still with no region: Poland (132 places, see
+  Poland), northern Cyprus (13), Bonaire, Saba and Sint Eustatius (10,
+  answering the Netherlands), Western Sahara (4), and single places on a
+  coast or border elsewhere.
 - **Capitals.** *(open)* `verify/test/world-queries.test.ts` looks up
   the capital of every country and dependency GeoNames lists one for
   (232; `verify/src/cases.ts`'s `CAPITALS` and `OPEN_CAPITALS` tables carry the
@@ -597,19 +629,18 @@ below).
   fifth, **no country or the wrong one**, is gone since the OSM country
   outlines: Vatican City and Monaco resolve, and Gibraltar and the three
   atolls get their country; see "Natural Earth's outlines are too coarse".)
-  - **Country only** (13): neither a region nor a city covers the point.
+  - **Country only** (6): neither a region nor a city covers the point.
     Microstates and small territories (Skopje, Manila and Tbilisi left on
     2026-10-14). `CITY_STATES` (Monaco, Vatican) is the mechanism for the
     microstates among them (Andorra, Malta and San Marino were added
     2026-10-13 and are out of this list). On 2026-10-15 it took nine
     territories off it, whose city tier OSM has but which had no region
-    to sit in (see "Territories with no region tier").
-    The Valley (Anguilla); Nassau (Bahamas); Willemstad (Curaçao);
-    Port-aux-Français (Fr. S. Antarctic Lands);
-    Gibraltar (Gibraltar); Bissau (Guinea-Bissau); Majuro (Marshall Is.);
-    Adamstown (Pitcairn Is.); Grytviken (S. Geo. and
-    the Is.); Jamestown (Saint Helena); Gustavia (St-Barthélemy); Marigot
-    (St-Martin); Mata-Utu (Wallis and Futuna Is.)
+    to sit in (see "Territories with no region tier"), and seven more the
+    same day (see "Land no region covers"). Jamestown, Gustavia and Marigot
+    have a region since then but still no city named for them.
+    Port-aux-Français (Fr. S. Antarctic Lands); Adamstown (Pitcairn Is.);
+    Grytviken (S. Geo. and the Is.); Jamestown (Saint Helena); Gustavia
+    (St-Barthélemy); Marigot (St-Martin)
   - **The capital is only a region** (14; nine left on 2026-10-14, see "Countries with a thin city tier", Hamilton on 2026-10-15, see "Territories with no region tier", and Vilnius the same day, see Lithuania): the region carries the
     capital's name and no city covers the point. This is the previous
     entry ("Capitals that are their own region"). Its `REGION_CITIES`
@@ -620,7 +651,8 @@ below).
     city now beats a region drawn the same (see "Cities drawn twice").
     The rest are either a province named after its seat or not checked
     yet (that entry says which).
-    Thimphu (Bhutan); Praia (Cabo Verde); Yamoussoukro
+    Thimphu (Bhutan); Praia (Cabo Verde; at this location the city's name
+    ends up in the region slot, see Cabo Verde); Yamoussoukro
     (Côte d'Ivoire); Djibouti (Djibouti); Banjul (Gambia); Male
     (Maldives); Saipan (N. Mariana Is.); Yaren (Nauru);
     Castries (Saint Lucia); Ljubljana (Slovenia); Honiara (Solomon Is.);
@@ -820,15 +852,15 @@ tessellates its country, so the bug was always grain, not coverage.
   (`VORONOI_CITY_FALLBACK_HOLES`) names the land the 217 level-8 relations
   leave: places of 50,000+ named 1 → 13 of 14, no city 12 → 0, Baku
   resolves.
-- **Baku's outer districts have no region.** *(open)* Found 2026-10-15:
-  17 places of 5,000+ around Baku (Sabunçu, Mərdəkan, Hövsan, Zabrat)
-  answer the country only. The level-6 `Bakı` relation is the 164 km² core;
-  OSM has no relation for Baku's whole administrative territory, whose
-  outer districts (`Sabunçu rayonu`, `Suraxanı rayonu`, `Xəzər rayonu`) are
-  level-8 relations in no region, so they are dropped and the hole fill has
-  no region to put a cell in (Binəqədi rayonu survives because its point
-  falls just inside Abşeron). The same shape as Bissau (see Guinea-Bissau):
-  land no region covers needs a region of its own.
+- **Baku's outer districts had no region.** Fixed 2026-10-15. 17 places
+  of 5,000+ around Baku (Sabunçu, Mərdəkan, Hövsan, Zabrat) answered the
+  country only. The level-6 `Bakı` relation is the 164 km² core; OSM has
+  no relation for Baku's whole administrative territory, whose outer
+  districts (`Sabunçu rayonu`, `Suraxanı rayonu`, `Xəzər rayonu`) are
+  level-8 relations in no region, so they were dropped. With
+  `VORONOI_REGION_HOLES` the land joins `Bakı` (its places are GeoNames
+  admin1 Baku, like the nearest covered ones in the core), and the
+  districts are cities in it: Zabrat answers `Bakı`, `Sabunçu rayonu`.
 
 ## Belarus (BY)
 
@@ -979,6 +1011,18 @@ tessellates its country, so the bug was always grain, not coverage.
 - **Communes cover a quarter of the country.** Fixed 2026-10-14. Of 5
   places of 50,000+ one was named and 4 had none, Gitega among them. Hole
   fill: 5 of 5 named, none without a city. Gitega resolves.
+
+## Cabo Verde (CV)
+
+`region [6]` (municipalities), `city [9]` (6.3%).
+
+- **Praia answers as a region.** *(open)* Remark added 2026-10-15 at the
+  user's request: at the capital's own point, 14.93152, -23.51254, the
+  city ends up in the region slot. The lookup returns `region Praia`,
+  `city -`: the level-6 region is the municipality of Praia, named after
+  its town, and no level-9 relation covers the point, so the name a user
+  looks for in the city field is only in the region field there. Not
+  examined further yet (CV is one of the thin-city-tier countries).
 
 ## Cambodia (KH)
 
@@ -1274,15 +1318,18 @@ tessellates its country, so the bug was always grain, not coverage.
 
 ## Guinea-Bissau (GW)
 
-`region [6]` (sectors), `city []`, `VORONOI_CITY_FALLBACK_HOLES`.
+`region [6]` (sectors), `city []`, `VORONOI_CITY_FALLBACK_HOLES`,
+`VORONOI_REGION_HOLES`.
 
-- **Bissau has no region.** *(open)* 11.86357, -15.59767 answers the country
-  only. OSM has no relation for the autonomous sector of Bissau at any
-  level (the eight regions at 4 and the sectors at 6 leave it out), and a
-  city with no region is dropped, so the hole fill, which names the rest of
-  the country (places of 5,000+ named 0 → 24 of 39), puts no cell there:
-  the 15 places of 5,000+ still answering the country only are Bissau and
-  its suburbs. Needs a region for land no region covers.
+- **Bissau has no region.** Fixed 2026-10-15. 11.86357, -15.59767 answered
+  the country only. OSM has no relation for the autonomous sector of Bissau
+  at any level (the eight regions at 4 and the sectors at 6 leave it out),
+  and a city with no region is dropped, so the hole fill, which names the
+  rest of the country (places of 5,000+ named 0 → 24 of 39), put no cell
+  there. The region hole fill (see "Land no region covers") makes the land
+  a region `Bissau` (GeoNames admin1 GW.11) from the cells of its 14
+  cities500 places; the city hole fill then names Bissau and its suburbs.
+  Bissau resolves (`region Bissau`, `city Bissau`).
 
 ## India (IN)
 
@@ -1886,8 +1933,13 @@ worldwide resolved data (`make netherlands`) and
 
 ## Portugal (PT)
 
-`region [6]`, `city [8]` (100.7%).
+`region [6]`, `city [8]` (100.7%), `VORONOI_REGION_HOLES`.
 
+- **Madeira and the Azores had no region.** Fixed 2026-10-15. 104 places
+  answered the country only: the region level is the mainland districts,
+  and the two autonomous regions are not districts, so their parishes were
+  dropped. The region hole fill makes them regions `Madeira` and `Azores`
+  (GeoNames admin1 PT.10, PT.23); 83 places of 1,000+ there gained a city.
 - **Lisboa is not a city.** *(open)* Lisboa is `place=city` at level 7
   (the concelho tier, 292 nationally), but Lisbon's freguesias (Alvalade,
   Belém, Benfica, Carnide, ...) are tagged at level 8, already primary.
@@ -2358,6 +2410,22 @@ District of Columbia.
   it exists and the township answers around it. Another "Surrounding rural
   unit" instance, with the US-wide twist that a township is not really a
   city either.
+- **Carson City has no city.** *(open)* Reported 2026-10-15:
+  39.166237, -119.766877 returns `Nevada`, `city -`; the expected city is
+  `Carson City`. Nevada's capital is a consolidated city-county, and OSM
+  has it only at the county level (relation 332921, `admin_level=6`), so
+  the level-8 city tier has nothing there. Not fixed yet: other
+  consolidated or independent cities may have the same shape.
+- **"Town of ..." around cities in some states.** *(open)* Reported
+  2026-10-15: in Michigan, New York, Pennsylvania, Wisconsin and Minnesota
+  the land around a city answers a town or township (`Town of ...`,
+  `... Township`), in the other states it answers the state with no city.
+  These states have civil townships or towns (minor civil divisions) that
+  tile the land outside the incorporated places, at level 8 like the cities
+  (level 7 in New York, which `overrides` uses as gap-fill), so they show
+  up as cities; elsewhere unincorporated land has no such unit. The same
+  question as "Township around a village": whether a township is a city.
+
 - **Washington, D.C. had no city.** 38.89511, -77.03637 returned `District
   of Columbia`, `city -`: the district is a level-4 region with nothing at
   level 8 inside it. Fixed 2026-10-13 by `REGION_CITIES`, with the city
@@ -2365,8 +2433,14 @@ District of Columbia.
 
 ## Uzbekistan (UZ)
 
-`region [4]`, `city [6]`.
+`region [4]`, `city [6]`, `VORONOI_REGION_HOLES`.
 
+- **Karakalpakstan had no region.** Fixed 2026-10-15. 24 places (Nukus,
+  332,500, Qŭnghirot, Mŭynoq) answered the country only: the autonomous
+  republic is not among the level-4 viloyats, and its districts were
+  dropped for having no region. The region hole fill makes it a region
+  `Karakalpakstan` (GeoNames admin1 UZ.09); Nukus answers
+  `Karakalpakstan`, `Nókis qalası hákimiyatı`.
 - **Region was the district tier.** The generated `region: [6]` (204
   tumani/shahri) won by being the only level in range, since `region`'s scan
   only measures levels the entry already lists (`selectRegionLevels` in

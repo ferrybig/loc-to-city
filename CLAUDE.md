@@ -510,6 +510,14 @@ region level (PH: Metro Manila and the independent cities are not in any
 province, and a city with no region is dropped; level 3 holds them). Only the
 Philippines so far.
 
+**Region hole fill** (`VORONOI_REGION_HOLES`, `regionHoles.ts`): for a country
+whose regions leave populated land out (Bissau, Baku's outer districts,
+Karakalpakstan, Madeira), the cities500 places there get Voronoi cells (every
+place of the country is a site), minus the regions, that join the region of
+the nearest covered place with the same GeoNames admin1 code, or else become a
+region named for the admin1. Runs before `regionIndex`, on the OSM outlines. A
+country with no region at all takes its own name instead (`CITY_STATES`).
+
 **Per-region `city` overrides** (`CountryAdminLevels.overrides`, keyed by
 region name — see `countryAdminLevels.ts`'s doc comment): for the rare
 case where one level doesn't fit a whole country (New York's real

@@ -58,6 +58,7 @@ import type { VoronoiCityCandidate } from "./lib/voronoiFallback.ts";
 import { loadAdmin1Names } from "./lib/admin1Codes.ts";
 import { buildCityFallback, buildContainerFallback, buildRegionFallback } from "./lib/voronoiFallback.ts";
 import { buildHoleFill, type RealCity } from "./lib/holeFill.ts";
+import { buildRegionHoles } from "./lib/regionHoles.ts";
 import {
   CITY_STATES,
   COUNTRY_ADMIN_LEVELS,
@@ -66,6 +67,7 @@ import {
   VORONOI_CITY_FALLBACK_HOLES,
   VORONOI_CITY_FALLBACK_WITHIN_REGIONS,
   VORONOI_REGION_FALLBACK,
+  VORONOI_REGION_HOLES,
 } from "./lib/countryAdminLevels.ts";
 import type { LonLat } from "./lib/geo.ts";
 import type { RegionCandidate } from "./lib/adminBoundaryIndex.ts";
@@ -249,6 +251,72 @@ async function main(): Promise<void> {
   for (const [key, coordinates] of regionCut.geometryByRegion) {
     const region = finalRegions.get(key)!;
     finalRegions.set(key, { ...region, feature: { ...region.feature, geometry: { type: "MultiPolygon", coordinates } } });
+  }
+
+  // The region hole fill (VORONOI_REGION_HOLES' doc comment): land of a
+  // country no region covers joins a region, or becomes one, by the admin1
+  // codes of the cities500 places on it. Before regionIndex, like the region
+  // fallback above, and on the OSM outlines, which are cleared below.
+  if (VORONOI_REGION_HOLES.size > 0) {
+    console.error(`Region hole fill: ${[...VORONOI_REGION_HOLES.keys()].join(", ")}...`);
+    const admin1Names = await loadAdmin1Names(ADMIN1_CODES_SOURCE);
+    const pointsByCountry = new Map<string, Cities500Row[]>();
+    for await (const row of streamCities500(CITIES500_SOURCE)) {
+      if (!VORONOI_REGION_HOLES.has(row.countryCode)) continue;
+      let points = pointsByCountry.get(row.countryCode);
+      if (!points) pointsByCountry.set(row.countryCode, (points = []));
+      points.push(row);
+    }
+    const holes = await Promise.all(
+      [...VORONOI_REGION_HOLES].map(async ([code, fallbackName]) => {
+        const coordinates = resolved.outlines.get(code);
+        if (!coordinates) return { code, result: null };
+        const own = [...finalRegions.values()]
+          .filter((r) => r.country === code)
+          .map((r) => ({ name: r.name, bbox: r.bbox, geometry: r.feature.geometry }));
+        const result = await buildRegionHoles(
+          code,
+          { type: "MultiPolygon", coordinates },
+          own,
+          pointsByCountry.get(code) ?? [],
+          admin1Names,
+          fallbackName,
+          clip,
+        );
+        return { code, result };
+      }),
+    );
+    for (const { code, result } of holes) {
+      if (!result) continue;
+      for (const [name, pieces] of result.extend) {
+        const [key, region] = [...finalRegions].find(([, r]) => r.country === code && r.name === name)!;
+        const own = region.feature.geometry;
+        const geometry: MultiPolygon = {
+          type: "MultiPolygon",
+          coordinates: [...(own.type === "Polygon" ? [own.coordinates] : own.coordinates), ...pieces],
+        };
+        const feature = { ...region.feature, geometry };
+        finalRegions.set(key, { ...region, bbox: bbox(feature), feature });
+        console.error(`  ${code} ${name}: ${pieces.length} pieces added`);
+      }
+      for (const [name, pieces] of result.created) {
+        const feature: Feature<MultiPolygon, { name: string }> = {
+          type: "Feature",
+          properties: { name },
+          geometry: { type: "MultiPolygon", coordinates: pieces },
+        };
+        finalRegions.set(`${code} region-hole ${name}`, {
+          id: `region-hole:${code}.${name}`,
+          name,
+          nameEn: undefined,
+          country: code,
+          level: -1, // not a real OSM admin_level -- never matched against COUNTRY_ADMIN_LEVELS
+          bbox: bbox(feature),
+          feature,
+        });
+        console.error(`  ${code} ${name}: new region, ${pieces.length} pieces`);
+      }
+    }
   }
   resolved.outlines.clear();
 

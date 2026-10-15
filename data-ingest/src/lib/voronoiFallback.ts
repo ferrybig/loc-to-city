@@ -159,11 +159,14 @@ export async function buildRegionFallback(
  * `buildCityFallback` and `buildRegionFallback` need, computed once over
  * every point in the country together so their results tile exactly (no
  * gaps or overlaps at a shared boundary, whether that boundary ends up
- * inside one region-fallback group or between two different ones). */
-async function computeClippedCells(
+ * inside one region-fallback group or between two different ones).
+ * `wanted` limits the clipping to some cells (`regionHoles.ts` needs only
+ * the cells of points no region covers); the rest come back null. */
+export async function computeClippedCells(
   countryPolygon: Feature<Polygon | MultiPolygon>,
   points: Cities500Row[],
   clip: Clipper,
+  wanted: (index: number) => boolean = () => true,
 ): Promise<(Polygon | MultiPolygon | null)[]> {
   if (points.length === 0) return [];
   const clipBox = bbox(countryPolygon);
@@ -177,7 +180,9 @@ async function computeClippedCells(
   // doesn't overlap the country at all (its bbox-clipped cell was entirely
   // outside the real outline -- possible for a site right at the country's
   // own bbox corner).
-  const cells: (Position[] | null)[] = points.map((_, i) => voronoi.cellPolygon(i));
+  // Every point is a site, so a wanted cell is bounded by all its
+  // neighbours; only the wanted ones are clipped (null for the rest).
+  const cells: (Position[] | null)[] = points.map((_, i) => (wanted(i) ? voronoi.cellPolygon(i) : null));
   const toClip: Position[][] = [];
   for (const cell of cells) if (cell && cell.length >= 4) toClip.push(cell);
   const clipped = await clip.intersectCells(toClip, countryPolygon.geometry);
