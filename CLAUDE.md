@@ -510,6 +510,13 @@ region level (PH: Metro Manila and the independent cities are not in any
 province, and a city with no region is dropped; level 3 holds them). Only the
 Philippines so far.
 
+**Regions outside the region level** (`CountryAdminLevels.regionOutside`):
+relations at these levels are regions only when their point lies in no region
+of the chosen level (NL: of the level-8 gemeenten, only Bonaire, Saba and Sint
+Eustatius, which no province holds). Their towns come from the hole fill on
+those regions only (`VORONOI_CITY_FALLBACK_HOLES_IN`); GeoNames' BQ places are
+read as NL (`GEONAMES_COUNTRY_OF`).
+
 **Region hole fill** (`VORONOI_REGION_HOLES`, `regionHoles.ts`): for a country
 whose regions leave populated land out (Bissau, Baku's outer districts,
 Karakalpakstan, Madeira), the cities500 places there get Voronoi cells (every

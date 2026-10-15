@@ -62,9 +62,11 @@ import { buildRegionHoles } from "./lib/regionHoles.ts";
 import {
   CITY_STATES,
   COUNTRY_ADMIN_LEVELS,
+  GEONAMES_COUNTRY_OF,
   REGION_CITIES,
   VORONOI_CITY_FALLBACK,
   VORONOI_CITY_FALLBACK_HOLES,
+  VORONOI_CITY_FALLBACK_HOLES_IN,
   VORONOI_CITY_FALLBACK_WITHIN_REGIONS,
   VORONOI_REGION_FALLBACK,
   VORONOI_REGION_HOLES,
@@ -82,6 +84,15 @@ const WORK_DIR = path.join(REPO_ROOT, "data/01-extracted/world");
 const COUNTRIES_SOURCE = path.join(REPO_ROOT, "data/00-raw/natural-earth/ne_10m_admin_0_countries.geojson");
 const CITIES500_SOURCE = path.join(REPO_ROOT, "data/00-raw/geonames/cities500.txt");
 const ADMIN1_CODES_SOURCE = path.join(REPO_ROOT, "data/00-raw/geonames/admin1CodesASCII.txt");
+
+/** cities500.txt, with a GeoNames country code this dataset files under
+ * another country read as that one (GEONAMES_COUNTRY_OF: BQ is NL). */
+async function* readCities500(): AsyncGenerator<Cities500Row> {
+  for await (const row of streamCities500(CITIES500_SOURCE)) {
+    const country = GEONAMES_COUNTRY_OF.get(row.countryCode);
+    yield country ? { ...row, countryCode: country } : row;
+  }
+}
 
 const HIERARCHY_OUT = path.join(REPO_ROOT, "data/02-resolved/world/hierarchy.json");
 const CITIES_OUT = path.join(REPO_ROOT, "data/02-resolved/world/cities-filtered.geojsonseq");
@@ -185,6 +196,19 @@ async function main(): Promise<void> {
         COUNTRY_ADMIN_LEVELS[r.country]?.regionGapFill?.includes(r.level),
     ),
   );
+  // A `regionOutside` relation is a region only where no region of the chosen
+  // level holds its point (NL: the Caribbean islands, not the gemeenten).
+  const outside = [...index.regionsByCountryName].filter(([, r]) =>
+    COUNTRY_ADMIN_LEVELS[r.country]?.regionOutside?.includes(r.level),
+  );
+  if (outside.length > 0) {
+    const chosen = buildRegionIndex(finalRegions);
+    for (const [key, r] of outside) {
+      if (!r.point || assignCityRegion(r.point, r.country, chosen) !== null) continue;
+      console.error(`  region outside ${r.country}'s regions: ${r.name} (level ${r.level}, ${r.id})`);
+      finalRegions.set(key, r);
+    }
+  }
 
   // The Voronoi-from-cities500 fallback (countries.md, Slovenia), region half
   // (VORONOI_REGION_FALLBACK's doc comment has the full rationale): for a
@@ -197,7 +221,7 @@ async function main(): Promise<void> {
     console.error(`Voronoi fallback: synthesizing regions for ${[...VORONOI_REGION_FALLBACK].join(", ")}...`);
     const admin1Names = await loadAdmin1Names(ADMIN1_CODES_SOURCE);
     const regionPointsByCountry = new Map<string, Cities500Row[]>();
-    for await (const row of streamCities500(CITIES500_SOURCE)) {
+    for await (const row of readCities500()) {
       if (!VORONOI_REGION_FALLBACK.has(row.countryCode)) continue;
       let points = regionPointsByCountry.get(row.countryCode);
       if (!points) {
@@ -261,7 +285,7 @@ async function main(): Promise<void> {
     console.error(`Region hole fill: ${[...VORONOI_REGION_HOLES.keys()].join(", ")}...`);
     const admin1Names = await loadAdmin1Names(ADMIN1_CODES_SOURCE);
     const pointsByCountry = new Map<string, Cities500Row[]>();
-    for await (const row of streamCities500(CITIES500_SOURCE)) {
+    for await (const row of readCities500()) {
       if (!VORONOI_REGION_HOLES.has(row.countryCode)) continue;
       let points = pointsByCountry.get(row.countryCode);
       if (!points) pointsByCountry.set(row.countryCode, (points = []));
@@ -411,7 +435,7 @@ async function main(): Promise<void> {
   // cells are built per container polygon as the primaries stream past.
   const withinRegionPoints = new Map<string, Cities500Row[]>();
   if (VORONOI_CITY_FALLBACK_WITHIN_REGIONS.size > 0) {
-    for await (const row of streamCities500(CITIES500_SOURCE)) {
+    for await (const row of readCities500()) {
       if (!VORONOI_CITY_FALLBACK_WITHIN_REGIONS.has(row.countryCode)) continue;
       let points = withinRegionPoints.get(row.countryCode);
       if (!points) {
@@ -474,9 +498,11 @@ async function main(): Promise<void> {
   // them): it is dropped, and the fill names its land.
   const realCitiesByCountry = new Map<string, RealCity[]>();
   const emitReal = async (candidate: CityCandidateMeta, geometryJson: string): Promise<boolean> => {
-    if (!VORONOI_CITY_FALLBACK_HOLES.has(candidate.country)) return emitCity(candidate, geometryJson);
-    const geometry = JSON.parse(geometryJson) as Polygon | MultiPolygon;
+    const only = VORONOI_CITY_FALLBACK_HOLES_IN.get(candidate.country);
+    if (!VORONOI_CITY_FALLBACK_HOLES.has(candidate.country) && !only) return emitCity(candidate, geometryJson);
     const region = regionOf(candidate);
+    if (only && !(region && only.includes(region))) return emitCity(candidate, geometryJson);
+    const geometry = JSON.parse(geometryJson) as Polygon | MultiPolygon;
     if (region && shareInOtherRegions(geometry, candidate.bbox, candidate.country, region, regionIndex) > 0.5) {
       console.error(`  hole fill: ${candidate.country} ${candidate.name} (${candidate.id}) lies mostly in other regions, dropped`);
       return false;
@@ -517,11 +543,12 @@ async function main(): Promise<void> {
   }
 
   // The Voronoi hole fill (VORONOI_CITY_FALLBACK_HOLES' doc comment).
-  if (VORONOI_CITY_FALLBACK_HOLES.size > 0) {
-    console.error(`Voronoi hole fill: ${[...VORONOI_CITY_FALLBACK_HOLES].join(", ")}...`);
+  const holeCountries = new Set([...VORONOI_CITY_FALLBACK_HOLES, ...VORONOI_CITY_FALLBACK_HOLES_IN.keys()]);
+  if (holeCountries.size > 0) {
+    console.error(`Voronoi hole fill: ${[...holeCountries].join(", ")}...`);
     const pointsByCountry = new Map<string, Cities500Row[]>();
-    for await (const row of streamCities500(CITIES500_SOURCE)) {
-      if (!VORONOI_CITY_FALLBACK_HOLES.has(row.countryCode)) continue;
+    for await (const row of readCities500()) {
+      if (!holeCountries.has(row.countryCode)) continue;
       let points = pointsByCountry.get(row.countryCode);
       if (!points) pointsByCountry.set(row.countryCode, (points = []));
       points.push(row);
@@ -530,7 +557,10 @@ async function main(): Promise<void> {
       [...pointsByCountry].map(async ([code, points]) => {
         const gapLevels = COUNTRY_ADMIN_LEVELS[code]?.regionGapFill ?? [];
         const wholeCity = new Set((REGION_CITIES.get(code) ?? []).map((r) => r.region));
-        const own = [...finalRegions.values()].filter((r) => r.country === code && !wholeCity.has(r.name));
+        const only = VORONOI_CITY_FALLBACK_HOLES_IN.get(code);
+        const own = [...finalRegions.values()].filter(
+          (r) => r.country === code && !wholeCity.has(r.name) && (!only || only.includes(r.name)),
+        );
         const primaryRegions = own.filter((r) => !gapLevels.includes(r.level));
         const regions = new Map<string, Feature<Polygon | MultiPolygon>>();
         for (const r of own) {
@@ -576,7 +606,7 @@ async function main(): Promise<void> {
   if (VORONOI_CITY_FALLBACK.size > 0) {
     console.error(`Voronoi fallback: loading cities500.txt for ${[...VORONOI_CITY_FALLBACK].join(", ")}...`);
     const pointsByCountry = new Map<string, Cities500Row[]>();
-    for await (const row of streamCities500(CITIES500_SOURCE)) {
+    for await (const row of readCities500()) {
       if (!VORONOI_CITY_FALLBACK.has(row.countryCode)) continue;
       let points = pointsByCountry.get(row.countryCode);
       if (!points) {

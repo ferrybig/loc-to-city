@@ -284,6 +284,46 @@ export const CASES: Case[] = [
 		section: "Uzbekistan",
 	},
 	{
+		name: "Kralendijk is a town on Bonaire, in the Netherlands",
+		at: [12.15, -68.26667],
+		country: "Netherlands",
+		region: "Bonaire",
+		city: "Kralendijk",
+		status: "fixed",
+		section: "Netherlands",
+		entry: "Bonaire, Saba and Sint Eustatius had no region.",
+	},
+	{
+		name: "Rincon is a town on Bonaire",
+		at: [12.23762, -68.33059],
+		country: "Netherlands",
+		region: "Bonaire",
+		city: "Dorp Rincon",
+		status: "fixed",
+		section: "Netherlands",
+		entry: "Bonaire, Saba and Sint Eustatius had no region.",
+	},
+	{
+		name: "The Bottom is a town on Saba",
+		at: [17.62652, -63.24971],
+		country: "Netherlands",
+		region: "Saba",
+		city: "The Bottom",
+		status: "fixed",
+		section: "Netherlands",
+		entry: "Bonaire, Saba and Sint Eustatius had no region.",
+	},
+	{
+		name: "Oranjestad is a town on Sint Eustatius",
+		at: [17.48303, -62.9864],
+		country: "Netherlands",
+		region: "Sint Eustatius",
+		city: "Oranjestad",
+		status: "fixed",
+		section: "Netherlands",
+		entry: "Bonaire, Saba and Sint Eustatius had no region.",
+	},
+	{
 		name: "Wormerveer, not Zaandijk",
 		at: [52.488789, 4.794346],
 		country: "Netherlands",
@@ -1337,7 +1377,9 @@ export const CASES: Case[] = [
 //
 // Left out: GeoNames lists no capital for Antarctica, Western Sahara,
 // Heard I. and McDonald Is., Israel, Br. Indian Ocean Ter., Palestine and
-// U.S. Minor Outlying Is. (uninhabited, or contested).
+// U.S. Minor Outlying Is. (uninhabited, or contested). Kralendijk, the
+// capital GeoNames gives Bonaire, Sint Eustatius and Saba (BQ), is in the
+// Netherlands, where OSM has the three islands.
 //
 // CAPITALS are the ones that resolve today and must keep resolving.
 // OPEN_CAPITALS are the ones that do not (measured on world-high-res.bin,
@@ -1366,6 +1408,7 @@ export const CAPITALS: Capital[] = [
 	["Kiribati", "Tarawa", 1.3278, 172.97696],
 	["Lithuania", "Vilnius", 54.68916, 25.2798],
 	["Marshall Is.", "Majuro", 7.08971, 171.38027],
+	["Netherlands", "Kralendijk", 12.15, -68.26667],
 	["Niue", "Alofi", -19.05294, -169.91957],
 	["Sint Maarten", "Philipsburg", 18.026, -63.04582],
 	["Slovakia", "Bratislava", 48.14816, 17.10674],

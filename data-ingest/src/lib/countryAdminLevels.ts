@@ -13,6 +13,13 @@ export interface CountryAdminLevels {
    * dropped), with the level above holding them (PH level 3, the 17
    * regions). Never part of the area vote that picks `region`. */
   regionGapFill?: number[];
+  /** Region levels for land outside every `region`-level relation: a relation
+   * at one of these is a region only when its point lies in no region of the
+   * chosen level. For a country whose regions leave out whole islands that
+   * OSM holds one level down, next to the municipalities the regions do hold
+   * (NL: Bonaire, Saba and Sint Eustatius are in no province; they are level
+   * 8, like every gemeente, and every other gemeente lies in a province). */
+  regionOutside?: number[];
   /** Per-region city level override, keyed by the exact region name this
    * country's regions resolve to (the same string `region` above's chosen
    * level produces). A region listed here ignores `city`/the country-wide
@@ -631,7 +638,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   NF: { region: [4], city: [9] }, // region 6022.3%, city 87.2%
   NG: { region: [4], city: [6] }, // region 100.4%, city 100.4%
   NI: { region: [4], city: [6, 10] }, // region 130.6%, city 128.1% (6) + gap-fill 10 -- see override note above
-  NL: { region: [4], city: [10] }, // region 111.1%, city 110.8%
+  NL: { region: [4], city: [10], regionOutside: [8] }, // region 111.1%, city 110.8%; level 8 outside the provinces is the Caribbean islands
   NO: { region: [4], city: [7] }, // region 164.2%, city 125.3%
   NP: { region: [6], city: [9] }, // region 100.3%, city 92.0%
   NR: { region: [6], city: [] }, // region 75.3%, city 0.0%
@@ -780,6 +787,24 @@ export const VORONOI_CITY_FALLBACK_HOLES: ReadonlySet<string> = new Set([
   "AE", "AI", "AO", "AW", "AZ", "BF", "BI", "BS", "BW", "CD", "CF", "CW", "GE", "GW", "LR", "LS", "MR", "MW", "NA", "NE", "PH", "PY", "QA",
   "SD", "SX", "SZ", "TG", "TT", "UG", "WF",
 ]);
+
+/** The hole fill (`VORONOI_CITY_FALLBACK_HOLES`) for only these regions of a
+ * country, where the rest has a full city tier: the Caribbean Netherlands
+ * have no level-10 woonplaatsen, which tile the European part. */
+export const VORONOI_CITY_FALLBACK_HOLES_IN: ReadonlyMap<string, readonly string[]> = new Map([
+  ["NL", ["Bonaire", "Saba", "Sint Eustatius"]],
+]);
+
+/** GeoNames country codes for land that OSM, and so this dataset, counts as
+ * part of another country: `cities500.txt` gives Bonaire, Saba and Sint
+ * Eustatius their ISO 3166-1 code BQ, while OSM's islands are inside the
+ * Netherlands' `admin_level=2` relation; OSM's BQ is only on Caribisch
+ * Nederland, a `boundary=legal` relation ("not an administrative entity"),
+ * which is no country here. prepare-world.ts reads such a place as the
+ * other country's. (The
+ * admin1 join, `BQ.BO`, then no longer matches, so such a country must not use
+ * an admin1-based fallback.) */
+export const GEONAMES_COUNTRY_OF: ReadonlyMap<string, string> = new Map([["BQ", "NL"]]);
 
 /** Countries with `region: []` -- no usable region tier in OSM at all --
  * where `voronoiFallback.ts`'s `buildRegionFallback` synthesizes one from

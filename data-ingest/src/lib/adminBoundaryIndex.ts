@@ -97,6 +97,8 @@ export interface RegionCandidate {
    * what a *different* country does with the same level number. */
   level: number;
   bbox: BBox;
+  /** A point on the region (its interior point), for `regionOutside`. */
+  point?: LonLat;
   feature: Feature<Polygon | MultiPolygon, { name?: string }>;
 }
 
@@ -222,7 +224,11 @@ export function classifyAdminFeature(
   // vs. country-wide) happens there, not here.
   const isCity = (levels?.city.includes(level) ?? false) || cachedOverrideLevels(country).includes(level);
   const name = props?.name;
-  const isRegion = ((levels?.region.includes(level) ?? false) || (levels?.regionGapFill?.includes(level) ?? false)) && !!name;
+  const isRegion =
+    ((levels?.region.includes(level) ?? false) ||
+      (levels?.regionGapFill?.includes(level) ?? false) ||
+      (levels?.regionOutside?.includes(level) ?? false)) &&
+    !!name;
   const wikidata = levels?.nameEnFromWikidata ? props?.wikidata : undefined;
   if (!isCity && !isRegion) {
     const lend = props?.["name:en"];
@@ -323,6 +329,7 @@ class AdminBoundaryAccumulator {
         country,
         level,
         bbox: c.bbox,
+        point: c.regionPoint ?? c.repPoint,
         feature: c.region,
       });
     }

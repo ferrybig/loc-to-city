@@ -610,9 +610,9 @@ below).
   No other country's answer changed for any cities500 place of 1,000+.
   Seven capitals resolve: Bissau, Nassau, Willemstad, Gibraltar, The
   Valley, Majuro, Mata-Utu. Still with no region: Poland (132 places, see
-  Poland), northern Cyprus (13), Bonaire, Saba and Sint Eustatius (10,
-  answering the Netherlands), Western Sahara (4), and single places on a
-  coast or border elsewhere.
+  Poland), northern Cyprus (13), Western Sahara (4), and single places on
+  a coast or border elsewhere. Bonaire, Saba and Sint Eustatius (10) have
+  their island as region since 2026-10-15 (see Netherlands).
 - **Capitals.** *(open)* `verify/test/world-queries.test.ts` looks up
   the capital of every country and dependency GeoNames lists one for
   (232; `verify/src/cases.ts`'s `CAPITALS` and `OPEN_CAPITALS` tables carry the
@@ -1649,7 +1649,8 @@ Putrajaya.
 
 ## Netherlands (NL)
 
-`region [4]`, `city [10]` (110.8%).
+`region [4]`, `city [10]` (110.8%), `regionOutside [8]` (the Caribbean
+islands), the hole fill on those islands only.
 
 The reference country: `data/03-final/zuid-holland.bin` is filtered from the
 worldwide resolved data (`make netherlands`) and
@@ -1680,6 +1681,30 @@ worldwide resolved data (`make netherlands`) and
   Croatia and Austria, and a South Sudan state by Sudan. 30,000 random world
   points: no change.
 
+- **Bonaire, Saba and Sint Eustatius had no region.** Fixed 2026-10-15.
+  The Caribbean Netherlands are part of the Netherlands (special
+  municipalities, *openbare lichamen*), and OSM has them inside the
+  Netherlands' `admin_level=2` relation, so the country was right; but they
+  are in no province (level 4) and have no level-10 woonplaatsen, so all 10
+  cities500 places there answered "Netherlands" alone. OSM has each island at
+  level 8, next to the gemeenten: Bonaire (relation 2324450), Saba
+  (2324451), Sint Eustatius (2324452). They are the regions now, through a new option,
+  `regionOutside`: a relation at a listed level is a region only when its
+  point lies in no region of the chosen level, which of NL's level-8
+  relations only the three islands do (the build log names them). The towns
+  come from the Voronoi hole fill, limited to those three regions
+  (`VORONOI_CITY_FALLBACK_HOLES_IN`), so the European woonplaatsen are
+  untouched. GeoNames files the islands under their own ISO 3166-1 code, BQ,
+  not NL; OSM's only BQ relation is Caribisch Nederland (1216720), tagged
+  `boundary=legal` and noted as "not an administrative entity", which is no
+  country here. `GEONAMES_COUNTRY_OF` reads cities500's BQ places as NL.
+  12.15, -68.26667 is Bonaire / Kralendijk, 12.23762, -68.33059 Bonaire / Dorp
+  Rincon, 17.62652, -63.24971 Saba / The Bottom, 17.48303, -62.9864 Sint
+  Eustatius / Oranjestad. Kralendijk is in the capitals table under the
+  Netherlands. No place outside the three islands changed. Windwardside, on
+  Saba, is not in cities500, so it answers Upper Hell's Gate, its nearest
+  place there (which GeoNames gives a population of 2,810, more than Saba
+  has).
 - **Lelystad is huge.** *(false positive)* 52.683459, 5.295410 (open water
   off Enkhuizen, near the Houtribdijk) genuinely resolves to Lelystad, not
   Enkhuizen or generic Flevoland. Lelystad's official municipal boundary is
