@@ -483,7 +483,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   BI: { region: [4], city: [6] }, // region 92.7%, city 25.3%
   BJ: { region: [4], city: [6] }, // region 99.2%, city 99.2%
   BL: { region: [], city: [8] }, // region 0.0%, city 84.8%
-  BM: { region: [6], city: [] }, // region 86.8%, city 0.0%
+  BM: { region: [], city: [6] }, // parishes and the City of Hamilton (6, 86.8%); region by CITY_STATES
   BN: { region: [4], city: [6] }, // region 155.6%, city 25.6%
   BO: { region: [4], city: [8] }, // region 99.7%, city 99.0%
   BR: { region: [4], city: [8] }, // region 103.1%; municipalities (8), districts (9) only exist in some
@@ -577,7 +577,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   IR: { region: [4], city: [7] }, // region 105.1%, city 104.4%
   IS: { region: [5], city: [6] }, // region 100.3%, city 100.3%
   IT: { region: [4], city: [8] }, // region 100.1%, city 100.1%
-  JE: { region: [], city: [9] }, // region 0.0%, city 100.6%
+  JE: { region: [], city: [8] }, // parishes (8); vingtaines (9) are inside them; region by CITY_STATES
   JM: { region: [5], city: [6] }, // region 99.4%, city 99.4%
   JO: { region: [4], city: [6] }, // region 100.0%, city 100.0%
   JP: { region: [4], city: [7] }, // region 204.2%, city 185.5%
@@ -597,7 +597,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   LC: { region: [4], city: [] }, // region 99.6%, city 0.0%
   LI: { region: [6], city: [8] }, // region 116.9%, city 105.3%
   LK: { region: [4], city: [5] }, // region 146.5%, city 146.5%
-  LR: { region: [6], city: [8] }, // region 101.6%, city 0.2%
+  LR: { region: [4], city: [] }, // counties (4); districts (6) are no region, zones (8) of two towns no city
   LS: { region: [5], city: [10] }, // region 101.5%, city 0.0%
   LT: { region: [5], city: [6] }, // region 100.6%, city 98.1%
   LU: { region: [6], city: [8, 9] }, // region 99.4%, city 100.8% (8) + gap-fill 9 -- see override note above
@@ -678,7 +678,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   TC: { region: [6], city: [] }, // region 127.0%, city 0.0%
   TD: { region: [4], city: [8] }, // region 100.5%, city 0.7%
   TF: { region: [4], city: [10] }, // region 0.0%, city 153.2%
-  TG: { region: [4], city: [6] }, // region 99.9%, city 58.6%
+  TG: { region: [4], city: [8] }, // region 99.9%; Lomé (8); prefectures (6, 58.6%) are no city
   TH: { region: [4], city: [6] }, // region 121.8%, city 100.1%
   TJ: { region: [4], city: [6] }, // region 99.4%, city 99.3%
   TL: { region: [4], city: [5] }, // region 98.6%, city 98.6%
@@ -691,7 +691,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   TW: { region: [4], city: [7, 8] }, // region 82.3%, city 69.8% (8) + 30.9% (7) -- see override note above
   TZ: { region: [4], city: [5] }, // region 94.0%, city 94.0%
   UA: { region: [4], city: [7] }, // region 104.1%, city 99.7%
-  UG: { region: [4], city: [6] }, // region 99.8%, city 6.4%
+  UG: { region: [4], city: [6] }, // region 99.8%, city 6.4%; a level-6 sub-region is dropped (shareInOtherRegions)
   US: {
     region: [4],
     city: [8], // region 106.6%, city 10.7% -- see override note above
@@ -771,10 +771,13 @@ export const VORONOI_CITY_FALLBACK_WITHIN_REGIONS: ReadonlyMap<string, readonly 
  * regions that do not overlap, apart from a `regionGapFill` level (cut down
  * to the land the others leave); not for a country like Fiji or Bahrain,
  * whose region level covers the country several times over. A region in
- * `REGION_CITIES` is left out: it is one city already. See countries.md,
+ * `REGION_CITIES` is left out: it is one city already. A real city lying
+ * mostly in other regions than its own is dropped rather than kept (UG's
+ * Bugisa sub-region, `shareInOtherRegions`). See countries.md,
  * "Countries with a thin city tier". */
 export const VORONOI_CITY_FALLBACK_HOLES: ReadonlySet<string> = new Set([
-  "AO", "AZ", "BF", "BI", "BW", "CD", "CF", "GE", "LR", "LS", "MR", "MW", "NA", "NE", "PH", "QA", "SD", "SZ", "TG", "TT", "UG",
+  "AO", "AW", "AZ", "BF", "BI", "BW", "CD", "CF", "GE", "GW", "LR", "LS", "MR", "MW", "NA", "NE", "PH", "QA", "SD", "SX", "SZ", "TG", "TT",
+  "UG",
 ]);
 
 /** Countries with `region: []` -- no usable region tier in OSM at all --
@@ -798,7 +801,10 @@ export const VORONOI_REGION_FALLBACK: ReadonlySet<string> = new Set(["SI"]);
  * its city once it has a region to sit in; the Vatican has nothing below
  * its `admin_level=2` relation. San Marino (castelli, level 8), Andorra
  * (parishes, level 7) and Malta (local councils, level 8) have a full
- * city tier in OSM and only lacked a region to sit in. See countries.md's
+ * city tier in OSM and only lacked a region to sit in. So do the small
+ * territories after them (Cayman Islands' districts, Jersey's parishes,
+ * Tuvalu's islands, ...), which OSM gives no region tier: a city with no
+ * region is dropped, so every city they have was. See countries.md's
  * Monaco, Vatican and "Country only" entries. */
 export const CITY_STATES: ReadonlyMap<string, { region: string; city?: string }> = new Map([
   ["MC", { region: "Monaco" }],
@@ -806,6 +812,16 @@ export const CITY_STATES: ReadonlyMap<string, { region: string; city?: string }>
   ["SM", { region: "San Marino" }],
   ["AD", { region: "Andorra" }],
   ["MT", { region: "Malta" }],
+  ["AW", { region: "Aruba" }],
+  ["BM", { region: "Bermuda" }],
+  ["FK", { region: "Falkland Islands" }],
+  ["JE", { region: "Jersey" }],
+  ["KI", { region: "Kiribati" }],
+  ["KY", { region: "Cayman Islands" }],
+  ["NU", { region: "Niue" }],
+  ["PM", { region: "Saint-Pierre-et-Miquelon" }],
+  ["SX", { region: "Sint Maarten" }],
+  ["TV", { region: "Tuvalu" }],
 ]);
 
 /** Regions that are one city: a capital or other city with the status of a

@@ -509,8 +509,9 @@ below).
   GW, HM, KN, LC, LS, LY, MR, MS, NE, NR, PW, SC, SH, SZ, TC, VC, VG, VU).
   Egypt, Chad, Eritrea and Libya were handled with the Voronoi fallback.
   **A Voronoi hole fill** (`VORONOI_CITY_FALLBACK_HOLES`, `holeFill.ts`),
-  added 2026-10-14, handles 21 more: AO, AZ, BF, BI, BW, CD, CF, GE, LR, LS,
-  MR, MW, NA, NE, PH, QA, SD, SZ, TG, TT, UG. What it found: in each of
+  added 2026-10-14, handles 24 more: AO, AW, AZ, BF, BI, BW, CD, CF, GE, GW,
+  LR, LS, MR, MW, NA, NE, PH, QA, SD, SX, SZ, TG, TT, UG (AW and SX since
+  2026-10-15, see "Territories with no region tier"). What it found: in each of
   them OSM has no relation at all for most towns (Angola's Benguela; the
   Philippines' Pagadian; Cebu province has about 20 of its 50 municipalities;
   an Overpass search for Pagadian finds schools and a fish port), so no
@@ -536,13 +537,45 @@ below).
   Also checked: 5,000+ places and random points within half a degree of
   every cities500 point of these countries (about 40,000) kept their
   region except 38 on a region border (22 in PH, 16 in GE, cell edges).
-  Fifteen capitals resolve now (see "Capitals."). Remaining open in the
-  group: Togo and Liberia keep their real level-6/8 polygons (prefectures,
-  "Zone 3"), which the fill does not override, so Sokodé answers
-  "Tchaoudjo"; Guinea-Bissau's Bissau has no region at all, so the fill
-  has no region to put a cell in; BB, BH, BZ, CV, DM, ME, MP, MV, SX, UY, WS,
-  the other empty lists and the countries not in the table (the 5-20% ones)
-  are not examined. *(open)*
+  Fifteen capitals resolve now (see "Capitals."). Guinea-Bissau was in
+  the list from the start (places of 5,000+ named 0 → 24 of 39), dropped
+  before the 2026-10-14 commit on the wrong assumption that the fill did
+  nothing there because Bissau has no region, and put back on 2026-10-15.
+  Since 2026-10-15 a real city of these countries that lies more than half
+  in other regions than its own is dropped too (Uganda's Bugisa
+  sub-region; see Uganda), and Togo's and Liberia's levels changed so the
+  fill names their towns (see Togo, Liberia). Remaining open in the group:
+  Bissau itself, whose sector has no relation at any level, so the fill
+  has no region to put a cell in (15 places of 5,000+ there answer the
+  country only); BB, BH, BZ, CV, DM, ME, MP, MV, UY, WS, the other empty
+  lists and the countries not in the table (the 5-20% ones) are not
+  examined. *(open)*
+- **Territories with no region tier.** Fixed 2026-10-15. A city with no
+  region is dropped (`emitCity`), so a country configured `region: []`
+  lost every city it had unless it was in `CITY_STATES`. Thirteen were
+  (AW, BL, BS, FK, JE, KI, KY, MF, NU, PM, SX, TV, WF), and Bermuda had its
+  parishes as the region and no city level. `CITY_STATES` now gives these one region covering the
+  territory, as it does Malta and Andorra: Aruba, Bermuda (`city [6]`, the
+  parishes and the City of Hamilton, was `region [6]`), Falkland Islands,
+  Jersey (`city [8]`, the parishes, was the vingtaines at 9), Kiribati
+  (the atolls; South Tarawa is `Tarawa Te Inainano`), Cayman Islands (the
+  districts), Niue (the villages), Saint-Pierre-et-Miquelon, Sint Maarten,
+  Tuvalu (the islands). Aruba and Sint Maarten have relations for only a
+  few towns (Oranjestad, Philipsburg), so they are in the hole fill as well
+  (its regions are `finalRegions`, which holds a city-state's region).
+  cities500 places of 500+ named for their city, before → after: AW 0 →
+  14 of 14, BM 0 → 10 of 12, FK 0 → 1 of 1, JE 0 → 5 of 5, KI 0 → 21 of 36
+  (a village answers its atoll), KY 0 → 66 of 71 (a neighbourhood answers
+  its district), NU 0 → 1 of 1, PM 0 → 2 of 2, SX 0 → 7 of 7, TV 0 → 6 of 8;
+  no city 0 everywhere. No other country's answer changed for any cities500
+  place of 1,000+. Ten capitals resolve: Oranjestad, Hamilton, Stanley,
+  Saint Helier, Tarawa, Alofi, Philipsburg, Saint-Pierre, Funafuti and
+  George Town. Not done: the Bahamas (level 8 is its districts, a region
+  tier, with New Providence for Nassau, and Freeport inside one), Wallis
+  and Futuna (level 8 is the three kingdoms; Mata-Utu is a village in
+  Uvea), St-Barthélemy and St-Martin (each one commune, named for the
+  island, not Gustavia or Marigot) and Curaçao (no relation below the
+  country).
 - **Capitals.** *(open)* `verify/test/world-queries.test.ts` looks up
   the capital of every country and dependency GeoNames lists one for
   (232; `verify/src/cases.ts`'s `CAPITALS` and `OPEN_CAPITALS` tables carry the
@@ -559,22 +592,20 @@ below).
   fifth, **no country or the wrong one**, is gone since the OSM country
   outlines: Vatican City and Monaco resolve, and Gibraltar and the three
   atolls get their country; see "Natural Earth's outlines are too coarse".)
-  - **Country only** (23): neither a region nor a city covers the point.
+  - **Country only** (13): neither a region nor a city covers the point.
     Microstates and small territories (Skopje, Manila and Tbilisi left on
     2026-10-14). `CITY_STATES` (Monaco, Vatican) is the mechanism for the
     microstates among them (Andorra, Malta and San Marino were added
-    2026-10-13 and are out of this list).
-    The Valley (Anguilla); Oranjestad (Aruba);
-    Nassau (Bahamas); George Town (Cayman Is.); Willemstad (Curaçao);
-    Stanley (Falkland Is.); Port-aux-Français (Fr. S. Antarctic Lands);
-    Gibraltar (Gibraltar); Bissau (Guinea-Bissau); Saint
-    Helier (Jersey); Tarawa (Kiribati); Majuro (Marshall Is.); Alofi (Niue);
+    2026-10-13 and are out of this list). On 2026-10-15 it took nine
+    territories off it, whose city tier OSM has but which had no region
+    to sit in (see "Territories with no region tier").
+    The Valley (Anguilla); Nassau (Bahamas); Willemstad (Curaçao);
+    Port-aux-Français (Fr. S. Antarctic Lands);
+    Gibraltar (Gibraltar); Bissau (Guinea-Bissau); Majuro (Marshall Is.);
     Adamstown (Pitcairn Is.); Grytviken (S. Geo. and
-    the Is.); Jamestown (Saint Helena); Philipsburg
-    (Sint Maarten); Gustavia (St-Barthélemy); Marigot (St-Martin);
-    Saint-Pierre (St. Pierre and Miquelon); Funafuti (Tuvalu); Mata-Utu
-    (Wallis and Futuna Is.)
-  - **The capital is only a region** (16; nine left on 2026-10-14, see "Countries with a thin city tier"): the region carries the
+    the Is.); Jamestown (Saint Helena); Gustavia (St-Barthélemy); Marigot
+    (St-Martin); Mata-Utu (Wallis and Futuna Is.)
+  - **The capital is only a region** (15; nine left on 2026-10-14, see "Countries with a thin city tier", and Hamilton on 2026-10-15, see "Territories with no region tier"): the region carries the
     capital's name and no city covers the point. This is the previous
     entry ("Capitals that are their own region"). Its `REGION_CITIES`
     took 13 capitals off this list on 2026-10-13 (Vienna, Minsk, Prague,
@@ -584,7 +615,7 @@ below).
     city now beats a region drawn the same (see "Cities drawn twice").
     The rest are either a province named after its seat or not checked
     yet (that entry says which).
-    Hamilton (Bermuda); Thimphu (Bhutan); Praia (Cabo Verde); Yamoussoukro
+    Thimphu (Bhutan); Praia (Cabo Verde); Yamoussoukro
     (Côte d'Ivoire); Djibouti (Djibouti); Banjul (Gambia); Vilnius
     (Lithuania); Male (Maldives); Saipan (N. Mariana Is.); Yaren (Nauru);
     Castries (Saint Lucia); Ljubljana (Slovenia); Honiara (Solomon Is.);
@@ -1211,6 +1242,18 @@ tessellates its country, so the bug was always grain, not coverage.
   6 inside it. Fixed 2026-10-13 by `REGION_CITIES`, which emits the region
   polygon as the city too (see "Capitals that are their own region").
 
+## Guinea-Bissau (GW)
+
+`region [6]` (sectors), `city []`, `VORONOI_CITY_FALLBACK_HOLES`.
+
+- **Bissau has no region.** *(open)* 11.86357, -15.59767 answers the country
+  only. OSM has no relation for the autonomous sector of Bissau at any
+  level (the eight regions at 4 and the sectors at 6 leave it out), and a
+  city with no region is dropped, so the hole fill, which names the rest of
+  the country (places of 5,000+ named 0 → 24 of 39), puts no cell there:
+  the 15 places of 5,000+ still answering the country only are Bissau and
+  its suburbs. Needs a region for land no region covers.
+
 ## India (IN)
 
 `region [4]` (100.2%), `city [6]` (97.4%).
@@ -1264,8 +1307,10 @@ tessellates its country, so the bug was always grain, not coverage.
 
 - **Natural Earth's outlines are 47 and 59 vertices.** Fixed: the country
   outlines are OSM's now (see "Natural Earth's outlines are too coarse").
-  Saint Helier still answers `Jersey` with no region or city, one of the
-  "Country only" capitals.
+  Saint Helier answered `Jersey` with no region or city, one of the
+  "Country only" capitals, until 2026-10-15 (see "Territories with no
+  region tier": region `Jersey` by `CITY_STATES`, `city [8]`, the parishes,
+  instead of the vingtaines at 9).
 
 - **`St Peter Port` is not `Saint Peter Port`.** Fixed 2026-10-14, in the
   matcher. 49.45981, -2.53527 returns `city St Peter Port`, which *is* the
@@ -1347,13 +1392,18 @@ tessellates its country, so the bug was always grain, not coverage.
 
 ## Liberia (LR)
 
-`region [6]`, `city [8]` (0.2%), `VORONOI_CITY_FALLBACK_HOLES`.
+`region [4]` (counties), `city []`, `VORONOI_CITY_FALLBACK_HOLES`.
 
-- **No city tier.** Fixed 2026-10-14. Hole fill: places of 50,000+ named
-  0 → 3 of 5, no city 3 → 0. Monrovia resolves. *(open)* The other two are
-  Gbarnga and Ganta, which answer `Zone 3` and `Zone 4`: real level-8
-  relations (zones of a town, 0.2% of the country) win the land, and the
-  fill never overrides a real polygon.
+- **No city tier.** Fixed 2026-10-14 and 2026-10-15. Hole fill: places of
+  50,000+ named 0 → 3 of 5, no city 3 → 0, Monrovia resolves. Gbarnga,
+  Ganta and Zwedru still answered `Zone 3`, `Zone 4` and `Zone 2`: level 8
+  holds only the numbered zones inside a few towns (0.2% of the country),
+  which won their land over the fill. With `city []` the fill names it all:
+  places of 5,000+ named 19 → 22 of 22, 50,000+ 5 of 5.
+- **The region was the district.** Changed 2026-10-15. `region [6]` came
+  from the generated table and is the ~136 districts (`Greater Monrovia`,
+  `Jorquelleh`); the 15 counties, Liberia's first-level division and
+  GeoNames' admin1, are level 4. Monrovia is in `Montserrado County` now.
 
 ## Libya (LY)
 
@@ -1973,13 +2023,15 @@ worldwide resolved data (`make netherlands`) and
 
 ## Togo (TG)
 
-`region [4]`, `city [6]` (58.6%), `VORONOI_CITY_FALLBACK_HOLES`.
+`region [4]`, `city [8]` (Lomé only), `VORONOI_CITY_FALLBACK_HOLES`.
 
-- **Prefecture-grain cities.** Partly fixed 2026-10-14. Places of 50,000+:
-  named 1 → 5 of 8, no city 4 → 0, Lomé resolves. *(open)* The other three
-  (Sokodé, Kara, Dapaong) answer the prefecture (`Tchaoudjo`, `Kozah`, `Préfecture
-  de Kpendjal`): the configured level 6 is prefectures, not towns, and the
-  fill does not override a real polygon.
+- **Prefecture-grain cities.** Fixed 2026-10-15. The hole fill
+  (2026-10-14) named Lomé and the south, where the prefectures are missing,
+  but the north kept answering the prefecture: Sokodé was `Tchaoudjo`, Kara
+  `Kozah`, Dapaong `Préfecture de Kpendjal`. Level 6 is the 39 prefectures
+  (58.6% of the country), not towns; OSM has no commune relations except
+  Lomé (level 8). `city [8]` keeps Lomé's real outline and lets the fill
+  name the rest. Places of 5,000+ named 21 → 32 of 32, 50,000+ 5 → 8 of 8.
 
 ## Trinidad and Tobago (TT)
 
@@ -2014,9 +2066,21 @@ worldwide resolved data (`make netherlands`) and
 - **No city tier below the districts.** Fixed 2026-10-14. The level-4
   relations are the districts (and the new city councils, Mbale City,
   Mbarara City), which overlap each other; 41 places of 50,000+ were
-  named 2, with no city 39. Hole fill: 40 of 41 named, no city 1. The
-  remaining miss is Mbale: its point is in the overlap of `Mbale` and
-  `Mbale City`, and a few sites there end up with no cell.
+  named 2, with no city 39. Hole fill: 40 of 41 named, no city 1.
+- **Mbale had no city.** Fixed 2026-10-15. 1.08209, 34.17503 answered
+  `Mbale City` with `city -`. Level 6 holds a few counties and towns, and
+  `Bugisa sub-region`, 2,483 km² over five districts and resolved to
+  Sironko. As a real city it took the fill's sites in Mbale City, then
+  lost every cell there to the smaller region. A real city of a hole-fill
+  country that lies more than half in regions other than its own is now
+  dropped (`shareInOtherRegions`, sampled on a grid; land in no region
+  counts for neither). Measured on every real city of the 21 countries
+  first: Bugisa is 84% elsewhere, the next is 50% (Viana, split between
+  Luanda and Icolo e Bengo). The first try also counted land its own
+  region shares with an overlapping one, which dropped 853 Philippine and
+  68 Georgian cities under the level-3/level-4 gap-fill regions; own
+  region land is never elsewhere now. Places of 5,000+ named 158 → 163 of
+  163, 50,000+ 41 of 41.
 
 ## Ukraine (UA)
 

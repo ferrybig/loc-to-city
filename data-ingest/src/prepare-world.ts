@@ -51,7 +51,7 @@ import {
   findSuppressedByWholeUnits,
   streamGeometries,
 } from "./lib/adminLevelDetection.ts";
-import { buildRegionIndex, assignCityRegion } from "./lib/regionPolygons.ts";
+import { buildRegionIndex, assignCityRegion, shareInOtherRegions } from "./lib/regionPolygons.ts";
 import { streamCities500 } from "./lib/cities500.ts";
 import type { Cities500Row } from "./lib/cities500.ts";
 import type { VoronoiCityCandidate } from "./lib/voronoiFallback.ts";
@@ -401,14 +401,22 @@ async function main(): Promise<void> {
   // no primary geometry is ever held (see createGapFillTracker).
   // The real cities of a hole-fill country (VORONOI_CITY_FALLBACK_HOLES),
   // kept to cut out of its synthesized cells.
+  // A "city" lying mostly in other regions than its own is a grouping of
+  // them (UG's Bugisa sub-region spans five districts, Mbale City among
+  // them): it is dropped, and the fill names its land.
   const realCitiesByCountry = new Map<string, RealCity[]>();
   const emitReal = async (candidate: CityCandidateMeta, geometryJson: string): Promise<boolean> => {
-    if (!(await emitCity(candidate, geometryJson))) return false;
-    if (VORONOI_CITY_FALLBACK_HOLES.has(candidate.country)) {
-      let real = realCitiesByCountry.get(candidate.country);
-      if (!real) realCitiesByCountry.set(candidate.country, (real = []));
-      real.push({ bbox: candidate.bbox, geometry: JSON.parse(geometryJson) as Polygon | MultiPolygon });
+    if (!VORONOI_CITY_FALLBACK_HOLES.has(candidate.country)) return emitCity(candidate, geometryJson);
+    const geometry = JSON.parse(geometryJson) as Polygon | MultiPolygon;
+    const region = regionOf(candidate);
+    if (region && shareInOtherRegions(geometry, candidate.bbox, candidate.country, region, regionIndex) > 0.5) {
+      console.error(`  hole fill: ${candidate.country} ${candidate.name} (${candidate.id}) lies mostly in other regions, dropped`);
+      return false;
     }
+    if (!(await emitCity(candidate, geometryJson))) return false;
+    let real = realCitiesByCountry.get(candidate.country);
+    if (!real) realCitiesByCountry.set(candidate.country, (real = []));
+    real.push({ bbox: candidate.bbox, geometry });
     return true;
   };
   const tracker = createGapFillTracker(index, primary, resolveCandidateRegion);
