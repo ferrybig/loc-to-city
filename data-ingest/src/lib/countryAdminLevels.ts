@@ -460,7 +460,7 @@ export interface CountryAdminLevels {
  */
 export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   AD: { region: [], city: [7] }, // region 0.0%, city 103.5%
-  AE: { region: [4], city: [8] }, // region 147.9%, city 93.1%
+  AE: { region: [4], city: [5] }, // emirates; Abu Dhabi city (5); 6 is municipal regions, 8 neighbourhoods
   AF: { region: [4], city: [5] }, // region 99.9%, city 99.9% -- see override note above
   AG: { region: [4], city: [6] }, // region 1947.0%, city 92.9%
   AL: { region: [6], city: [8] }, // region 100.8%, city 100.8%
@@ -473,7 +473,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   AW: { region: [], city: [8] }, // region 0.0%, city 23.0%
   AX: { region: [4], city: [8] }, // region 1415.9%, city 919.8%
   AZ: { region: [6], city: [8] }, // region 112.7%, city 4.2%
-  BA: { region: [4], city: [9] }, // region 98.8%, city 61.3%
+  BA: { region: [4], city: [9, 6, 7], primaryLevel: 9, coverageGapFill: [6, 7] }, // settlements (9, 61.3%); cities (6), municipalities (7) fill
   BB: { region: [6], city: [9] }, // region 97.5%, city 19.6%
   BD: { region: [4], city: [6] }, // region 122.3%, city 111.4%
   BE: { region: [4], city: [9], nameEnFromWikidata: true }, // region 100.1%, city 99.9%
@@ -599,7 +599,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   LK: { region: [4], city: [5] }, // region 146.5%, city 146.5%
   LR: { region: [4], city: [] }, // counties (4); districts (6) are no region, zones (8) of two towns no city
   LS: { region: [5], city: [10] }, // region 101.5%, city 0.0%
-  LT: { region: [5], city: [6] }, // region 100.6%, city 98.1%
+  LT: { region: [5], city: [8, 6], primaryLevel: 8, coverageGapFill: [6] }, // settlements (8), elderships (6, 98.1%) fill between them
   LU: { region: [6], city: [8, 9] }, // region 99.4%, city 100.8% (8) + gap-fill 9 -- see override note above
   LV: { region: [5], city: [8, 7] }, // region 100.0%, city 98.0% (8) + gap-fill 7 -- see override note above
   LY: { region: [4], city: [] }, // region 106.2%, city 0.0%
@@ -649,8 +649,8 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   PS: { region: [4], city: [6] }, // region 100.6%, city 94.3%
   PT: { region: [6], city: [8] }, // region 97.5%, city 100.7%
   PW: { region: [4], city: [] }, // region 1896.1%, city 0.0%
-  PY: { region: [4], city: [8] }, // region 99.9%, city 72.9%
-  QA: { region: [4], city: [10] }, // region 103.9%, city 1.2%
+  PY: { region: [4], city: [8, 6, 7], primaryLevel: 8, coverageGapFill: [6, 7] }, // districts: 8 (72.9%), 6 in Paraguarí, 7 in Caazapá
+  QA: { region: [4], city: [] }, // municipalities; 10 is Doha's neighbourhoods (1.2%)
   RO: { region: [4], city: [8] }, // region 100.8%, city 100.5%
   RS: { region: [4], city: [9] }, // region 100.0%, city 99.5%
   RU: { region: [4], city: [6] }, // region 108.2%, city 104.0%
@@ -776,7 +776,7 @@ export const VORONOI_CITY_FALLBACK_WITHIN_REGIONS: ReadonlyMap<string, readonly 
  * Bugisa sub-region, `shareInOtherRegions`). See countries.md,
  * "Countries with a thin city tier". */
 export const VORONOI_CITY_FALLBACK_HOLES: ReadonlySet<string> = new Set([
-  "AO", "AW", "AZ", "BF", "BI", "BW", "CD", "CF", "GE", "GW", "LR", "LS", "MR", "MW", "NA", "NE", "PH", "QA", "SD", "SX", "SZ", "TG", "TT",
+  "AE", "AO", "AW", "AZ", "BF", "BI", "BW", "CD", "CF", "GE", "GW", "LR", "LS", "MR", "MW", "NA", "NE", "PH", "PY", "QA", "SD", "SX", "SZ", "TG", "TT",
   "UG",
 ]);
 
@@ -840,6 +840,7 @@ export const CITY_STATES: ReadonlyMap<string, { region: string; city?: string }>
  * province merely named after its seat (Lilongwe, Maseru) is not a city.
  * See countries.md's "Capitals that are their own region". */
 export const REGION_CITIES: ReadonlyMap<string, readonly { region: string; city?: string }[]> = new Map([
+  ["AE", [{ region: "دبي", city: "Dubai" }]],
   ["AT", [{ region: "Wien" }]],
   ["BY", [{ region: "Мінск" }]],
   ["CD", [{ region: "Kinshasa" }]],
@@ -861,6 +862,7 @@ export const REGION_CITIES: ReadonlyMap<string, readonly { region: string; city?
   ],
   ["MU", [{ region: "Port Louis" }]],
   ["MY", [{ region: "Kuala Lumpur" }, { region: "Putrajaya" }]],
+  ["QA", [{ region: "الدوحة" }]],
   ["RO", [{ region: "București" }]],
   ["RU", [{ region: "Москва" }, { region: "Санкт-Петербург" }, { region: "Севастополь" }]],
   ["TJ", [{ region: "Душанбе" }]],

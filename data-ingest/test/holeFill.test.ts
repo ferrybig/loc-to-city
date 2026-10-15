@@ -51,3 +51,15 @@ test("a region with no site is left alone", async () => {
   const cells = await buildHoleFill(new Map([["Empty", square(0, 0, 1, 1)]]), [], [], () => "Empty", clipper());
   assert.deepEqual(cells, []);
 });
+
+test("a section of a populated place (PPLX) is no site", async () => {
+  const regions = new Map([["North", square(0, 0, 10, 10)]]);
+  const cells = await buildHoleFill(
+    regions,
+    [],
+    [row("1", 2, 5), { ...row("2", 8, 5), featureCode: "PPLX" }],
+    () => "North",
+    clipper(),
+  );
+  assert.deepEqual(cells.map((c) => c.id), ["voronoi:1"], "the town's cell covers its neighbourhood");
+});

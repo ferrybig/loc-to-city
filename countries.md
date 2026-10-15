@@ -509,9 +509,10 @@ below).
   GW, HM, KN, LC, LS, LY, MR, MS, NE, NR, PW, SC, SH, SZ, TC, VC, VG, VU).
   Egypt, Chad, Eritrea and Libya were handled with the Voronoi fallback.
   **A Voronoi hole fill** (`VORONOI_CITY_FALLBACK_HOLES`, `holeFill.ts`),
-  added 2026-10-14, handles 24 more: AO, AW, AZ, BF, BI, BW, CD, CF, GE, GW,
-  LR, LS, MR, MW, NA, NE, PH, QA, SD, SX, SZ, TG, TT, UG (AW and SX since
-  2026-10-15, see "Territories with no region tier"). What it found: in each of
+  added 2026-10-14, handles 26 more: AE, AO, AW, AZ, BF, BI, BW, CD, CF,
+  GE, GW, LR, LS, MR, MW, NA, NE, PH, PY, QA, SD, SX, SZ, TG, TT, UG (AW and
+  SX since 2026-10-15, see "Territories with no region tier"; AE and PY
+  since 2026-10-15, see United Arab Emirates and Paraguay). What it found: in each of
   them OSM has no relation at all for most towns (Angola's Benguela; the
   Philippines' Pagadian; Cebu province has about 20 of its 50 municipalities;
   an Overpass search for Pagadian finds schools and a fish port), so no
@@ -541,7 +542,11 @@ below).
   the list from the start (places of 5,000+ named 0 → 24 of 39), dropped
   before the 2026-10-14 commit on the wrong assumption that the fill did
   nothing there because Bissau has no region, and put back on 2026-10-15.
-  Since 2026-10-15 a real city of these countries that lies more than half
+  Since 2026-10-15 a GeoNames section of a populated place (`PPLX`) is no
+  site: Doha's and Dubai's neighbourhoods split their city into
+  neighbourhood names (Qatar 21 of 43 points are PPLX, the Philippines 28
+  of 4,529; 6 Philippine and 3 Aruban places of 1,000+ changed their
+  answer to the neighbouring town's). Also since 2026-10-15 a real city of these countries that lies more than half
   in other regions than its own is dropped too (Uganda's Bugisa
   sub-region; see Uganda), and Togo's and Liberia's levels changed so the
   fill names their towns (see Togo, Liberia). Remaining open in the group:
@@ -605,7 +610,7 @@ below).
     Adamstown (Pitcairn Is.); Grytviken (S. Geo. and
     the Is.); Jamestown (Saint Helena); Gustavia (St-Barthélemy); Marigot
     (St-Martin); Mata-Utu (Wallis and Futuna Is.)
-  - **The capital is only a region** (15; nine left on 2026-10-14, see "Countries with a thin city tier", and Hamilton on 2026-10-15, see "Territories with no region tier"): the region carries the
+  - **The capital is only a region** (14; nine left on 2026-10-14, see "Countries with a thin city tier", Hamilton on 2026-10-15, see "Territories with no region tier", and Vilnius the same day, see Lithuania): the region carries the
     capital's name and no city covers the point. This is the previous
     entry ("Capitals that are their own region"). Its `REGION_CITIES`
     took 13 capitals off this list on 2026-10-13 (Vienna, Minsk, Prague,
@@ -616,8 +621,8 @@ below).
     The rest are either a province named after its seat or not checked
     yet (that entry says which).
     Thimphu (Bhutan); Praia (Cabo Verde); Yamoussoukro
-    (Côte d'Ivoire); Djibouti (Djibouti); Banjul (Gambia); Vilnius
-    (Lithuania); Male (Maldives); Saipan (N. Mariana Is.); Yaren (Nauru);
+    (Côte d'Ivoire); Djibouti (Djibouti); Banjul (Gambia); Male
+    (Maldives); Saipan (N. Mariana Is.); Yaren (Nauru);
     Castries (Saint Lucia); Ljubljana (Slovenia); Honiara (Solomon Is.);
     Basseterre (St. Kitts and Nevis)
   - **A region around it, no city** (20; Khartoum and Lomé left on 2026-10-14; Brasília moved on 2026-10-14, see Brazil; Guernsey left on 2026-10-14, it has a city and only the spelling differed): the region is a province,
@@ -631,7 +636,7 @@ below).
     (Rwanda); Apia (Samoa); Victoria (Seychelles); Kingstown (St. Vin. and
     Gren.); Tunis
     (Tunisia); Cockburn Town (Turks and Caicos Is.); Port-Vila (Vanuatu)
-  - **A district, ward or parish instead of the capital** (62; Brussels left on 2026-10-14, see Belgium): the
+  - **A district, ward or parish instead of the capital** (61; Brussels left on 2026-10-14, see Belgium; Abu Dhabi on 2026-10-15, see United Arab Emirates): the
     country's city tier is finer than its capital (Beijing, Tokyo, Seoul,
     Bangkok, Lisbon, London and many more). The capital's own boundary
     exists in OSM for most of these, usually a level above the one the
@@ -654,7 +659,7 @@ below).
     (Singapore); Mogadishu (Somalia); Pretoria (South Africa); Seoul
     (South Korea); Paramaribo (Suriname); Taipei (Taiwan); Bangkok
     (Thailand); Dili (Timor-Leste); Nuku‘alofa (Tonga); Ankara (Turkey); Charlotte Amalie
-    (U.S. Virgin Is.); Abu Dhabi (United Arab Emirates); London (United
+    (U.S. Virgin Is.); London (United
     Kingdom); Tashkent (Uzbekistan); Caracas (Venezuela); Hanoi (Vietnam);
     Sanaa (Yemen)
   - Work it from the test: `node --test verify/test/world-queries.test.ts`
@@ -815,6 +820,15 @@ tessellates its country, so the bug was always grain, not coverage.
   (`VORONOI_CITY_FALLBACK_HOLES`) names the land the 217 level-8 relations
   leave: places of 50,000+ named 1 → 13 of 14, no city 12 → 0, Baku
   resolves.
+- **Baku's outer districts have no region.** *(open)* Found 2026-10-15:
+  17 places of 5,000+ around Baku (Sabunçu, Mərdəkan, Hövsan, Zabrat)
+  answer the country only. The level-6 `Bakı` relation is the 164 km² core;
+  OSM has no relation for Baku's whole administrative territory, whose
+  outer districts (`Sabunçu rayonu`, `Suraxanı rayonu`, `Xəzər rayonu`) are
+  level-8 relations in no region, so they are dropped and the hole fill has
+  no region to put a cell in (Binəqədi rayonu survives because its point
+  falls just inside Abşeron). The same shape as Bissau (see Guinea-Bissau):
+  land no region covers needs a region of its own.
 
 ## Belarus (BY)
 
@@ -863,6 +877,22 @@ tessellates its country, so the bug was always grain, not coverage.
   -88.76401 returns `region Cayo`, `city -`. City coverage is 5.3%
   nationally. The user suspects the city level is too *high* (too coarse a
   number, the places sit at a finer level). Not checked.
+
+## Bosnia and Herzegovina (BA)
+
+`region [4]` (the entities), `city [9, 6, 7]`, `primaryLevel: 9`,
+`coverageGapFill: [6, 7]`.
+
+- **Federation towns had no city.** Fixed 2026-10-15. 41 of 118 places of
+  5,000+ answered `Federacija Bosne i Hercegovine` with `city -` (Živinice,
+  Visoko, Konjic, Kakanj). `city [9]`, the settlements, covers 61.3%:
+  Republika Srpska and the big towns (Sarajevo, Zenica, Tuzla, Mostar) have
+  them, much of the Federation does not. Its cities (`Grad Živinice`, level
+  6) and municipalities (`Općina Kakanj`, 7) cover the rest, so they fill
+  the land the settlements leave, the Bulgarian shape (see Bulgaria). Named
+  73 → 97 of 118, no city 41 → 0; the rest are villages answering their
+  municipality (`Mala Kladuša` → `Općina Velika Kladuša`). Places of
+  50,000+ 7 of 7 before and after; Sarajevo still resolves.
 
 ## Botswana (BW)
 
@@ -1429,6 +1459,21 @@ tessellates its country, so the bug was always grain, not coverage.
 - **Libya's regions were dropped** before region-seeding (23 polygons);
   fixed, see the README.
 
+## Lithuania (LT)
+
+`region [5]` (municipalities), `city [8, 6]`, `primaryLevel: 8`,
+`coverageGapFill: [6]`.
+
+- **Cities had no city, towns answered their eldership.** Fixed
+  2026-10-15. Vilnius, Kaunas, Klaipėda, Šiauliai and Panevėžys answered
+  their city municipality with `city -`, Trakai `Trakų seniūnija`.
+  `city [6]` was the elderships (seniūnija, 98.1%): rural districts
+  around a town, and none inside the city municipalities. Level 8 holds
+  the settlements, towns and villages. Settlements are primary now, the
+  elderships fill the land between them. Places of 5,000+ named 28 → 56
+  of 71, no city 29 → 0 (the rest are Vilnius and Kaunas neighbourhoods
+  answering their city); 50,000+ 0 → 6 of 6. Vilnius resolves.
+
 ## Luxembourg (LU)
 
 `region [6]`, `city [8, 9]` (100.8% at 8, gap-fill 9).
@@ -1749,6 +1794,20 @@ worldwide resolved data (`make netherlands`) and
 - Places named with a district (Santa Cruz, Paco and Port Area answer
   "Manila"; Tunasan and Putatan "Muntinlupa") are correct at the city tier.
 
+## Paraguay (PY)
+
+`region [4]`, `city [8, 6, 7]`, `primaryLevel: 8`, `coverageGapFill: [6, 7]`,
+`VORONOI_CITY_FALLBACK_HOLES`.
+
+- **Missing districts.** Fixed 2026-10-15. 27 of 66 places of 5,000+ had
+  no city (Villarrica, Coronel Oviedo, Caacupé, Concepción). The districts
+  are at level 8 in most departments, 6 in Paraguarí and 7 in Caazapá, and
+  many (Coronel Oviedo, Caacupé, Horqueta, Piribebuy) have no relation at
+  all. Levels 6 and 7 fill what 8 leaves, and the hole fill names the
+  rest. Named 37 → 64 of 66, no city 27 → 0; 50,000+ 15 → 18 of 19. The
+  two left are suburbs answering the neighbouring district (Fernando de
+  la Mora → San Lorenzo).
+
 ## Poland (PL)
 
 `region [6]` (powiat), `city [7]` (gmina), 100.1%.
@@ -1838,11 +1897,21 @@ worldwide resolved data (`make netherlands`) and
 
 ## Qatar (QA)
 
-`region [4]`, `city [10]` (1.2%), `VORONOI_CITY_FALLBACK_HOLES`.
+`region [4]`, `city []`, `REGION_CITIES` for Doha, `VORONOI_CITY_FALLBACK_HOLES`.
 
 - **Thin city tier.** Fixed 2026-10-14. Places of 50,000+: named 2 → 5 of
   6, no city 3 → 0. The sixth is Old Airport (`المطار القديم`), a real
   level-10 polygon around a place GeoNames calls differently.
+- **Doha answered its neighbourhoods.** Fixed 2026-10-15. `city [10]` is
+  Doha's neighbourhoods (1.2% of the country), and the hole fill named the
+  gaps between them after GeoNames' neighbourhood points (PPLX, 21 of
+  Qatar's 43). Doha itself only passed because one neighbourhood is
+  called `Mushayrib Downtown Doha`. Now `city []`, the Doha municipality is
+  the city `Doha` (`REGION_CITIES`), and the fill, without PPLX sites,
+  names the other municipalities' towns (Ar Rayyān, Al Wakrah, Al Khawr).
+  "Named for the point's city" falls 30 → 15 of 36 places of 5,000+,
+  because those are Doha's neighbourhoods and now answer `Doha`; no city
+  stays 0.
 
 ## Romania (RO)
 
@@ -2090,6 +2159,27 @@ worldwide resolved data (`make netherlands`) and
   `Київ / Kyiv`, `city -`; the expected city is `Kyiv`. Fixed 2026-10-13 by
   `REGION_CITIES`, which emits the region polygon as the city too (see
   "Capitals that are their own region").
+
+## United Arab Emirates (AE)
+
+`region [4]` (emirates), `city [5]` (Abu Dhabi), `REGION_CITIES` for Dubai,
+`VORONOI_CITY_FALLBACK_HOLES`.
+
+- **No city tier.** Fixed 2026-10-15. 61 of 94 places of 5,000+ had no
+  city (Dubai and every place in it, Fujairah, Hatta), and the rest
+  answered a neighbourhood (Abu Dhabi `حدبة الزعفرانة`, Ajman `الجرف`):
+  `city [8]` was the neighbourhoods and suburbs (373 relations, none in
+  most of Dubai). OSM has no town tier in between: level 5 is the city of
+  Abu Dhabi (799 km²), level 6 Abu Dhabi's three municipal regions (Abu
+  Dhabi, Al Ain, Al Dhafra, up to 30,000 km² of desert). `city [5, 6]` with
+  6 as gap-fill was tried first and made Zayed City and Ruwais answer
+  `منطقة الظفرة` (Al Dhafra), so 6 is out. Abu Dhabi's city keeps its
+  outline, Dubai's emirate is the city `Dubai` (Dubai Municipality is the
+  emirate), and the hole fill names the other towns (Sharjah, Khor Fakkan,
+  Al Ain, Zayed City), PPLX neighbourhoods excluded (see "Countries with a
+  thin city tier"). No city 61 → 0; named 27 → 47 of 94, the rest being
+  Dubai's neighbourhoods answering `Dubai` and Abu Dhabi's suburbs
+  answering `Abu Dhabi`. Abu Dhabi resolves.
 
 ## United Kingdom (GB)
 

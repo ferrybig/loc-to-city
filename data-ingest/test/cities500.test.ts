@@ -18,12 +18,12 @@ function writeFixture(lines: string[]): string {
 const REAL_ROW =
   "3038832\tVila\tVila\tCasas Vila,Vila\t42.53176\t1.56654\tP\tPPL\tAD\t\t03\t\t\t\t1418\t\t1318\tEurope/Andorra\t2024-11-04";
 
-test("streamCities500: parses a real row's id, name, point, country and admin1 code", async () => {
+test("streamCities500: parses a real row's id, name, point, country, admin1 and feature code", async () => {
   const file = writeFixture([REAL_ROW]);
   const rows = [];
   for await (const row of streamCities500(file)) rows.push(row);
   assert.deepEqual(rows, [
-    { geonameId: "3038832", name: "Vila", point: [1.56654, 42.53176], countryCode: "AD", admin1Code: "03" },
+    { geonameId: "3038832", name: "Vila", point: [1.56654, 42.53176], countryCode: "AD", admin1Code: "03", featureCode: "PPL" },
   ]);
 });
 

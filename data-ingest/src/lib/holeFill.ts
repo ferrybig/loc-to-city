@@ -15,7 +15,9 @@ export interface RealCity {
  * real city covers after the nearest populated place of `points`
  * (cities500), without touching a real one.
  *
- * Sites are the points no real city polygon contains. They are grouped by the
+ * Sites are the points no real city polygon contains, except a section of a
+ * populated place (GeoNames' `PPLX`: Doha's and Dubai's neighbourhoods), which
+ * would split its town into neighbourhood names. They are grouped by the
  * region `regionAt` gives them, and each region's sites tessellate that
  * region's own polygon (`buildContainerFallback`), so a cell never crosses a
  * region border: a city belongs to one region, and a cell over another
@@ -43,7 +45,7 @@ export async function buildHoleFill(
 
   const sitesByRegion = new Map<string, Cities500Row[]>();
   for (const row of points) {
-    if (covered(row.point[0], row.point[1])) continue;
+    if (row.featureCode === "PPLX" || covered(row.point[0], row.point[1])) continue;
     const region = regionAt(row.point);
     if (!region || !regions.has(region)) continue;
     let sites = sitesByRegion.get(region);

@@ -24,6 +24,9 @@ export interface Cities500Row {
    * GeoNames has no admin1 for this row (rare; excluded from the region
    * fallback, since it can't be grouped into a named admin1 cell). */
   admin1Code: string;
+  /** GeoNames' feature code (`PPL`, `PPLA`, `PPLX` for a section of a
+   * populated place, ...); absent in hand-built rows. */
+  featureCode?: string;
 }
 
 /** Streams every row of `cities500.txt`, tab-split and filtered to just
@@ -42,7 +45,8 @@ export async function* streamCities500(filePath: string): AsyncGenerator<Cities5
     const lon = Number(cols[5]);
     const countryCode = cols[8];
     const admin1Code = cols[10];
+    const featureCode = cols[7];
     if (!geonameId || !name || !countryCode || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-    yield { geonameId, name, point: [lon, lat], countryCode, admin1Code: admin1Code ?? "" };
+    yield { geonameId, name, point: [lon, lat], countryCode, admin1Code: admin1Code ?? "", ...(featureCode ? { featureCode } : {}) };
   }
 }
