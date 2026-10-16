@@ -820,6 +820,23 @@ export class CGeoDataReader {
 		};
 	}
 
+	/** How many places sit directly under `id`: a country's regions, a
+	 * region's cities, always 0 for a city. From the place table's counts
+	 * alone, like `placeIds()`, so no name block is read and it is
+	 * synchronous: `childCount(region) === 0` finds a region with no city
+	 * mapped to it. */
+	childCount(id: number): number {
+		this.checkPlaceId(id);
+		const { countryCount: C, totalRegions: R } = this.placeTable;
+		const { regionCountryPrefix, cityRegionPrefix } = this.placeTable;
+		if (id < C) return regionCountryPrefix[id + 1]! - regionCountryPrefix[id]!;
+		if (id < C + R) {
+			const region = id - C;
+			return cityRegionPrefix[region + 1]! - cityRegionPrefix[region]!;
+		}
+		return 0;
+	}
+
 	/**
 	 * Walks the place hierarchy in id order (countries, then regions, then
 	 * cities), optionally restricted to one level and/or one ancestor. Each

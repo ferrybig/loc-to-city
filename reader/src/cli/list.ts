@@ -7,6 +7,7 @@ import {
 	parse,
 	parseLevel,
 	resolveCountry,
+	UsageError,
 	writeLine,
 } from "./shared.ts";
 
@@ -36,7 +37,7 @@ async function printTree(
 export const list: Command = {
 	name: "list",
 	summary: "list places: countries by default, or a level, scoped to a country",
-	usage: `usage: cgeodata list <file.bin> [--level country|region|city] [--country <id|name>] [--tree] [--json]
+	usage: `usage: cgeodata list <file.bin> [--level country|region|city] [--country <id|name>] [--childless] [--tree] [--json]
 
 Lists places one per line as tab-separated columns: id, level, names,
 region, country. Alternative names within a column are joined by " | ";
@@ -45,6 +46,9 @@ a column that doesn't apply is "-".
   --level L    which level to list (default: country)
   --country C  only places inside this country, given as an id or as one
                of its names (case-insensitive, must be unambiguous)
+  --childless  only places with nothing directly under them: regions with
+               no city mapped to them (with --level region), countries
+               with no region. Read from the place table's counts
   --tree       print the hierarchy indented instead of flat, down to
                --level (default with --tree: city); lines are "id<TAB>names"
   --json       one JSON object per place instead of the text form`,
@@ -52,11 +56,15 @@ a column that doesn't apply is "-".
 		const { values, positionals } = parse(argv, {
 			level: { type: "string" },
 			country: { type: "string" },
+			childless: { type: "boolean", default: false },
 			tree: { type: "boolean", default: false },
 			json: { type: "boolean", default: false },
 		});
 		const level =
 			parseLevel(values.level) ?? (values.tree ? "city" : "country");
+
+		if (values.childless && values.tree)
+			throw new UsageError("--childless cannot be combined with --tree");
 
 		const reader = await openReader(positionals[0]);
 		try {
@@ -75,6 +83,7 @@ a column that doesn't apply is "-".
 			}
 			const filter = country === undefined ? { level } : { level, country };
 			for await (const place of reader.places(filter)) {
+				if (values.childless && reader.childCount(place.id) > 0) continue;
 				writeLine(values.json ? JSON.stringify(place) : formatPlaceLine(place));
 			}
 			return 0;

@@ -555,6 +555,53 @@ below).
   country only); BB, BH, BZ, CV, DM, ME, MP, MV, UY, WS, the other empty
   lists and the countries not in the table (the 5-20% ones) are not
   examined. *(open)*
+- **Regions with no city mapped.** *(open)* Found 2026-10-16 from the place
+  table alone: `node reader/src/cli.ts list data/03-final/world-high-res.bin
+  --level region --childless` prints every region whose `city_counts` entry
+  is 0 (0.7 s, no chunk is read). 418 of 5,125 regions in 70 countries
+  (`world-high-res.bin`, built 2026-10-15); looking each one up at its
+  `locate` point gave the region and `city -` every time. Reading the list:
+  - **Countries with no city at all** (13, 128 regions): British Virgin Is.,
+    Fiji, Grenada, Heard I. and McDonald Is., Montserrat, Nauru, Palau, Saint
+    Lucia, Seychelles, St. Kitts and Nevis, St. Vin. and Gren., Turks and
+    Caicos Is., Vanuatu. The empty city lists of "Countries with a thin city
+    tier"; the Voronoi hole fill was not tried on them (Fiji is excluded by
+    its region overlap). Their towns answer with the region.
+  - **Countries where most regions have none** (the rest of that entry's
+    list): Bahrain 3 of 4, Dominica 9 of 10, Greenland 5 of 6, Saint Helena
+    5 of 6, Macao 6 of 8, Samoa 11 of 12, Maldives 19 of 21, Cook Is. 10 of
+    11, Cabo Verde 17 of 22, eSwatini 34 of 53 (the hole fill covers SZ, but
+    not these inkhundla), Bahamas 9 of 33.
+  - **A region that is one town, with no city for it**, the Bremen shape
+    (verified by lookup, answer `city -`): Kranj (Slovenia, Urban
+    Municipality of Kranj), Izola, Abidjan and Yamoussoukro (Côte d'Ivoire),
+    Cetinje (Montenegro), Paphos (Cyprus), Rason (North Korea), Ménaka
+    (Mali), Banjul and Kanifing (Gambia), Djibouti and Ali Sabieh, Honiara,
+    Osh, Sejong, Labuan, Delhi, Ljubljana, the Bahraini governorates, Kigali's
+    districts, Niamey 5. Several are capitals already listed under
+    "Capitals." Fix with `REGION_CITIES` (with a `city` name where the
+    region's is not the town's) after checking the region holds no other
+    town.
+  - **Not a problem**: uninhabited or remote units (Ashmore and Cartier,
+    Coral Sea Islands, Bouvet, Jan Mayen, Gough and Nightingale, Mexican
+    islets); Ugandan districts that surround a separate `... City` region
+    (Gulu, Mbarara, Mbale, Masaka, Soroti, Arua and Fort Portal all resolve
+    to their city); Vietnam's new `Tỉnh Lào Cai` and `Tỉnh Quảng Trị`, whose
+    wards sit under the `... cũ` (old) province relation.
+  - **Relations that are not places**: China's `... Boundary ...` and
+    enclave relations (824, 825, 826, 833, 843, 849, 855), India's `Karnataka
+    - Maharashtra border` and `Maghval – Nagar Haveli border`, Spain's
+    `Cantabria - Castilla y León` and `Castilla y León - Euskadi`, Georgia's
+    `Къуайса`. They are regions with no land of their own; worth dropping or
+    reporting upstream, not mapping.
+  - **Not covered here**: Bremen itself has Bremerhaven, so it is not
+    childless. The second check is a region that has cities but whose own
+    `locate` point resolves to none (245 regions; Bremen is one, 1012 at
+    53.1251, 8.7465). It is noisier, since the point can fall between cities.
+    Not triaged; the largest groups are the United States 37, Uruguay 18,
+    Indonesia 14, Thailand 11, Montenegro 9, Panama 8.
+  Cases: Kranj, Izola, Abidjan, Cetinje, Paphos, Rason and Ménaka are in
+  `verify/src/cases.ts` as open.
 - **Territories with no region tier.** Fixed 2026-10-15. A city with no
   region is dropped (`emitCity`), so a country configured `region: []`
   lost every city it had unless it was in `CITY_STATES`. Thirteen were
