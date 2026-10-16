@@ -679,6 +679,16 @@ below).
   Kolkata district's slivers (3.69 km^2 left at 50-150 m) from Coalville's
   unparished town in North West Leicestershire (3.45 km^2), on grids of
   ~200 m cells, and lost Coalville its city.
+- **A few cells still trade places at Hyderabad and Kolkata.** *(open)*
+  Checked by the user on the map after the fix above was deployed
+  (2026-10-16): both are much improved, and the rest is a few cells,
+  documented rather than fixed, since the gain is very small for what is
+  likely a hard fix. 17.519490, 78.273983: Hyderabad meets Patancheruvu and
+  Ramachandrapuram mandals, two gap-fill cities of one level whose shared
+  edge is drawn differently (the Gagetown shape below; the marking does not
+  rank two gap-fill cities against each other). 22.529445, 88.289995:
+  Kolkata meets Maheshtala, two primary municipalities (level 8) with the
+  same kind of edge, and Thakurpukur Maheshtala, a taluka.
 - **Border artifacts found by the island count.** *(open)* Ranked by
   `verify/src/islands.ts` on 2026-10-16 (after "Overlapping cities traded
   cells") and checked on the map by the user, all true positives: Tāzirbū
@@ -1235,6 +1245,8 @@ Brunswick, `[6]`.
   Waterloo, Cambridge, Agglomération de Montréal -> Montréal, Capital
   Regional District -> Victoria, Saanich, Québec's MRCs and Ontario's
   counties -> their municipalities. Stanley Bridge's isolated cell is gone.
+  Checked by the user on the map after the deploy: no artifacts at
+  Vancouver, Toronto or Stanley Bridge.
   The old notes: 54.5164,
   -128.6003 returns `Regional District of Kitimat-Stikine`, although the
   entry above was verified fixed. `data/02-resolved/world/cities-filtered.geojsonseq`
