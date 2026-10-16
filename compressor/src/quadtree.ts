@@ -28,11 +28,6 @@ function pruneAncestors(candidates: IndexedCandidate[]): IndexedCandidate[] {
   return candidates.filter((c) => !ancestorIds.has(c.globalId));
 }
 
-/** A city's ancestors are its region and country. */
-function isCity(candidate: IndexedCandidate): boolean {
-  return candidate.ancestorIds.length === 2;
-}
-
 /** Of two candidates equally good for a cell, the one that gets it: not a
  * gap-fill city (`CityProperties.gapFill`: it names what primary cities
  * leave, so where it overlaps one, the primary keeps the cell; drawn from
@@ -164,24 +159,23 @@ export function buildChunkRecords(
     // whenever a bigger one overlaps smaller ones it beats every one of them
     // on every border cell (a district over the parishes it holds: each
     // parish border turned district-named). A candidate whose boundary crosses
-    // the cell and that holds a real share of it takes the cell instead.
+    // the cell and that holds a real share of it takes the cell instead, but
+    // only from candidates it beats where both contain a cell (`preferred`):
+    // otherwise its border is a line of its own cells through the other one.
+    // A region's border then does not cut through a smaller city of another
+    // region (Egypt's Voronoi cities span their governorates' borders), nor a
+    // gap-fill city's border through a primary city it overlaps (Hyderabad
+    // and its mandals, whose edges are drawn differently).
     let best: IndexedCandidate | undefined;
     let bestScore = -1;
-    const crossing = relevant.filter((candidate) => !containsCell.has(candidate.globalId));
-    // Except a gap-fill city's border inside a primary city: that is where
-    // the two overlap, and the primary keeps it (`preferred`).
-    const primaryCityContains = relevant.some(
-      (candidate) => containsCell.has(candidate.globalId) && isCity(candidate) && !candidate.gapFill,
-    );
-    if (crossing.length < relevant.length) {
-      for (const candidate of crossing) {
-        if (primaryCityContains && candidate.gapFill) continue;
-        const score = countContainedSamples(candidate.geometry, bounds);
-        if (score < CROSSING_MIN_SHARE * AREA_SHARE_SAMPLE_COUNT) continue;
-        if (score > bestScore || (score === bestScore && preferred(candidate, best!) === candidate)) {
-          bestScore = score;
-          best = candidate;
-        }
+    for (const candidate of relevant) {
+      if (containsCell.has(candidate.globalId)) continue;
+      if (!containing.every((other) => preferred(candidate, other) === candidate)) continue;
+      const score = countContainedSamples(candidate.geometry, bounds);
+      if (score < CROSSING_MIN_SHARE * AREA_SHARE_SAMPLE_COUNT) continue;
+      if (score > bestScore || (score === bestScore && preferred(candidate, best!) === candidate)) {
+        bestScore = score;
+        best = candidate;
       }
     }
     if (!best) {

@@ -103,9 +103,9 @@ export interface VoronoiRegionCandidate {
 }
 
 /** The Voronoi-from-cities500 region fallback (countries.md, Slovenia): for a country
- * with no usable region tier at all (`region: []` -- Slovenia, whose real
- * regional tier, OSM's "Upravna Enota" at level 7, only covers 17.6% of
- * the country, see countries.md's Slovenia section), groups its
+ * with no usable region tier at all (`region: []`; no country uses it now,
+ * Slovenia did until its census regions were read, see
+ * `VORONOI_REGION_FALLBACK`), groups its
  * own `cities500.txt` points by GeoNames admin1 code and unions each
  * group's individual Voronoi cells (computed together, over every point
  * in the country at once, so adjacent groups tile exactly -- computing a

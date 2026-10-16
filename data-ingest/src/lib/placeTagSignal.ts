@@ -18,6 +18,7 @@ const PLAUSIBLE_ADMIN_LEVELS = new Set([4, 5, 6, 7, 8, 9, 10, 11]);
 
 interface PlaceTagProps {
   admin_level?: string;
+  boundary?: string;
   name?: string;
   place?: string;
 }
@@ -52,7 +53,7 @@ export async function collectPlaceTagCandidates(
     const props = feature.properties as PlaceTagProps | null;
     const levelRaw = props?.admin_level;
     const name = props?.name;
-    if (!levelRaw || !name) continue;
+    if (!levelRaw || !name || props?.boundary === "census") continue;
     const level = Number(levelRaw);
     if (!PLAUSIBLE_ADMIN_LEVELS.has(level)) continue;
 

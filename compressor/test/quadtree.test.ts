@@ -116,3 +116,57 @@ test("a gap-fill city takes no cell a primary city contains, not even along its 
   assert.equal(after(3.5, 1), 31, "the mandal names the land outside the corporation");
   assert.equal(after(3.03, 1), 31, "and the corporation's edge cell, where it holds under a quarter");
 });
+
+test("a region's border does not cut through a city of another region", () => {
+  // Regions 1 and 2 meet at x = 2.01, inside a depth-6 cell; city 40 belongs
+  // to region 1 but reaches across that border (a Voronoi city spanning two
+  // governorates, Egypt). Region 2 crosses that cell with most of it, the
+  // city contains it.
+  const regionEntries: CandidateEntry[] = [
+    entries[0]!,
+    { globalId: 1, shape: packFeature(square(0, 0, 2.01, 4)), ancestorIds: [0] },
+    { globalId: 2, shape: packFeature(square(2.01, 0, 4, 4)), ancestorIds: [0] },
+    { globalId: 40, shape: packFeature(square(1, 1, 3, 3)), ancestorIds: [1, 0] },
+  ];
+  const candidates = new CandidateIndex(regionEntries).candidatesForBbox(0, 0, 4, 4);
+  const records = buildChunkRecords(candidates, bounds, 6);
+  const cellOf = (lon: number, lat: number) => {
+    const x = Math.floor((lon / 4) * 64);
+    const y = Math.floor((lat / 4) * 64);
+    return records.find((r) => {
+      const { x: cx, y: cy } = mortonDecode(r.code, 6);
+      const size = 2 ** (6 - r.depth);
+      return x >= cx && x < cx + size && y >= cy && y < cy + size;
+    })!.globalId;
+  };
+  assert.equal(cellOf(2.03, 2), 40, "the city keeps the cell the other region's border crosses");
+  assert.equal(cellOf(2.03, 0.5), 2, "below the city, the border cell goes to the region holding most of it");
+  assert.equal(cellOf(1.03, 2), 40, "the city's own edge cell, where it holds most of it");
+});
+
+test("two regions' border does not cut through a bigger city of a third region either", () => {
+  // City 50 (region 3) is bigger than regions 1 and 2 and reaches into both:
+  // where it overlaps them the smaller region wins, so their shared border at
+  // x = 2.01 goes to them by share, not to the city as a line through them.
+  const regionEntries: CandidateEntry[] = [
+    { globalId: 0, shape: packFeature(square(0, 0, 4, 4)), ancestorIds: [] },
+    { globalId: 1, shape: packFeature(square(0, 0, 2.01, 2)), ancestorIds: [0] },
+    { globalId: 2, shape: packFeature(square(2.01, 0, 4, 2)), ancestorIds: [0] },
+    { globalId: 3, shape: packFeature(square(0, 2, 4, 4)), ancestorIds: [0] },
+    { globalId: 50, shape: packFeature(square(0, 1, 4, 4)), ancestorIds: [3, 0] },
+  ];
+  const candidates = new CandidateIndex(regionEntries).candidatesForBbox(0, 0, 4, 4);
+  const records = buildChunkRecords(candidates, bounds, 6);
+  const cellOf = (lon: number, lat: number) => {
+    const x = Math.floor((lon / 4) * 64);
+    const y = Math.floor((lat / 4) * 64);
+    return records.find((r) => {
+      const { x: cx, y: cy } = mortonDecode(r.code, 6);
+      const size = 2 ** (6 - r.depth);
+      return x >= cx && x < cx + size && y >= cy && y < cy + size;
+    })!.globalId;
+  };
+  assert.equal(cellOf(1, 1.5), 1, "the smaller region wins where it overlaps the city");
+  assert.equal(cellOf(2.03, 1.5), 2, "the regions' border cell goes to the region holding most of it");
+  assert.equal(cellOf(2.03, 3), 50, "the city keeps its own region");
+});

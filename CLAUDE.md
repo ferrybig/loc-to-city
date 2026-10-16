@@ -458,10 +458,13 @@ goes through `preferred` (not a gap-fill city, then smaller area, then
 finer tier, then lower global id), a total order. A gap-fill city from a
 coarser level than its country's primary one (`CityProperties.gapFill`, set
 by prepare-world; a finer one, like Varadero in Cárdenas, is a real place
-and is not marked) also never wins a border
-cell at max depth that a primary city contains: where the two overlap, the
-primary keeps it, or their differently drawn edges trade cells (Hyderabad
-and its mandals; `verify/src/islands.ts` counts the pieces). It used to be first-in-array-wins, which made
+and is not marked) ranks last. At max depth a candidate crossing a cell
+with >= 25% of it takes the cell from one containing it (a parish from its
+district), but only when `preferred` ranks it above every candidate
+containing the cell: otherwise its border becomes a line of its own cells
+through the other one (a governorate's border through an Egyptian Voronoi
+city spanning it, a mandal's edge through Hyderabad; `verify/src/islands.ts`
+counts the pieces). It used to be first-in-array-wins, which made
 the few hundred OSM relations with identical geometry flip between builds
 whenever any candidate was added, since that reorders the R-tree's
 search results. Keep it a total order.
@@ -560,7 +563,8 @@ same cell; `[primary, ...gapFill]` order is what prevents that.
 `admin1Codes.ts`, `countryAdminLevels.ts`'s `VORONOI_CITY_FALLBACK`/
 `VORONOI_REGION_FALLBACK`): for a country with a genuine, confirmed
 absence of OSM admin polygons at the city tier (Libya, Egypt, Chad,
-Eritrea — 0–0.7% coverage) or region tier (Slovenia — `region: []`), not
+Eritrea — 0–0.7% coverage) or region tier (no country now: Slovenia used
+it until its statistical regions came from census relations, see below), not
 fixable by any `admin_level` choice unlike every per-country override
 above, synthesizes polygons from `data/00-raw/geonames/cities500.txt` points
 instead. Both share `computeClippedCells`: `d3-delaunay` builds the
@@ -581,6 +585,14 @@ why a fixed-radius buffer per point was rejected in favor of a real
 tessellation, and a known residual limitation: a real OSM city's
 `repPoint` can land in a neighboring region's Voronoi cell when that
 city's own polygon is large or off-center — confirmed on Ljubljana).
+
+**Census regions** (`CountryAdminLevels.regionBoundary`): the extraction
+keeps `boundary=census` relations next to `boundary=administrative` ones,
+and a country with `regionBoundary: "census"` reads its `region` levels from
+them (SI: the 12 statistical regions, NUTS 3, census level 5; OSM has no
+administrative tier between Slovenia and its 212 municipalities). Everywhere
+else a census relation is dropped before country resolution, and it is never
+a city or a country outline.
 
 **Country resolution is Natural Earth, corrected by OSM's own borders.**
 `resolvePolygonCountry` (`polygonCountry.ts`) samples points against

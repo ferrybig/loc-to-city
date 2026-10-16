@@ -125,15 +125,15 @@ data/02-resolved/eu/cities-filtered.geojsonseq: data/02-resolved/world/cities-fi
 data/02-resolved/nl/cities-filtered.geojsonseq: data/02-resolved/world/cities-filtered.geojsonseq | node_modules
 	node data-ingest/src/filter-by-scope.ts --only-country NL --out-dir data/02-resolved/nl
 
-data/02-resolved/world/cities-filtered.geojsonseq: data/01-extracted/world/planet-latest-admin.geojson data/00-raw/geonames/cities500.txt data/00-raw/geonames/admin1CodesASCII.txt data/00-raw/natural-earth/ne_10m_admin_0_countries.geojson | node_modules
+data/02-resolved/world/cities-filtered.geojsonseq: data/01-extracted/world/planet-latest-admin.geojson data/01-extracted/world/planet-latest-census.geojson data/00-raw/geonames/cities500.txt data/00-raw/geonames/admin1CodesASCII.txt data/00-raw/natural-earth/ne_10m_admin_0_countries.geojson | node_modules
 	NODE_OPTIONS="--max-old-space-size=9216" \
 	node data-ingest/src/prepare-world.ts
 
-data/01-extracted/world/planet-latest-admin.geojson: data/00-raw/osm/planet-latest.osm.pbf .docker-image-stamp
+data/01-extracted/world/planet-latest-admin.geojson data/01-extracted/world/planet-latest-census.geojson &: data/00-raw/osm/planet-latest.osm.pbf .docker-image-stamp
 	data-ingest/scripts/extract-boundaries.sh
 
 .PHONY: extract
-extract: data/01-extracted/world/planet-latest-admin.geojson
+extract: data/01-extracted/world/planet-latest-admin.geojson data/01-extracted/world/planet-latest-census.geojson
 
 .docker-image-stamp: Dockerfile.tools
 	docker build -t loc2city-tools -f Dockerfile.tools .

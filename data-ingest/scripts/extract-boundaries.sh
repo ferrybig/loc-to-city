@@ -2,8 +2,13 @@
 # Filters every .osm.pbf in data/00-raw/osm/ (normally just
 # planet-latest.osm.pbf) down to boundary=administrative relations and
 # exports them to GeoJSON Text Sequence, via the loc2city-tools Docker image
-# (osmium-tool). Skips a file whose output is already newer than its input,
-# so re-running after swapping in an updated planet file only redoes that
+# (osmium-tool). boundary=census relations go to a file of their own,
+# <base>-census.geojson, with relation areas only (`area_tags: false`): the
+# closed ways osmium pulls in as their members would otherwise become
+# candidates (a US "Town Limits" way at admin_level=8). Pass 1 reads census
+# relations only for a country with `regionBoundary: "census"` (Slovenia's
+# statistical regions). Skips an output already newer than its input, so
+# re-running after swapping in an updated planet file only redoes that
 # file -- see README's "Reproducing" section.
 #
 # Usage:
@@ -34,19 +39,28 @@ for pbf in "${targets[@]}"; do
   fi
   base="$(basename "$pbf" .osm.pbf)"
 
-  admin_pbf="$WORK_DIR/${base}-admin.osm.pbf"
-  admin_geojson="$WORK_DIR/${base}-admin.geojson"
-  if [ -f "$admin_geojson" ] && [ "$admin_geojson" -nt "$pbf" ]; then
-    echo "skip $base (up to date)"
-    continue
-  fi
+  for kind in admin census; do
+    out_pbf="$WORK_DIR/${base}-${kind}.osm.pbf"
+    out_geojson="$WORK_DIR/${base}-${kind}.geojson"
+    if [ -f "$out_geojson" ] && [ "$out_geojson" -nt "$pbf" ]; then
+      echo "skip $base $kind (up to date)"
+      continue
+    fi
+    if [ "$kind" = admin ]; then
+      filter=r/boundary=administrative
+      config=
+    else
+      filter=r/boundary=census
+      config="-c data-ingest/scripts/census-export.json"
+    fi
 
-  echo "extracting $base..."
-  docker run --rm -v "$PWD:/work" -w /work loc2city-tools bash -c "
-    osmium tags-filter '$pbf' r/boundary=administrative \
-      -o '$admin_pbf' --overwrite -f pbf &&
-    osmium export '$admin_pbf' -o '$admin_geojson' \
-      --overwrite -f geojsonseq --geometry-types=polygon,multipolygon \
-      --add-unique-id type_id
-  "
+    echo "extracting $base $kind..."
+    docker run --rm -v "$PWD:/work" -w /work loc2city-tools bash -c "
+      osmium tags-filter '$pbf' $filter \
+        -o '$out_pbf' --overwrite -f pbf &&
+      osmium export '$out_pbf' $config -o '$out_geojson' \
+        --overwrite -f geojsonseq --geometry-types=polygon,multipolygon \
+        --add-unique-id type_id
+    "
+  done
 done

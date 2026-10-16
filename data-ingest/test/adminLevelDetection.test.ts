@@ -73,13 +73,13 @@ test("selectRegionLevels: uses whatever level the country's own table entry list
 });
 
 test("selectRegionLevels: a level with real area data is still ignored if the country's table entry doesn't list it", () => {
-  assert.deepEqual(COUNTRY_ADMIN_LEVELS.SI?.region, [], "test assumes SI's real table entry has no region levels");
-  const countries = fakeCountries({ SI: 20273 });
-  // Level 8 has real, plausible-looking coverage, but SI's table entry
-  // doesn't list 8 as a region candidate (only city) -- must not be picked.
-  const index = fakeIndex({ regionAreaByCountryLevel: new Map([["SI", new Map([[8, 20000]])]]) });
+  assert.deepEqual(COUNTRY_ADMIN_LEVELS.AD?.region, [], "test assumes AD's real table entry has no region levels");
+  const countries = fakeCountries({ AD: 468 });
+  // Level 7 has real, plausible-looking coverage, but AD's table entry
+  // doesn't list 7 as a region candidate (only city) -- must not be picked.
+  const index = fakeIndex({ regionAreaByCountryLevel: new Map([["AD", new Map([[7, 470]])]]) });
   const { regionLevelByCountry } = selectRegionLevels(index, countries);
-  assert.equal(regionLevelByCountry.has("SI"), false);
+  assert.equal(regionLevelByCountry.has("AD"), false);
 });
 
 test("selectRegionLevels: North Macedonia's region level is 7, not the 2.3% Skopje relation at 6", () => {
@@ -363,4 +363,26 @@ test("NOT_PLACES: the German-Luxembourg condominium is no candidate, by its area
     geometry: { type: "Polygon", coordinates: [[[6.36, 49.49], [6.37, 49.49], [6.37, 49.5], [6.36, 49.5], [6.36, 49.49]]] },
   } as Feature;
   assert.equal(classifyAdminFeature(condominium, { lookup: () => "DE" }), null);
+});
+
+test("regionBoundary: a census relation is a region only in a country that reads its regions from them", () => {
+  assert.equal(COUNTRY_ADMIN_LEVELS.SI?.regionBoundary, "census", "test assumes SI reads census regions");
+  assert.deepEqual(COUNTRY_ADMIN_LEVELS.SI?.region, [5], "test assumes SI's region level is 5");
+  const relation = (boundary: string, level: string, name: string) =>
+    ({
+      type: "Feature",
+      id: "a3407437",
+      properties: { admin_level: level, boundary, name },
+      geometry: { type: "Polygon", coordinates: [[[14, 46.2], [14.3, 46.2], [14.3, 46.5], [14, 46.5], [14, 46.2]]] },
+    }) as Feature;
+  const gorenjska = classifyAdminFeature(relation("census", "5", "Gorenjska regija"), { lookup: () => "SI" });
+  assert.ok(gorenjska && "isCity" in gorenjska);
+  assert.equal(gorenjska.isCity, false);
+  assert.equal(gorenjska.region?.properties.name, "Gorenjska regija");
+  // An administrative relation at the census level is no region there, and a
+  // census relation is nothing in a country that doesn't ask for them.
+  assert.equal(classifyAdminFeature(relation("administrative", "5", "Gorenjska"), { lookup: () => "SI" }), null);
+  assert.equal(classifyAdminFeature(relation("census", "5", "Oberbayern"), { lookup: () => "DE" }), null);
+  // A census relation is never a city, even at the country's city level.
+  assert.equal(classifyAdminFeature(relation("census", "8", "Bled"), { lookup: () => "SI" }), null);
 });

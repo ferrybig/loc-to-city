@@ -39,7 +39,7 @@ export async function loadOsmCountryRelations(
   let vertices = 0;
   for await (const { record, parsed } of streamMergedAdminRecords(files)) {
     const props = (parsed?.properties ?? peekOsmiumProperties(record)) as CountryBorderProps | null | undefined;
-    if (!props) continue;
+    if (!props || props.boundary === "census") continue;
     const isBorder = props.admin_level === "2";
     if (!isBorder && props.boundary !== "administrative") continue;
     const code = (props["ISO3166-1:alpha2"] ?? props["ISO3166-1"])?.toUpperCase();

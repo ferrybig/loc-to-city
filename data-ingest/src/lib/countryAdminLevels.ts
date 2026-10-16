@@ -20,6 +20,13 @@ export interface CountryAdminLevels {
    * (NL: Bonaire, Saba and Sint Eustatius are in no province; they are level
    * 8, like every gemeente, and every other gemeente lies in a province). */
   regionOutside?: number[];
+  /** Read the `region` levels from `boundary=census` relations instead of
+   * `boundary=administrative` ones. For a country whose regions OSM tags as
+   * census areas, with no administrative relation between the country and
+   * its municipalities (SI: the 12 statistical regions, NUTS 3, at level 5).
+   * A census relation is never a city, and is ignored in every other
+   * country. */
+  regionBoundary?: "census";
   /** Per-region city level override, keyed by the exact region name this
    * country's regions resolve to (the same string `region` above's chosen
    * level produces). A region listed here ignores `city`/the country-wide
@@ -706,7 +713,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   SE: { region: [4], city: [7] }, // region 119.2%, city 119.2%
   SG: { region: [5], city: [7] }, // region 153.1%, city 119.4%
   SH: { region: [4], city: [10] }, // region 43.9%, city 0.0%
-  SI: { region: [], city: [8] }, // region 0.0%, city 101.9%
+  SI: { region: [5], regionBoundary: "census", city: [8] }, // statistical regions (census) 12, city 101.9% -- see countries.md
   SK: { region: [4], city: [8, 5], coverageGapFill: [5] }, // region 101.2%, city 99.4% (8) + gap-fill 5 (Bratislava, Košice) -- see countries.md
   SL: { region: [4], city: [5] }, // region 101.4%, city 101.4%
   SM: { region: [], city: [8] }, // region 0.0%, city 84.2%
@@ -846,13 +853,17 @@ export const GEONAMES_COUNTRY_OF: ReadonlyMap<string, string> = new Map([["BQ", 
  * where `voronoiFallback.ts`'s `buildRegionFallback` synthesizes one from
  * `cities500.txt`, grouped by GeoNames admin1 code (see that function's
  * doc comment for why cities500 rather than `admin1CodesASCII.txt`
- * directly). Slovenia is the one confirmed case so far: its real regional
- * tier, OSM `admin_level=7` ("Upravna Enota"), only covers 17.6% of the
- * country -- not a full tessellation, so no `region` level fixes it (see
- * countries.md's Slovenia section). Same opt-in philosophy as
- * `VORONOI_CITY_FALLBACK`: added only after confirming no real OSM region
- * tier exists, not automatically. */
-export const VORONOI_REGION_FALLBACK: ReadonlySet<string> = new Set(["SI"]);
+ * directly). Same opt-in philosophy as `VORONOI_CITY_FALLBACK`: added only
+ * after confirming no real OSM region tier exists, not automatically.
+ *
+ * Empty now. Slovenia was the one case, and it showed the catch: where a
+ * country's admin1 codes are its municipalities (Slovenia's 212), the
+ * synthesized regions are a rough copy of the city layer, and a Voronoi
+ * cell smaller than the city it overlaps wins that city's cells (central
+ * Ljubljana had no city). Its statistical regions turned out to be in OSM
+ * as `boundary=census` (`regionBoundary`). Check for those, and for
+ * admin1 codes that are the city tier, before adding a country here. */
+export const VORONOI_REGION_FALLBACK: ReadonlySet<string> = new Set();
 
 /** The region hole fill (`regionHoles.ts`): for a country whose regions leave
  * populated land uncovered, a city there is dropped for having no region.

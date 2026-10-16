@@ -574,10 +574,11 @@ below).
     not these inkhundla), Bahamas 9 of 33.
   - **A region that is one town, with no city for it**, the Bremen shape
     (verified by lookup, answer `city -`): Kranj (Slovenia, Urban
-    Municipality of Kranj), Izola, Abidjan and Yamoussoukro (Côte d'Ivoire),
+    Municipality of Kranj; resolves since 2026-10-16, see Slovenia), Izola
+    (likewise), Abidjan and Yamoussoukro (Côte d'Ivoire),
     Cetinje (Montenegro), Paphos (Cyprus), Rason (North Korea), Ménaka
     (Mali), Banjul and Kanifing (Gambia), Djibouti and Ali Sabieh, Honiara,
-    Osh, Sejong, Labuan, Delhi, Ljubljana, the Bahraini governorates, Kigali's
+    Osh, Sejong, Labuan, Delhi, Ljubljana (resolves since 2026-10-16), the Bahraini governorates, Kigali's
     districts, Niamey 5. Several are capitals already listed under
     "Capitals." Fix with `REGION_CITIES` (with a `city` name where the
     region's is not the town's) after checking the region holds no other
@@ -601,12 +602,12 @@ below).
     "Bremen does not resolve on the current builds."). It is noisier,
     since the point can fall between cities. Not triaged; the largest groups are the United States 37, Uruguay 18,
     Indonesia 14, Thailand 11, Montenegro 9, Panama 8.
-  Cases: Kranj and Izola are in `verify/src/cases.ts` as open. Abidjan,
-  Cetinje, Paphos, Rason and Ménaka resolve since 2026-10-16 (next entry).
-  Slovenia's (Kranj, Izola, Ljubljana) are a different shape: its regions
-  are Voronoi cells named for GeoNames' admin1 codes, which in Slovenia are
-  the municipalities, so a region and the city of the same name compete
-  (see Slovenia).
+  Abidjan, Cetinje, Paphos, Rason and Ménaka resolve since 2026-10-16
+  (next entry). Slovenia's (Kranj, Izola, Ljubljana) were a different shape:
+  its regions were Voronoi cells named for GeoNames' admin1 codes, which in
+  Slovenia are the municipalities, so a region and the city of the same
+  name competed. They resolve since 2026-10-16, with the statistical regions
+  (see Slovenia; their cases moved there).
 - **Regions that are one town had no city.** Fixed 2026-10-16. From the
   "one town" group of the entry above, each region was checked twice: which
   OSM relations cover its town (a scratch scan of the extract), and which
@@ -709,6 +710,33 @@ below).
   also still has the parishes the 2023 reform replaced, at level 8
   (Burton Parish, Petersville Parish). Every place scoring above ~21,000
   that was checked is a true positive; between 10 and 20 pieces most are not.
+  False positives found by the user: French Polynesia's atolls (Fakarava 58
+  pieces, Tahanea 38, Aratika 23). Their outlines are rings of motu thinner
+  than a cell, and each motu the cells catch is a piece of its own; with no
+  city next to them their score is only their own count.
+- **Region borders cut lines through cities.** Fixed 2026-10-16, reported
+  by the user on Egypt. 0d303fb (2026-10-14) let a candidate crossing a
+  max-depth cell with >= 25% of it take the cell from one containing it, so
+  a district stops taking its parishes' borders. It applied across tiers
+  too: a Voronoi city is clipped to its country, not its region, and where
+  a governorate's border ran through it the governorate took a line of
+  cells (29.32869, 29.31015: Matruh across Al Bawīţī, a city of Giza). A
+  crossing candidate now takes the cell only from candidates `preferred`
+  ranks below it, i.e. those it would beat where both contain a cell.
+  Limiting it by tier instead (a region never takes a cell a city contains)
+  was tried first: where a Voronoi city is the bigger one (Mukhaylá under
+  Marj and Jabal al Akhdar, Libya), the regions win their insides, and the
+  border between them became a line of city cells. The rule also covers the
+  gap-fill exception of "Overlapping cities traded cells". Pieces
+  (`world-high-res.bin`): Egypt 10,177 -> 798, Libya 13,535 -> 2,448, Chad
+  19,053 -> 1,344, Slovenia 10,489 -> 4,586 (before its census regions);
+  places with 50+ pieces 412 -> 226; fewer pieces in 552 places, one more in
+  2. 15 cities500 places changed, all gains: nine Michigan towns from
+  their township (Mio, Hesperia, Baldwin), Village of Mamaroneck, Town of
+  Oromocto (was CFB Gagetown), two Iranian cities from their rural
+  district, Kafr al Kurdī, and Weitersfeld an der Mur back in Austria (was
+  a Slovenian Voronoi region). The Libyan, Chadian and Nigerien places of
+  the entry above are city-against-city borders and barely changed.
 - **Territories with no region tier.** Fixed 2026-10-15. A city with no
   region is dropped (`emitCity`), so a country configured `region: []`
   lost every city it had unless it was in `CITY_STATES`. Thirteen were
@@ -796,7 +824,7 @@ below).
     Port-aux-Français (Fr. S. Antarctic Lands); Adamstown (Pitcairn Is.);
     Grytviken (S. Geo. and the Is.); Jamestown (Saint Helena); Gustavia
     (St-Barthélemy); Marigot (St-Martin)
-  - **The capital is only a region** (10; Yamoussoukro, Djibouti, Banjul and Honiara left on 2026-10-16, see "Regions that are one town had no city"; nine left on 2026-10-14, see "Countries with a thin city tier", Hamilton on 2026-10-15, see "Territories with no region tier", and Vilnius the same day, see Lithuania): the region carries the
+  - **The capital is only a region** (9; Ljubljana left on 2026-10-16, see Slovenia; Yamoussoukro, Djibouti, Banjul and Honiara left on 2026-10-16, see "Regions that are one town had no city"; nine left on 2026-10-14, see "Countries with a thin city tier", Hamilton on 2026-10-15, see "Territories with no region tier", and Vilnius the same day, see Lithuania): the region carries the
     capital's name and no city covers the point. This is the previous
     entry ("Capitals that are their own region"). Its `REGION_CITIES`
     took 13 capitals off this list on 2026-10-13 (Vienna, Minsk, Prague,
@@ -809,7 +837,7 @@ below).
     Thimphu (Bhutan); Praia (Cabo Verde; at this location the city's name
     ends up in the region slot, see Cabo Verde); Male
     (Maldives); Saipan (N. Mariana Is.); Yaren (Nauru);
-    Castries (Saint Lucia); Ljubljana (Slovenia);
+    Castries (Saint Lucia);
     Basseterre (St. Kitts and Nevis)
   - **A region around it, no city** (18; New Delhi left on 2026-10-16, see India; Manama left on 2026-10-16 with Bahrain's city hole fill; Khartoum and Lomé left on 2026-10-14; Brasília moved on 2026-10-14, see Brazil; Guernsey left on 2026-10-14, it has a city and only the spelling differed): the region is a province,
     parish or federal district, and no city covers the point. Washington
@@ -2442,39 +2470,57 @@ worldwide resolved data (`make netherlands`) and
 
 ## Slovenia (SI)
 
-`region []` plus `VORONOI_REGION_FALLBACK`, `city [8]` (101.9%).
+`region [5]` from `boundary=census` (`regionBoundary`: the 12 statistical
+regions), `city [8]` (101.9%).
 
+- **Voronoi regions cut the municipalities apart.** Fixed 2026-10-16,
+  reported by the user (artifacts all over the map). The regions were
+  synthesized (`VORONOI_REGION_FALLBACK`, see the entry below) from GeoNames'
+  admin1 codes, which for Slovenia are its 212 municipalities, the same
+  units as the level-8 cities: the region layer was a Voronoi copy of the
+  city layer. Where a Voronoi cell was smaller than the city it overlapped
+  it won that city's cells (central Ljubljana, 46.0569, 14.5058, answered
+  `region Ljubljana`, `city -`), and along every municipality border the
+  two outlines traded cells: 472 Slovenian places in several pieces, 10,489
+  pieces (`verify/src/islands.ts`). OSM has no administrative relation
+  between the country and the municipalities (levels 3-6: none; level 7,
+  the upravne enote, 11 relations, 17.6%; level 10, 1.4%), but it has the
+  12 statistical regions (NUTS 3, e.g. Gorenjska regija SI042) as
+  `boundary=census`, `admin_level=5`, which the extraction dropped. They
+  are now extracted to `planet-latest-census.geojson` (relation areas only:
+  with their member ways, a US "Town Limits" way at level 8 would have
+  become a city) and read as Slovenia's regions; nowhere else. After: 37
+  places in more than one piece, 85 pieces, at most 5 (Vitanje). Ljubljana,
+  Kranj, Izola, Novo mesto, Piran and Portorož resolve to their city; 50
+  cities500 places that had no city gained one, 602 changed region (to the
+  statistical region), and Gorizia (Italy), which a Voronoi region of
+  Šempeter–Vrtojba covered, answers Italy again. No answer outside Slovenia
+  and Gorizia changed. Merged with "Region borders cut lines through
+  cities" (Cross-cutting patterns), which had already brought Slovenia from
+  10,489 pieces to 4,586.
 - **Zero regions, hence zero cities, fixed with the Voronoi machinery.**
-  City coverage was already fine (real municipalities: Bled, Solčava,
-  Mežica), but there was no usable region candidate, so `emitCity`'s "no
-  region, drop the city" rule dropped every Slovenian city (Bled and Maribor
-  both absent from `world.bin`). The nearest regional tier, OSM
-  `admin_level=7` ("Upravna Enota"), covers 17.6%, not a tessellation.
-  `buildRegionFallback` groups cities500 points by GeoNames admin1 code,
-  computes one Voronoi diagram over all points together (per-group diagrams
-  would leave gaps at group borders), then `@turf/union`s each group's cells.
-  602 points fall into exactly 212 admin1 codes, matching
-  `admin1CodesASCII.txt`'s 212 municipalities; the 212 polygons' combined
-  area matches the country's (~20,277 km²), so no gaps or overlaps. It runs
-  before `finalRegions`/`regionIndex` are built.
-- **A handful of cities land in the wrong synthesized region.** *(open)*
-  `assignCityRegion` places a real OSM city by its `repPoint`
-  (`pointOnFeature`, roughly a bbox midpoint), and a large or off-centre
-  polygon's `repPoint` can land closer to a neighbour's Voronoi site.
-  Confirmed on Ljubljana (polygon spans 14.41-14.76 lon; its `repPoint` lands
-  in the "Dol pri Ljubljani" cell) and Puconci (lands in "Grad"). Of 271
-  Slovenian cities 2 look like real misassignments; the ~95 whose city and
-  region names differ are legitimate. On `world-high-res.bin`, 46.0569,
-  14.5058 returns `region Ljubljana`, `city -`: the same residue. A fix would
-  use each city's own centroid, or bias the sites by extent. Not attempted.
-
-- **The Voronoi fake cities may land on the wrong layer.** *(open)* The
-  user, looking at the map, reads the region layer as holding both cities
-  and regions and the city layer as holding nothing, and suspects the
-  synthesized polygons are generated at the wrong layer. Ljubljana
-  (46.05108, 14.50513) returns `region Ljubljana`, `city -`. Not checked;
-  the entry above ("A handful of cities land in the wrong synthesized
-  region") is the same code path.
+  Superseded 2026-10-16 by the statistical regions (entry above). City
+  coverage was already fine (real municipalities: Bled, Solčava, Mežica),
+  but there was no usable region candidate, so `emitCity`'s "no region,
+  drop the city" rule dropped every Slovenian city (Bled and Maribor both
+  absent from `world.bin`). The nearest regional tier, OSM `admin_level=7`
+  ("Upravna Enota"), covers 17.6%, not a tessellation. `buildRegionFallback`
+  grouped cities500 points by GeoNames admin1 code, computed one Voronoi
+  diagram over all points together (per-group diagrams would leave gaps at
+  group borders), then `@turf/union`ed each group's cells. 602 points fall
+  into exactly 212 admin1 codes, matching `admin1CodesASCII.txt`'s 212
+  municipalities.
+- **A handful of cities land in the wrong synthesized region.** Fixed
+  2026-10-16 by the statistical regions, which are unions of whole
+  municipalities. `assignCityRegion` placed a real OSM city by its
+  `repPoint`, and a large or off-centre polygon's `repPoint` could land
+  closer to a neighbour's Voronoi site: Ljubljana (its point in the "Dol
+  pri Ljubljani" cell) and Puconci (in "Grad").
+- **The Voronoi fake cities may land on the wrong layer.** Fixed 2026-10-16
+  (the entry above it). The user read the region layer as holding both
+  cities and regions and the city layer as holding nothing: the Voronoi
+  regions were the municipalities, winning the cells of the cities they
+  were smaller than.
 
 ## Solomon Islands (SB)
 
@@ -2857,6 +2903,14 @@ District of Columbia.
   (level 7 in New York, which `overrides` uses as gap-fill), so they show
   up as cities; elsewhere unincorporated land has no such unit. The same
   question as "Township around a village": whether a township is a city.
+- **Hawaii has one city.** *(open)* Reported 2026-10-16: the map shows a
+  single city in Hawaii. Hawaii has no incorporated municipality besides
+  the City and County of Honolulu; its towns are census-designated places,
+  which OSM tags `boundary=census`, not `boundary=administrative`. To
+  inspect when this is tackled: Hilo (relation 119192) and Kahului (119172),
+  both `boundary=census`. Census relations are extracted since 2026-10-16
+  (`planet-latest-census.geojson`), but only read for countries with
+  `regionBoundary: "census"`, and only as regions.
 
 - **Washington, D.C. had no city.** 38.89511, -77.03637 returned `District
   of Columbia`, `city -`: the district is a level-4 region with nothing at

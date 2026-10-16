@@ -36,6 +36,11 @@ const PLAUSIBLE_ADMIN_LEVELS = new Set([3, 4, 5, 6, 7, 8, 9, 10, 11]);
 // decide `resolvePolygonCountry`'s sampling care (regions matter more to
 // get right than an ordinary city), not to decide role or acceptance.
 const REGION_SAMPLE_LEVELS = new Set([4, 5, 6]);
+// The same prefilter for `boundary=census` relations: only the region levels
+// of the countries that read their regions from them (`regionBoundary`).
+const CENSUS_REGION_LEVELS = new Set(
+  Object.values(COUNTRY_ADMIN_LEVELS).flatMap((levels) => (levels.regionBoundary === "census" ? levels.region : [])),
+);
 
 /** Every level any of this country's region `overrides` lists, flattened
  * -- a level here needs to survive Pass 1's `isCity` test even when it's
@@ -143,6 +148,7 @@ export interface AdminBoundaryIndex {
 
 interface AdminBoundaryProps {
   admin_level?: string;
+  boundary?: string;
   name?: string;
   "name:en"?: string;
   wikidata?: string;
@@ -207,6 +213,7 @@ export function classifyAdminFeature(
   if (!levelRaw) return null;
   const level = Number(levelRaw);
   if (!PLAUSIBLE_ADMIN_LEVELS.has(level)) return null;
+  if (props?.boundary === "census" && !CENSUS_REGION_LEVELS.has(level)) return null;
   // An island's coastline multipolygon with admin tags added (Penghu's
   // islets at admin_level=4, Indonesia's at 5), not an administrative
   // unit. Worldwide that is 143 named region candidates and 1,103 city
@@ -227,18 +234,23 @@ export function classifyAdminFeature(
   if (!country) return { noCountry: true };
 
   const levels = COUNTRY_ADMIN_LEVELS[country];
+  // `regionBoundary` reads the `region` levels from census relations,
+  // which are never anything else; elsewhere they are ignored.
+  const census = props?.boundary === "census";
+  const censusRegions = levels?.regionBoundary === "census";
+  if (census && !censusRegions) return null;
   // A superset check: a level that's only an override level for one of
   // this country's regions (not in the country-wide `city` list) still
   // needs to survive Pass 1, since which region a candidate belongs to
   // isn't known until regions are resolved, later in prepare-world.ts.
   // Routing a surviving candidate to its actual region/level (override
   // vs. country-wide) happens there, not here.
-  const isCity = (levels?.city.includes(level) ?? false) || cachedOverrideLevels(country).includes(level);
+  const isCity = !census && ((levels?.city.includes(level) ?? false) || cachedOverrideLevels(country).includes(level));
   const name = props?.name;
   const isRegion =
-    ((levels?.region.includes(level) ?? false) ||
-      (levels?.regionGapFill?.includes(level) ?? false) ||
-      (levels?.regionOutside?.includes(level) ?? false)) &&
+    ((census === censusRegions && (levels?.region.includes(level) ?? false)) ||
+      (!census && (levels?.regionGapFill?.includes(level) ?? false)) ||
+      (!census && (levels?.regionOutside?.includes(level) ?? false))) &&
     !!name;
   const wikidata = levels?.nameEnFromWikidata ? props?.wikidata : undefined;
   if (!isCity && !isRegion) {
