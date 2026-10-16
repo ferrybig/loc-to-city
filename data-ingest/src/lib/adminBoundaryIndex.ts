@@ -85,7 +85,13 @@ export interface CityCandidateMeta {
 
 export interface RegionCandidate {
   id: string;
+  /** The region's key within its country, joining it to its cities: OSM's
+   * name, or for one of several namesakes `name [id]` (see `localName`). */
   name: string;
+  /** OSM's name, when `name` is not: regions of one country and level that
+   * share a name but lie apart (Poland's `powiat ostrowski` in Masovia and
+   * in Greater Poland) are kept apart under `name [id]` and shown as this. */
+  localName?: string;
   /** OSM's `name:en` tag, when present -- see CityCandidateMeta.nameEn. */
   nameEn: string | undefined;
   /** See CityCandidateMeta.wikidata. */
@@ -119,8 +125,10 @@ export interface AdminBoundaryIndex {
    * list -- `selectRegionLevels` picks the best of just those levels. */
   regionAreaByCountryLevel: Map<string, Map<number, number>>;
   /** Final region polygons, deduped by (country, level, name) -- prefers
-   * the larger bbox on a genuine duplicate/fragmentary match, same rule
-   * `prepare-europe.ts`'s `extractRegionPolygons` already uses. Unlike
+   * the larger bbox on a genuine duplicate/fragmentary match (bboxes that
+   * touch), same rule `prepare-europe.ts`'s `extractRegionPolygons` already
+   * uses; namesakes whose bboxes are apart are all kept, keyed and named
+   * `name [id]` (`RegionCandidate.localName`). Unlike
    * that function, country is resolved directly per relation (via
    * `resolvePolygonCountry`), not reverse-engineered from a pre-resolved
    * cities list -- there is no such list at world scale. Includes every
@@ -265,12 +273,13 @@ export function classifyAdminFeature(
 
 /** Pass 1's in-order half: folds each relation's `AdminFeatureClass` into
  * the index, in corpus order (which decides candidate order and which of
- * two same-named regions wins a tie). */
+ * two same-named, overlapping regions wins a tie). */
 class AdminBoundaryAccumulator {
   readonly cityCandidates: CityCandidateMeta[] = [];
   readonly areaByCountryLevel = new Map<string, Map<number, number>>();
   readonly regionAreaByCountryLevel = new Map<string, Map<number, number>>();
-  readonly regionsByCountryName = new Map<string, RegionCandidate>();
+  /** (country, level, name) -> the relations kept under it, pairwise apart. */
+  private readonly regionsByKey = new Map<string, RegionCandidate[]>();
   readonly diagnostics: AdminBoundaryIndexDiagnostics = { scanned: 0, keptCity: 0, keptRegion: 0, noCountry: 0 };
 
   add(id: string, c: AdminFeatureClass): void {
@@ -319,19 +328,27 @@ class AdminBoundaryAccumulator {
     addArea(this.regionAreaByCountryLevel, country, level, c.area);
     const name = c.name!;
     const key = `${country} ${level} ${name}`;
-    const existing = this.regionsByCountryName.get(key);
-    if (!existing || bboxArea(c.bbox) > bboxArea(existing.bbox)) {
-      this.regionsByCountryName.set(key, {
-        id,
-        name,
-        nameEn: c.nameEn,
-        ...(c.wikidata ? { wikidata: c.wikidata } : {}),
-        country,
-        level,
-        bbox: c.bbox,
-        point: c.regionPoint ?? c.repPoint,
-        feature: c.region,
-      });
+    const candidate: RegionCandidate = {
+      id,
+      name,
+      nameEn: c.nameEn,
+      ...(c.wikidata ? { wikidata: c.wikidata } : {}),
+      country,
+      level,
+      bbox: c.bbox,
+      point: c.regionPoint ?? c.repPoint,
+      feature: c.region,
+    };
+    const kept = this.regionsByKey.get(key);
+    if (!kept) this.regionsByKey.set(key, [candidate]);
+    else {
+      const i = kept.findIndex((r) => bboxesTouch(r.bbox, c.bbox));
+      if (i < 0) kept.push(candidate);
+      else {
+        const [larger, smaller] = bboxArea(c.bbox) > bboxArea(kept[i]!.bbox) ? [candidate, kept[i]!] : [kept[i]!, candidate];
+        console.error(`adminBoundaryIndex: region ${country} ${level} ${name}: ${smaller.id} dropped, overlaps ${larger.id}`);
+        kept[i] = larger;
+      }
     }
     diagnostics.keptRegion++;
   }
@@ -348,12 +365,29 @@ class AdminBoundaryAccumulator {
     const borrowed = (c: { nameEn: string | undefined; wikidata?: string }): string | undefined =>
       c.nameEn ?? (c.wikidata ? this.nameEnByWikidata.get(c.wikidata) : undefined);
     for (const c of this.cityCandidates) c.nameEn = borrowed(c);
-    for (const r of this.regionsByCountryName.values()) r.nameEn = borrowed(r);
+    for (const group of this.regionsByKey.values()) for (const r of group) r.nameEn = borrowed(r);
+  }
+
+  /** One entry per kept region; namesakes apart get `name [id]` keys. */
+  private regionsByCountryName(): Map<string, RegionCandidate> {
+    const regions = new Map<string, RegionCandidate>();
+    for (const [key, group] of this.regionsByKey) {
+      if (group.length === 1) {
+        regions.set(key, group[0]!);
+        continue;
+      }
+      console.error(`adminBoundaryIndex: ${group.length} namesake regions ${key}: ${group.map((r) => r.id).join(", ")}`);
+      for (const r of group) {
+        regions.set(`${key} [${r.id}]`, { ...r, name: `${r.name} [${r.id}]`, localName: r.name });
+      }
+    }
+    return regions;
   }
 
   finish(): AdminBoundaryIndex {
     this.borrowNameEn();
-    const { cityCandidates, areaByCountryLevel, regionAreaByCountryLevel, regionsByCountryName, diagnostics } = this;
+    const regionsByCountryName = this.regionsByCountryName();
+    const { cityCandidates, areaByCountryLevel, regionAreaByCountryLevel, diagnostics } = this;
     console.error(
       `adminBoundaryIndex: done -- ${diagnostics.scanned} scanned, ${diagnostics.keptCity} city candidates, ` +
         `${diagnostics.keptRegion} region matches (${regionsByCountryName.size} unique), ${diagnostics.noCountry} no-country`,
@@ -482,6 +516,10 @@ export function adminBoundaryHandlers(workerData: Partial<AdminBoundaryWorkerDat
       return { result };
     },
   };
+}
+
+function bboxesTouch(a: BBox, b: BBox): boolean {
+  return a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3];
 }
 
 function bboxArea(b: BBox): number {

@@ -609,10 +609,11 @@ below).
 
   No other country's answer changed for any cities500 place of 1,000+.
   Seven capitals resolve: Bissau, Nassau, Willemstad, Gibraltar, The
-  Valley, Majuro, Mata-Utu. Still with no region: Poland (132 places, see
-  Poland), northern Cyprus (13), Western Sahara (4), and single places on
-  a coast or border elsewhere. Bonaire, Saba and Sint Eustatius (10) have
-  their island as region since 2026-10-15 (see Netherlands).
+  Valley, Majuro, Mata-Utu. Still with no region: northern Cyprus (13),
+  Western Sahara (4), and single places on a coast or border elsewhere.
+  Bonaire, Saba and Sint Eustatius (10) have their island as region since
+  2026-10-15 (see Netherlands), Poland's 132 since 2026-10-16 (namesake
+  powiaty, see Poland).
 - **Capitals.** *(open)* `verify/test/world-queries.test.ts` looks up
   the capital of every country and dependency GeoNames lists one for
   (232; `verify/src/cases.ts`'s `CAPITALS` and `OPEN_CAPITALS` tables carry the
@@ -1927,29 +1928,55 @@ worldwide resolved data (`make netherlands`) and
   `gmina ` blindly: it would also hide the 148 town/gmina twins behind
   identical names. Same question for the other "Surrounding rural unit"
   countries.
-- **Whole blocks with a country but no region or city.** *(open)* Seven
-  reported points, all in central/eastern Poland, all returning `Poland`,
-  `region -`, `city -`:
-  51.638902, 17.824631; 51.602666, 20.083008; 52.229377, 17.273254;
-  52.107138, 20.628204; 52.431106, 20.714550; 51.147479, 21.968193;
-  51.137894, 22.846928. The reporter sees city names for these areas on the
-  OSM map, so the polygons exist, which points at a whole region (or a
-  group of powiat/gmina relations) being dropped or mis-assigned before the
-  compressor: either the powiat does not get picked up as a region
-  (and its gminas are dropped by `emitCity`'s "no region, no city" rule), or
-  the relations lack a usable `name`. Untested; first step is to
-  scratch-script the extract at one of these points and read the
-  `admin_level=6` and `7` relations covering it.
+- **Whole blocks with a country but no region or city.** Fixed
+  2026-10-16. Seven reported points in central/eastern Poland returned
+  `Poland`, `region -`, `city -`, as did 132 cities500 places (Czechowice-
+  Dziedzice, 34,703 people, the largest).
 
-  Likely cause (2026-10-13, from names only): regions are keyed by
-  country and name, and Poland repeats powiat names across voivodeships.
-  `regions.geojsonseq` has one `powiat ostrowski` (Ostrów Mazowiecka), and
-  the first point is Ostrów Wielkopolski, whose powiat of the same name is
-  missing; gmina Nowe Skalmierzyce, inside it, has no region. The other
-  points look like powiaty with namesakes too (średzki, tomaszowski,
-  grodziski, nowodworski, opolski, świdnicki). Check that, then key
-  regions by relation id instead of name.
-  (The `world-queries` todo tests encode all seven.)
+  Cause: regions were keyed by (country, level, name), and when two
+  relations shared a key the one with the larger bbox was kept. Poland
+  repeats ten powiat names across voivodeships, so one of each pair was
+  lost, and its gminas were dropped by `emitCity`'s "no region, no city"
+  rule. Nowe Skalmierzyce was not dropped but went to the next region,
+  Kalisz.
+
+  The ten pairs, with the build's relation ids:
+
+  | Name | Relations |
+  |---|---|
+  | powiat bielski | a5606671, a4831575 |
+  | powiat brzeski | a5332339, a5342183 |
+  | powiat grodziski | a673243, a5385077 |
+  | powiat krośnieński | a5327711, a5271315 |
+  | powiat nowodworski | a3106173, a5196693 |
+  | powiat opolski | a5384841, a5323819 |
+  | powiat ostrowski | a5409379, a5368989 |
+  | powiat średzki | a5126187, a903023 |
+  | powiat świdnicki | a5599793, a902721 |
+  | powiat tomaszowski | a5426157, a5379245 |
+
+  Fix: namesakes whose bboxes do not touch are all kept, as
+  `RegionCandidate`s keyed and named `name [id]` throughout ingest. The
+  hierarchy's `regionLocalNames` gives each its OSM name back, so both
+  show as `powiat ostrowski` (their `name:en`, Ostrów Wielkopolski County
+  and Ostrów Mazowiecka County, tells them apart). Same-named relations
+  whose bboxes touch are still treated as duplicates (larger bbox wins),
+  now logged.
+
+  Measured against the previous build:
+  - all 134 changed cities500 places are Polish: the 132 and the two
+    Skalmierzyce places;
+  - Poland has no place without a region left.
+
+  The build splits other namesakes too: MP's Northern Islands Municipality
+  (9 island relations), CN, TN, and ES "Cantabria - Castilla y León",
+  plus NL's two Bergen gemeenten, which are not regions there. None of
+  them changed a cities500 answer.
+
+  Cases: the seven points are fixed cases, each pinned to the English
+  county name that tells its namesake apart. Two more cases cover the
+  other halves: Ostrów Mazowiecka, and Czechowice-Dziedzice in Bielsko
+  County.
 
 - **Poland may be another England.** *(open)* The user's note, with no
   coordinate: the gmina tier probably misses cities that are their own

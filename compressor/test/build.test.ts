@@ -169,3 +169,33 @@ test("a region's international name doesn't affect the region/city join, only it
   assert.deepEqual(await readNameEntry(source, placeTable, 3, streamInflater), ["Shelbyville"]);
   assert.deepEqual(await readNameEntry(source, placeTable, 4, streamInflater), ["Springfield", "Springfield City"]);
 });
+
+test("namesake regions keep their own cities under distinct keys, and both show the shared name", async () => {
+  // Poland has two `powiat ostrowski`: the hierarchy keys them apart, and
+  // regionLocalNames gives both the name OSM uses.
+  const namesakes: HierarchyCountry[] = [
+    {
+      code: "TL",
+      name: "Testland",
+      regions: ["Ostrow [r1]", "Ostrow [r2]"],
+      regionLocalNames: { "Ostrow [r1]": "Ostrow", "Ostrow [r2]": "Ostrow" },
+    },
+  ];
+  const split: FeatureCollection<Polygon, CityProperties> = {
+    type: "FeatureCollection",
+    features: cities.features.map((f) => ({
+      ...f,
+      properties: { ...f.properties, region: f.properties.name === "Springfield" ? "Ostrow [r1]" : "Ostrow [r2]" },
+    })),
+  };
+
+  const { bytes } = buildCGeoDataFile(namesakes, split, options);
+  const reader = await CGeoDataReader.open(bytes);
+  const west = await reader.query(0.5, 0.25);
+  const east = await reader.query(0.5, 1.75);
+  assert.deepEqual(west.city?.names, ["Springfield"]);
+  assert.deepEqual(east.city?.names, ["Shelbyville"]);
+  assert.deepEqual(west.region?.names, ["Ostrow"]);
+  assert.deepEqual(east.region?.names, ["Ostrow"]);
+  assert.notEqual(west.region?.id, east.region?.id);
+});

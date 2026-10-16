@@ -82,7 +82,8 @@ export function buildPlaceIdSpace(
   hierarchy.forEach((country, countryId) => {
     for (const regionName of country.regions) {
       regionOwners.push({ countryCode: country.code, regionName, countryId });
-      nameEntries.push(assembleNameEntry(regionName, country.regionNames?.[regionName]));
+      const localName = country.regionLocalNames?.[regionName] ?? regionName;
+      nameEntries.push(assembleNameEntry(localName, country.regionNames?.[regionName]));
     }
   });
   const totalRegions = regionOwners.length;

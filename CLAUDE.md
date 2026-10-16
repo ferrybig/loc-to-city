@@ -517,6 +517,13 @@ Eustatius, which no province holds). Their towns come from the hole fill on
 those regions only (`VORONOI_CITY_FALLBACK_HOLES_IN`); GeoNames' BQ places are
 read as NL (`GEONAMES_COUNTRY_OF`).
 
+**Namesake regions** (`RegionCandidate.localName`): regions are joined to
+their cities by name, so relations of one country and level that share a
+name but whose bboxes do not touch (Poland's ten pairs of powiaty, e.g. two
+`powiat ostrowski`) are keyed and named `name [id]` throughout ingest, and
+the hierarchy's `regionLocalNames` gives the compressor the name to show.
+Same-named relations whose bboxes touch are duplicates: the larger bbox wins.
+
 **Region hole fill** (`VORONOI_REGION_HOLES`, `regionHoles.ts`): for a country
 whose regions leave populated land out (Bissau, Baku's outer districts,
 Karakalpakstan, Madeira), the cities500 places there get Voronoi cells (every

@@ -20,6 +20,12 @@ export interface HierarchyCountry {
    * side lookup instead of ever replacing it. Absent entirely, or missing
    * a given region's key, both mean "no international name known". */
   regionNames?: Record<string, string>;
+  /** Region key -> the local name to store, for a region whose key in
+   * `regions` is not its name: namesakes in one country (Poland's two
+   * `powiat ostrowski`) need distinct keys to keep their cities apart, but
+   * are both shown as what OSM calls them. Absent means the key is the
+   * name. */
+  regionLocalNames?: Record<string, string>;
 }
 
 export function loadHierarchy(path: string): HierarchyCountry[] {
@@ -32,8 +38,10 @@ export function loadHierarchy(path: string): HierarchyCountry[] {
     if (typeof e.code !== "string" || typeof e.name !== "string" || !Array.isArray(e.regions)) {
       throw new Error(`invalid hierarchy entry: ${JSON.stringify(entry)}`);
     }
-    if (e.regionNames !== undefined && (typeof e.regionNames !== "object" || e.regionNames === null)) {
-      throw new Error(`invalid hierarchy entry: ${JSON.stringify(entry)}`);
+    for (const map of [e.regionNames, e.regionLocalNames]) {
+      if (map !== undefined && (typeof map !== "object" || map === null)) {
+        throw new Error(`invalid hierarchy entry: ${JSON.stringify(entry)}`);
+      }
     }
   }
   return raw as HierarchyCountry[];

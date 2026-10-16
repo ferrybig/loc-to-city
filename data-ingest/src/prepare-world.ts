@@ -406,6 +406,8 @@ async function main(): Promise<void> {
   // local name pairs" item), keyed by the exact same local name used as
   // the join key everywhere else -- see HierarchyCountry.regionNames.
   const regionNamesByCountry = new Map<string, Map<string, string>>();
+  // Region key -> OSM's name, for namesakes (HierarchyCountry.regionLocalNames).
+  const regionLocalNamesByCountry = new Map<string, Map<string, string>>();
   for (const r of finalRegions.values()) {
     let names = regionsByCountry.get(r.country);
     if (!names) {
@@ -420,6 +422,11 @@ async function main(): Promise<void> {
         regionNamesByCountry.set(r.country, intlNames);
       }
       intlNames.set(r.name, r.nameEn);
+    }
+    if (r.localName) {
+      let localNames = regionLocalNamesByCountry.get(r.country);
+      if (!localNames) regionLocalNamesByCountry.set(r.country, (localNames = new Map()));
+      localNames.set(r.name, r.localName);
     }
   }
   const skippedNoRegionByCountry = new Map<string, number>();
@@ -750,11 +757,13 @@ async function main(): Promise<void> {
     .sort(([a], [b]) => byCodeUnits(a, b))
     .map(([code, name]) => {
       const regionNames = regionNamesByCountry.get(code);
+      const regionLocalNames = regionLocalNamesByCountry.get(code);
       return {
         code,
         name,
         regions: [...(regionsByCountry.get(code) ?? [])].sort(byCodeUnits),
         ...(regionNames && regionNames.size > 0 ? { regionNames: Object.fromEntries(regionNames) } : {}),
+        ...(regionLocalNames ? { regionLocalNames: Object.fromEntries(regionLocalNames) } : {}),
       };
     });
   writeFileSync(HIERARCHY_OUT, JSON.stringify(hierarchy));
