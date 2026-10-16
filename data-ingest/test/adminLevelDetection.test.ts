@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Polygon } from "geojson";
+import type { Feature, Polygon } from "geojson";
 import { selectRegionLevels, selectPrimaryLevels, createGapFillTracker, selectWholeUnits, suppressedByWholeUnits } from "../src/lib/adminLevelDetection.ts";
 import type { PrimaryLevelResult } from "../src/lib/adminLevelDetection.ts";
 import type { AdminBoundaryIndex, CityCandidateMeta } from "../src/lib/adminBoundaryIndex.ts";
-import { COUNTRY_ADMIN_LEVELS } from "../src/lib/countryAdminLevels.ts";
+import { classifyAdminFeature } from "../src/lib/adminBoundaryIndex.ts";
+import { COUNTRY_ADMIN_LEVELS, isNotPlace } from "../src/lib/countryAdminLevels.ts";
 import type { CountryIndex } from "../src/lib/countryIndex.ts";
 
 // selectRegionLevels/selectPrimaryLevels read COUNTRY_ADMIN_LEVELS directly
@@ -348,4 +349,18 @@ test("gap-fill: a candidate is judged by a point inside it, not a boundary verte
     tracker.gapFill().map((c) => c.id),
     [bremen.id],
   );
+});
+
+test("NOT_PLACES: the German-Luxembourg condominium is no candidate, by its area id", () => {
+  // Relation 3659532 is osmium's area a7319065 (2 * id + 1); a7319064 would be a way.
+  assert.equal(isNotPlace("a7319065"), true);
+  assert.equal(isNotPlace("a7319064"), false);
+  assert.equal(isNotPlace("a3659532"), false);
+  const condominium = {
+    type: "Feature",
+    id: "a7319065",
+    properties: { admin_level: "6", boundary: "administrative", name: "Condominium Lëtzebuerg-Deutschland" },
+    geometry: { type: "Polygon", coordinates: [[[6.36, 49.49], [6.37, 49.49], [6.37, 49.5], [6.36, 49.5], [6.36, 49.49]]] },
+  } as Feature;
+  assert.equal(classifyAdminFeature(condominium, { lookup: () => "DE" }), null);
 });

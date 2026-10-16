@@ -484,8 +484,9 @@ the representative-point test above drops a district as soon as one parish
 covers its point, however much unparished town it holds (GB: Norwich,
 Winchester). For the levels a country lists there, each candidate carries a
 grid over its bbox that every primary clears where it contains a cell
-centre, and the candidate is added when `MIN_UNCOVERED_KM2` is left. Only GB
-uses it so far. It needs the compressor's max-depth rule (a candidate
+centre, and the candidate is added when `MIN_UNCOVERED_KM2` is left (half of
+itself for a candidate under twice that: Lakshadweep's island taluks). GB,
+BA, BG, IN, LT, PY and SK use it. It needs the compressor's max-depth rule (a candidate
 crossing a cell with >= 25% of it beats one containing it), or the added
 districts take every border cell between the parishes they contain.
 
@@ -586,7 +587,8 @@ change anything else. Only a polygon Natural Earth places nowhere at all
 (a coastal village inland of its coastline, like Ter Heijde; an atoll it
 lacks) is sampled again against the drawn outlines below (`outlineAt`),
 instead of being dropped. Relations tagged `natural=coastline` are never
-candidates (islands with admin tags added). That is which country a
+candidates (islands with admin tags added), nor are the relations in
+`NOT_PLACES` (the German-Luxembourg condominium, border rivers at level 6). That is which country a
 *city or region* belongs to. The country *outlines* the compressor draws are OSM's own
 (`loadOsmCountryRelations`): the `admin_level=2` relation, or a
 dependency's own ISO-tagged relation (Hong Kong, Puerto Rico), territorial

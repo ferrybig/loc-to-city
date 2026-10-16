@@ -82,3 +82,14 @@ test("gap-fill by coverage: a county its districts tile is no city, a unitary au
   const names = trackerFor([county, unitary, east, west]).gapFill().map((c) => c.name);
   assert.deepEqual(names.sort(), ["East", "Portsmouth", "West"]);
 });
+
+test("gap-fill by coverage: an island smaller than the floor is added when it is uncovered", () => {
+  // ~1.2 km^2, under MIN_UNCOVERED_KM2 even when nothing covers it.
+  const island = gbCandidate(8, "Chetlat", [3, 50, 3.01, 50.01], 1.2);
+  const covered = gbCandidate(8, "Reef", [4, 50, 4.01, 50.01], 1.2);
+  const tracker = trackerFor([island, covered]);
+  tracker.observePrimary(gbCandidate(10, "Lagoon", [3.995, 49.995, 4.008, 50.015], 1), () =>
+    square(3.995, 49.995, 4.008, 50.015),
+  );
+  assert.deepEqual(tracker.gapFill().map((c) => c.name), ["Chetlat"]);
+});

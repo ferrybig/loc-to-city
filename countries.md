@@ -635,7 +635,8 @@ below).
   Ibarac (Montenegro), went from Rožaje to its own name; it is a separate
   village of 3,135 next to the town. Five capitals resolve since:
   Yamoussoukro, Djibouti, Banjul, Honiara and Manama.
-  Not done: Delhi, which holds New Delhi and more (see India), Kigali,
+  Not done: Delhi, which holds New Delhi and more (its municipal
+  corporations are the cities since 2026-10-16, see India), Kigali,
   whose districts tile it (Nyarugenge holds the centre), Kanifing, which is
   Serekunda's municipality but not named for it, and Niamey 5.
 - **Territories with no region tier.** Fixed 2026-10-15. A city with no
@@ -740,13 +741,12 @@ below).
     (Maldives); Saipan (N. Mariana Is.); Yaren (Nauru);
     Castries (Saint Lucia); Ljubljana (Slovenia);
     Basseterre (St. Kitts and Nevis)
-  - **A region around it, no city** (19; Manama left on 2026-10-16 with Bahrain's city hole fill; Khartoum and Lomé left on 2026-10-14; Brasília moved on 2026-10-14, see Brazil; Guernsey left on 2026-10-14, it has a city and only the spelling differed): the region is a province,
-    parish or federal district (New Delhi is "Delhi"), and no city covers the point. Washington
+  - **A region around it, no city** (18; New Delhi left on 2026-10-16, see India; Manama left on 2026-10-16 with Bahrain's city hole fill; Khartoum and Lomé left on 2026-10-14; Brasília moved on 2026-10-14, see Brazil; Guernsey left on 2026-10-14, it has a city and only the spelling differed): the region is a province,
+    parish or federal district, and no city covers the point. Washington
     ("District of Columbia") was one and resolves since 2026-10-13
-    (`REGION_CITIES` with a `city` name). New Delhi is not
-    that simple: Delhi holds New Delhi and more.
+    (`REGION_CITIES` with a `city` name).
     Bridgetown (Barbados); Belmopan (Belize); Road Town (British Virgin Is.); Quito (Ecuador); Suva
-    (Fiji); Nuuk (Greenland); Saint George's (Grenada); New Delhi (India); Macau (Macao); Antananarivo
+    (Fiji); Nuuk (Greenland); Saint George's (Grenada); Macau (Macao); Antananarivo
     (Madagascar); Plymouth (Montserrat); Ngerulmud (Palau); Kigali
     (Rwanda); Apia (Samoa); Victoria (Seychelles); Kingstown (St. Vin. and
     Gren.); Tunis
@@ -1412,7 +1412,7 @@ and Yamoussoukro.
   of Bremen (Stadtgemeinde) and Bremerhaven, both enclaves in Lower Saxony,
   plus small exclaves. One of them is Bremen's overseas port area,
   which lies inside Bremerhaven. See
-  https://en.wikipedia.org/wiki/Bremen_(state). OSM matches that: the
+  <https://en.wikipedia.org/wiki/Bremen_(state)>. OSM matches that: the
   Land is `a125437` (level 4), the city of Bremen `a125119` (level 6,
   `place=city`, three parts, port area included), and Bremerhaven
   `a125317` (level 6).
@@ -1453,6 +1453,19 @@ and Yamoussoukro.
   relation of its own (see the entry above).
 - **Border artifacts** on the Dutch, Belgian, Luxembourg and Czech borders.
   Fixed by the OSM country outlines: see "Border artifacts".
+- **The German-Luxembourg condominium was a city.** Fixed 2026-10-16,
+  reported by the user. 49.494277, 6.368744, in the Moselle between
+  Schengen and Perl, answered `region Rheinland-Pfalz`, `city Condominium
+  Lëtzebuerg-Deutschland`, while the cells to its left answered Luxembourg
+  and to its right Saarland. Condominium Lëtzebuerg-Deutschland (relation
+  3659532) is the Moselle, Sauer and Our where they form the border, held
+  by both countries and, in its own `note`, part of no Gemeinde, commune
+  or Kreis. It is tagged `admin_level=6`, Germany's city gap-fill level, so
+  it was a city along the whole border, with the region its point lies in.
+  No tag says it is not a place, and it is the only such relation in the
+  extract, so it is listed by id in `NOT_PLACES` and dropped in Pass 1 like
+  `natural=coastline` islands. The point answers Saarland / Perl now; no
+  cities500 place changed.
 
 ## Guinea (GN)
 
@@ -1480,12 +1493,53 @@ and Yamoussoukro.
 
 ## India (IN)
 
-`region [4]` (100.2%), `city [6]` (97.4%).
+`region [4]` (100.2%), `city [8, 6, 5]`: municipal corporations (8)
+primary, talukas (6, 97.4%) and then districts (5) fill by coverage.
+India has 28 states and 8 union territories, among them the National
+Capital Territory of Delhi; Mumbai is Maharashtra's largest city, Kolkata
+West Bengal's, Ahmedabad and Surat Gujarat's (see
+<https://en.wikipedia.org/wiki/States_and_union_territories_of_India>, and
+<https://en.wikipedia.org/wiki/Delhi#Geography> for Delhi).
 
-- **New Delhi resolves to Delhi only.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 28.62137, 77.2148
-  returns `region Delhi`, `city -`. The user reads it as another London:
-  only the capital is affected. See "A region around it, no city" under
-  "Capitals".
+- **India's municipal corporations were hidden behind talukas.** Fixed
+  2026-10-16. `city [6]` (talukas, tehsils, mandals) was the only tier, so
+  Hyderabad answered `Asif Nagar mandal`, Jaipur `Jaipur Tehsil`, Nagpur
+  `Nagpur Urban Taluka`, and the cities no taluka covers answered only
+  their state: Chennai, Kolkata, New Delhi and Delhi (154 cities500 places
+  with a region and no city, 122 of them in Delhi). OSM has India's urban
+  local bodies at level 8, 84 relations and 10,370 km^2: Chennai
+  Corporation (relation 1766358), Kolkata (9381363), New Delhi (21180662,
+  the NDMC), Delhi (the MCD), Hyderabad, Jaipur Municipal Corporation,
+  Bengaluru's five city corporations, Nagpur City, Thane, Navi Mumbai,
+  Madurai, and Kerala's grama panchayats. Level 9 is 55,092 villages
+  (9%), level 7 blocks in Haryana and Tripura only. The Lithuanian shape:
+  `primaryLevel: 8`, with talukas in `coverageGapFill`, so a taluka shows
+  wherever no corporation is, and districts (5) after them, for land no
+  taluka covers (Mumbai's two districts, Leh). A district the talukas
+  tile is skipped (`finerArea`). 227 places changed, all in India: 147
+  from `city -` to a city, 80 from a taluka to their corporation (Madurai
+  North and South are Madurai, Yelahanka is Bengaluru North City
+  Corporation, Virar is Vasai-Virar). 7 places with no city are left:
+  Surat and Ahmedabad (see below), Kalpeni and four Mizoram villages.
+  New Delhi, the capital, resolves since. Shahdara answering Delhi
+  Cantonment is right for its point: GeoNames puts it at 28.60311,
+  77.13988, inside the cantonment, not in east Delhi.
+  Three Lakshadweep islands lost their city on that build: Amini (2.7
+  km^2), Kiltan (1.8) and Chetlat (1.2) are whole island taluks that no
+  primary covers, but under `MIN_UNCOVERED_KM2` (3 km^2), which applied
+  even to a candidate smaller than the floor. A candidate under twice the
+  floor now needs half of itself uncovered (`minUncoveredKm2`). That
+  changed 4 places worldwide: the three islands, and Linksmakalnis
+  (Lithuania), now in Linksmakalnio seniūnija instead of `city -`.
+- **Mumbai, Ahmedabad, Surat and Pune have no city relation.** *(open)*
+  19.076, 72.8777 (Mumbai) answers `Mumbai Suburban District`, south
+  Mumbai `Mumbai City District`; 23.0225, 72.5714 (Ahmedabad)
+  `SabarmatiTaluka`; 21.1702, 72.8311 (Surat) `Majura Taluka`; 18.5204,
+  73.8567 (Pune) `Pune City Subdistrict`. None of the four has a level-8
+  relation like the other metros. Mumbai's city relations, 7888990 and
+  16173235, have no `admin_level`, so the extract does not have them;
+  Surat's 10029899747 is a node. Ahmedabad and Surat are level-5
+  districts (relations 1953566, 1952514) that their talukas tile.
 
 ## Indonesia (ID)
 
@@ -1858,7 +1912,10 @@ worldwide resolved data (`make netherlands`) and
 
 - **Bonaire, Saba and Sint Eustatius had no region.** Fixed 2026-10-15.
   The Caribbean Netherlands are part of the Netherlands (special
-  municipalities, *openbare lichamen*), and OSM has them inside the
+  municipalities, *openbare lichamen*; see
+  <https://nl.wikipedia.org/wiki/Caribisch_Nederland> and
+  <https://www.centruminternationaalrecht.nl/-/is-er-verschil-tussen-caribisch-nederland-en-het-caribisch-deel-van-het-koninkrijk-der-nederlanden->),
+  and OSM has them inside the
   Netherlands' `admin_level=2` relation, so the country was right; but they
   are in no province (level 4) and have no level-10 woonplaatsen, so all 10
   cities500 places there answered "Netherlands" alone. OSM has each island at

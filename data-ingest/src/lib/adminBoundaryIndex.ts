@@ -1,7 +1,7 @@
 import area from "@turf/area";
 import simplify from "@turf/simplify";
 import type { BBox, Feature, MultiPolygon, Polygon } from "geojson";
-import { COUNTRY_ADMIN_LEVELS } from "./countryAdminLevels.ts";
+import { COUNTRY_ADMIN_LEVELS, isNotPlace } from "./countryAdminLevels.ts";
 import type { CountryIndex } from "./countryIndex.ts";
 import type { LonLat } from "./geo.ts";
 import { CountryPolygonIndex, loadCountryIndex, type PackedCountryPolygons } from "./countryIndex.ts";
@@ -213,6 +213,7 @@ export function classifyAdminFeature(
   // candidates, all of them islands, islets or skerries by name; as a
   // region each became a "province" of its country.
   if (props?.natural === "coastline") return null;
+  if (isNotPlace(feature.id)) return null;
 
   const geometry = feature as Feature<Polygon | MultiPolygon>;
   // Still needed as a point known to lie on the feature (gap-fill and

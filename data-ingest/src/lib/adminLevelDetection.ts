@@ -12,6 +12,13 @@ import { coverGrid, uncoveredKm2 } from "./coverageGrid.ts";
 
 /** Uncovered area (km^2) from which a `coverageGapFill` candidate is added. */
 export const MIN_UNCOVERED_KM2 = 3;
+/** What a `coverageGapFill` candidate must leave uncovered to be added:
+ * `MIN_UNCOVERED_KM2`, or half of itself when it is smaller than twice
+ * that. Lakshadweep's island taluks (Amini 2.7 km^2, Chetlat 1.2) are
+ * uncovered whole and were still under the floor. */
+function minUncoveredKm2(candidate: CityCandidateMeta): number {
+  return Math.min(MIN_UNCOVERED_KM2, candidate.area / 2);
+}
 /** A level-6 county is not a city when finer candidates of the country tile
  * at least this share of its area (by bbox containment, a cheap stand-in). */
 const TILED_BY_FINER_SHARE = 0.5;
@@ -353,7 +360,7 @@ export function createGapFillTracker(
     gapFill() {
       const byPoint = new Set(points.filter((p) => !p.covered).map((p) => p.candidate));
       const byCoverage = new Set(
-        eligibleCoverage.filter((c) => uncoveredKm2(c.coverage!, c.bbox) >= MIN_UNCOVERED_KM2),
+        eligibleCoverage.filter((c) => uncoveredKm2(c.coverage!, c.bbox) >= minUncoveredKm2(c)),
       );
       return index.cityCandidates.filter((c) => byPoint.has(c) || byCoverage.has(c));
     },

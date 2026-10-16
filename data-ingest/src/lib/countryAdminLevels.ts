@@ -579,7 +579,7 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   IE: { region: [6], city: [8, 7] }, // region 101.2%; city 8 (municipal districts) primary, 7 (Dublin, Cork, ...) gap-fills -- 10 was townlands, 51,414 of them
   IL: { region: [5], city: [8] }, // region 100.4%, city 95.7%
   IM: { region: [6], city: [8] }, // region 99.7%, city 99.7%
-  IN: { region: [4], city: [6] }, // region 100.2%, city 97.4%
+  IN: { region: [4], city: [8, 6, 5], primaryLevel: 8, coverageGapFill: [6, 5] }, // municipal corporations (8); talukas (6, 97.4%), then districts (5) fill -- see countries.md
   IQ: { region: [4], city: [7] }, // region 100.6%, city 98.3%
   IR: { region: [4], city: [7] }, // region 105.1%, city 104.4%
   IS: { region: [5], city: [6] }, // region 100.3%, city 100.3%
@@ -841,6 +841,24 @@ export const VORONOI_REGION_HOLES: ReadonlyMap<string, string> = new Map([
   ["TZ", "Tanzania"],
   ["UZ", "Oʻzbekiston"],
 ]);
+
+/** Relations with admin tags that are no region or city, by OSM relation id,
+ * with the reason. Dropped in Pass 1 like `natural=coastline` islands
+ * (`classifyAdminFeature`). Condominium Lëtzebuerg-Deutschland is level 6
+ * in Germany, Germany's city gap-fill level, but it is the Moselle, Sauer
+ * and Our where they form the border, held by both countries and part of no
+ * Gemeinde or commune (its own `note` says so); as a city it took the river
+ * border's cells and named Rheinland-Pfalz as their region, also beside
+ * Saarland. */
+export const NOT_PLACES: ReadonlyMap<number, string> = new Map([
+  [3659532, "Condominium Lëtzebuerg-Deutschland, the German-Luxembourg border rivers"],
+]);
+
+/** Whether an osmium area id (`a<2 * relation id + 1>`) is in `NOT_PLACES`. */
+export function isNotPlace(areaId: string | number | undefined): boolean {
+  const n = typeof areaId === "string" && areaId.startsWith("a") ? Number(areaId.slice(1)) : NaN;
+  return n % 2 === 1 && NOT_PLACES.has((n - 1) / 2);
+}
 
 /** City-states: a country that is one city, so a lookup in it should read
  * `Monaco / Monaco / Monaco`, not `Monaco / - / -` -- someone filtering on
