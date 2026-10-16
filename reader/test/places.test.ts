@@ -74,6 +74,27 @@ test("placeIds(id) is place(id)'s level and ids without the names", async () => 
 	assert.throws(() => reader.placeIds(7), RangeError);
 });
 
+test("childCount(id) is the place table's count under that place", async () => {
+	// Appendix A.3: region_counts 1 1, city_counts 2 1; a city has none.
+	assert.deepEqual(
+		[0, 1, 2, 3, 4, 5, 6].map((id) => reader.childCount(id)),
+		[1, 1, 2, 1, 0, 0, 0],
+	);
+	for (let id = 0; id < 7; id++) {
+		const level = reader.placeIds(id).level;
+		if (level === "city") continue;
+		const children = await collect(
+			reader.places(
+				level === "country"
+					? { level: "region", country: id }
+					: { level: "city", region: id },
+			),
+		);
+		assert.equal(reader.childCount(id), children.length);
+	}
+	assert.throws(() => reader.childCount(7), RangeError);
+});
+
 test("query() is lookup() plus the place's names", async () => {
 	// Appendix A's lookups: Zaandam (5), Noord-Holland (2), and three unknowns.
 	for (const [lat, lon, placeId] of [
