@@ -76,7 +76,9 @@ export interface CityCandidateMeta {
   area: number;
   repPoint: LonLat;
   /** Set when `repPoint` is a boundary vertex: a point strictly inside,
-   * which region assignment uses instead (see `interiorPoint`). */
+   * which region assignment and the gap-fill and whole-unit coverage tests
+   * use instead (see `interiorPoint`, and `insidePoint` in
+   * adminLevelDetection.ts). */
   regionPoint?: LonLat;
   bbox: BBox;
   /** Only for a level in the country's `coverageGapFill`. */

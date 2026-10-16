@@ -2,6 +2,7 @@ import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import RBush from "rbush";
 import type { Feature, MultiPolygon, Polygon } from "geojson";
 import type { AdminBoundaryIndex, CityCandidateMeta } from "./adminBoundaryIndex.ts";
+import type { LonLat } from "./geo.ts";
 import { COUNTRY_ADMIN_LEVELS } from "./countryAdminLevels.ts";
 import type { CountryIndex } from "./countryIndex.ts";
 import { splitOsmiumFeature } from "./geojsonseqStream.ts";
@@ -236,6 +237,16 @@ export interface GapFillTracker {
  * that region's own primary set, never a peer region's or the country's.
  * A candidate at a plain country-level (never listed in any override) is
  * never affected by this check. */
+/** The point a coverage test checks a candidate by: strictly inside it.
+ * `repPoint` can be a boundary vertex, which a neighbour on the other side
+ * contains too (point-in-polygon counts the boundary), and then covered
+ * the candidate: Bremen's vertex on the Lesum is Ritterhude's too, and
+ * that level-8 Lower Saxony municipality kept Bremen's level-6 city out
+ * of the gap-fill. */
+function insidePoint(candidate: CityCandidateMeta): LonLat {
+  return candidate.regionPoint ?? candidate.repPoint;
+}
+
 export function createGapFillTracker(
   index: AdminBoundaryIndex,
   primary: PrimaryLevelResult,
@@ -273,7 +284,7 @@ export function createGapFillTracker(
       coverageCandidates.push(candidate);
       continue;
     }
-    const [x, y] = candidate.repPoint;
+    const [x, y] = insidePoint(candidate);
     points.push({ minX: x, minY: y, maxX: x, maxY: y, candidate, covered: false });
   }
 
@@ -330,12 +341,13 @@ export function createGapFillTracker(
       // an index.
       const polygon = geometry();
       if (open.length === 1) {
-        if (booleanPointInPolygon(open[0]!.candidate.repPoint, polygon)) open[0]!.covered = true;
+        if (booleanPointInPolygon(insidePoint(open[0]!.candidate), polygon)) open[0]!.covered = true;
         return;
       }
       const prepared = preparePolygon(polygon);
       for (const point of open) {
-        if (prepared.contains(point.candidate.repPoint[0], point.candidate.repPoint[1])) point.covered = true;
+        const [x, y] = insidePoint(point.candidate);
+        if (prepared.contains(x, y)) point.covered = true;
       }
     },
     gapFill() {
@@ -414,9 +426,9 @@ export function selectWholeUnits(
 
 /** Ids of primary candidates to drop because a `wholeUnits` relation
  * contains them: every primary candidate of the same country, at any other
- * level, whose representative point lies inside a whole unit. Only the
+ * level, whose point (`insidePoint`) lies inside a whole unit. Only the
  * units' own geometry is needed -- the candidates are tested by the
- * representative point their metadata already carries. */
+ * point their metadata already carries. */
 export function suppressedByWholeUnits(
   index: AdminBoundaryIndex,
   primary: PrimaryLevelResult,
@@ -430,10 +442,10 @@ export function suppressedByWholeUnits(
     for (const unit of units) {
       if (unit.candidate.country !== candidate.country || unit.candidate.id === candidate.id) continue;
       if (unit.candidate.level === candidate.level) continue;
-      const [x, y] = candidate.repPoint;
+      const [x, y] = insidePoint(candidate);
       const [minX, minY, maxX, maxY] = unit.candidate.bbox;
       if (x < minX || x > maxX || y < minY || y > maxY) continue;
-      if (booleanPointInPolygon(candidate.repPoint, unit.geometry)) {
+      if (booleanPointInPolygon([x, y], unit.geometry)) {
         suppressed.add(candidate.id);
         break;
       }

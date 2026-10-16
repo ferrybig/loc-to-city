@@ -597,8 +597,9 @@ below).
   - **Not covered here**: Bremen itself has Bremerhaven, so it is not
     childless. The second check is a region that has cities but whose own
     `locate` point resolves to none (245 regions; Bremen is one, 1012 at
-    53.1251, 8.7465). It is noisier, since the point can fall between cities.
-    Not triaged; the largest groups are the United States 37, Uruguay 18,
+    53.1251, 8.7465, which resolves since 2026-10-16, see Germany's
+    "Bremen does not resolve on the current builds."). It is noisier,
+    since the point can fall between cities. Not triaged; the largest groups are the United States 37, Uruguay 18,
     Indonesia 14, Thailand 11, Montenegro 9, Panama 8.
   Cases: Kranj and Izola are in `verify/src/cases.ts` as open. Abidjan,
   Cetinje, Paphos, Rason and Ménaka resolve since 2026-10-16 (next entry).
@@ -1403,25 +1404,46 @@ and Yamoussoukro.
   (not Körrig, not Südlingen), Wadern (not Lockweiler) and Morbach (not
   Morscheid-Riedenburg) resolve to the town on `world-high-res.bin`;
   spot-checks in `verify/src/cases.ts`.
-- **Bremen does not resolve on the current builds.** *(open)* 53.079296,
-  8.801694 returns `region Bremen`, `city -`, and
-  `data/02-resolved/world/cities-filtered.geojsonseq` (built 2026-10-09
-  13:00) has no German feature named `Bremen`. `world-high-res.bin`
-  (2026-10-10) and `world-e8-d9.bin` agree because both were compressed from
-  that input; `world.bin` is not present in this checkout (the other
-  worktree's, from 2026-09-28, predates the fix). Same symptom as Reading,
-  Brighton, Bristol and Terrace, all gap-fill or otherwise missing entries;
-  Guelph (level-6 gap-fill) and Westminster (level-8 gap-fill) are present.
+- **Bremen does not resolve on the current builds.** Fixed 2026-10-16.
+  53.079296, 8.801694 returned `region Bremen`, `city -`, and no German
+  city named `Bremen` reached `cities-filtered.geojsonseq`.
 
-  **Not established:** whether this is a regression, or just a resolved
-  input built before the code that fixes it. The input is only one minute
-  older than the last merge touching `data-ingest` (`337f74e`), which is not
-  conclusive. To tell: re-run `prepare-world.ts` with the current code and
-  check whether `Bremen` appears (a full run, see PIPELINE-STAGES.md), or
-  scratch-script the extract for the level-6 relation first. If it is a
-  regression, candidates to bisect are `20eba2c` (stream primaries instead
-  of batching), `9c6a89a` (OSM country borders) and `15fb005` (UK/Ireland
-  grain). Rebuild before trusting any "regressed" label here.
+  The state of Bremen is two cities with the state around them: the city
+  of Bremen (Stadtgemeinde) and Bremerhaven, both enclaves in Lower Saxony,
+  plus small exclaves. One of them is Bremen's overseas port area,
+  which lies inside Bremerhaven. See
+  https://en.wikipedia.org/wiki/Bremen_(state). OSM matches that: the
+  Land is `a125437` (level 4), the city of Bremen `a125119` (level 6,
+  `place=city`, three parts, port area included), and Bremerhaven
+  `a125317` (level 6).
+
+  Not a regression, and not a missing relation: the level-6 gap fill
+  dropped it. A gap-fill candidate was tested by its `repPoint`, which for a
+  polygon whose bbox midpoint is outside it (Bremen's bbox reaches up to
+  the port area) is the nearest boundary vertex. Bremen's vertex,
+  53.18549, 8.69942, is on the Lesum, on the border with Ritterhude, a
+  level-8 Lower Saxony municipality that contains the vertex too. So
+  Bremen counted as covered by a primary. Region assignment had the same
+  flaw and already used a strictly interior point (`regionPoint`); the
+  gap-fill and `wholeUnits` coverage tests use it now as well
+  (`insidePoint` in `adminLevelDetection.ts`, with a test).
+
+  Measured against the previous build: 17 cities500 answers changed, all
+  for the better:
+  - Bremen, Vegesack and Burglesum (`city -` -> Bremen). Bremen's port
+    area in Bremerhaven, 53.585, 8.545, answers Bremen, and Bremerhaven
+    still answers Bremerhaven.
+  - Nuremberg (515,543), Wetzendorf and Großreuth bei Schweinau
+    (`city -` -> Nürnberg), and Landau in der Pfalz: two more German
+    `kreisfreie Städte` with the same vertex problem.
+  - Pļaviņas, Ilūkste and Ādaži (Latvia), Matagami (`city -` -> itself).
+  - Buffalo Narrows and White City (Saskatchewan): their own municipality
+    instead of the rural unit around it. Varadero: itself instead of
+    Cárdenas. Hornell (`city -` -> City of Hornell), and Munsons Corners
+    and Cortland West (`city -` -> Town of Cortlandville).
+
+  The `world-queries` case now passes, and a Nuremberg case pins the
+  second city.
 - **Berlin and Hamburg are regions with no city.** 52.520008,
   13.404954 and 53.551086, 9.993682. Confirmed: neither has a second,
   lower-level relation anywhere in the German extract, unlike Bremen.

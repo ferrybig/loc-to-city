@@ -329,3 +329,23 @@ test("whole units: Welsh Cardiff is promoted to primary and its communities are 
   );
   assert.deepEqual([...suppressed], ["castle"]);
 });
+
+test("gap-fill: a candidate is judged by a point inside it, not a boundary vertex a neighbour shares", () => {
+  // Bremen: its representative point is a vertex on the border with
+  // Ritterhude, a level-8 primary, which contains that vertex too. Its
+  // inside point is in no primary, so it is gap-filled.
+  const bremen = {
+    ...fakeCandidate("DE", 6, 100),
+    repPoint: [1, 0] as [number, number],
+    regionPoint: [0.5, 0] as [number, number],
+  };
+  const ritterhude = { ...fakeCandidate("DE", 8, 5), bbox: [1, -1, 2, 1] as [number, number, number, number] };
+  const index = fakeIndex({ cityCandidates: [bremen, ritterhude] });
+  const primary: PrimaryLevelResult = { primaryLevelByCountry: new Map([["DE", 8]]), primaryIds: new Set([ritterhude.id]) };
+  const tracker = createGapFillTracker(index, primary);
+  tracker.observePrimary(ritterhude, () => square(1, -1, 2, 1));
+  assert.deepEqual(
+    tracker.gapFill().map((c) => c.id),
+    [bremen.id],
+  );
+});

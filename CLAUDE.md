@@ -631,7 +631,9 @@ fetches just the gap-fill cities. Both reads skip unwanted records by an
 id peeked off the raw bytes (`geojsonseqStream.ts`'s
 `streamGeoJSONSeqRecords`/`peekFeatureId`), so only Pass 1 parses the
 whole corpus. A primary only counts as covering a gap-fill candidate of
-its own country.
+its own country, and covers it by a point strictly inside the candidate
+(`insidePoint`): its `repPoint` can be a boundary vertex the neighbour
+shares, which kept Bremen and Nuremberg out.
 
 **`prepare-world.ts` runs on worker threads, with byte-identical output.**
 A worldwide run takes ~2.5 minutes on 16 cores (it was ~20). Three kinds
