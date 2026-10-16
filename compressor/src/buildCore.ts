@@ -87,6 +87,7 @@ export function prepareBuild(
     globalId,
     shape: "shape" in city ? city.shape : packFeature(city),
     ancestorIds: placeIds.cityAncestors.get(globalId) ?? [],
+    ...(city.properties.gapFill === true ? { gapFill: true } : {}),
   }));
   const candidateIndex = new CandidateIndex([...regionCountryCandidates, ...cityCandidates]);
 

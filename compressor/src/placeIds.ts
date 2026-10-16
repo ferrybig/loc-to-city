@@ -12,6 +12,11 @@ export interface CityProperties {
   nameEn?: string;
   region: string;
   country: string;
+  /** Added by data-ingest's gap-fill from a coarser level than the
+   * country's primary city level (India's talukas around its corporations),
+   * to name what the primaries leave: it never takes a cell a primary city
+   * contains (quadtree.ts's `preferred`). */
+  gapFill?: boolean;
   [key: string]: unknown;
 }
 

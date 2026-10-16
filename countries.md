@@ -639,6 +639,66 @@ below).
   corporations are the cities since 2026-10-16, see India), Kigali,
   whose districts tile it (Nyarugenge holds the centre), Kanifing, which is
   Serekunda's municipality but not named for it, and Niamey 5.
+- **Overlapping cities traded cells.** Fixed 2026-10-16, reported by the
+  user at Hyderabad: tiny enclave-like pieces of one city scattered inside
+  another. Found with `verify/src/islands.ts`, which counts the separate
+  pieces (edge-connected cells) of every place and ranks places by those
+  times the pieces of their most broken-up neighbouring city. One piece is
+  normal, 2-4 an enclave or a sliver touching at a corner (Den Haag 2,
+  Uikhoven 3, Khudail Tahsil 4, Baarle-Hertog 7 against Baarle-Nassau 3);
+  above ~50, two polygons lie on top of each other. Hyderabad had 203:
+  India's talukas tile whole districts, the corporations included, so the
+  gap-fill mandals around Hyderabad (Patancheruvu, Alwal, Balanagar,
+  Rajendranagar, ...) reach into the corporation, and in the overlap the
+  smaller polygon won each cell. Their edges are drawn from different
+  sources, so the overlap is a ragged band and every cell along it could
+  go either way. The cause is general: a gap-fill city from a *coarser*
+  level than the primaries names what they leave, never land a primary
+  holds. prepare-world now marks those (`CityProperties.gapFill`: a
+  gap-fill city whose level is below its country's, or its region
+  override's, primary level), and the compressor's `preferred` ranks them
+  after every other candidate, and does not let one win a max-depth border
+  cell a primary city contains. A gap-fill city from a *finer* level is a
+  real place a coarser primary overlaps (Varadero, level 8, in Cárdenas, 6)
+  and is not marked: marking every gap-fill city lost Varadero to Cárdenas.
+  50 cities500 places changed, all gains: 44 in India (Chennai's suburbs
+  from their taluk to Chennai Corporation, Secunderabad and Malkajgiri to
+  Hyderabad, Joka to Kolkata) and six New York villages that had lost to
+  their town (Ballston Spa, Gowanda, Sag Harbor, Black River, Earlville,
+  Middleville). Pieces: Hyderabad 203 -> 7, Chennai Corporation 127 -> 1,
+  Kolkata 111 -> 4, Sitarganj 70 -> 1, Town of North Hempstead 39 -> 19;
+  1,662 fewer pieces in 197 places, 107 more in 19, mostly the mandals now
+  cut along the corporation's edge, and Kolkata district (level 5, a
+  gap-fill city of its own), 11 -> 39, now only the slivers where its
+  outline sticks out past the corporation's. Such a district is the city
+  drawn twice, so a coarser gap-fill city named like a primary it overlaps
+  (local or English name) that is at least half its size is dropped
+  (prepare-world, "drawn again" in the log): Kolkata and Chennai districts,
+  no answer changed. Tried first and reverted: not counting uncovered land
+  within 200 m of a primary (an eroded coverage grid). It cannot tell
+  Kolkata district's slivers (3.69 km^2 left at 50-150 m) from Coalville's
+  unparished town in North West Leicestershire (3.45 km^2), on grids of
+  ~200 m cells, and lost Coalville its city.
+- **Border artifacts found by the island count.** *(open)* Ranked by
+  `verify/src/islands.ts` on 2026-10-16 (after "Overlapping cities traded
+  cells") and checked on the map by the user, all true positives: Tāzirbū
+  (26.243694, 18.601570, a horizontal slice), Fada, Al Jawf and Ounianga
+  Kébir (19.660694, 23.649101, a vertical slice), Bilma (20.766186,
+  15.573978), Idrī, Debdeb, In Amenas, Teseney, Wagar, Assab, Central
+  Tigray and Semien Mi'irabawi Zone, Goz Beida, Léré, Bardaï, Rey-Bouba,
+  Abéché, Guéréda; Slovenia's Sevnica, Šentjur, Litija, Ljubljana and
+  Brežice (66 pieces, next to Krško's 102). Most are borders where one
+  side is synthesized Voronoi cities (Libya, Chad, Eritrea, Niger and
+  their neighbours) or Slovenia's Voronoi regions. Capital Region Rural
+  District (New Brunswick) is a large rural polygon in the city slot that
+  the towns inside it cut into pieces, with artifacts at 45.828500,
+  -66.457157 and 45.690113, -66.395187. There it borders 5th Canadian
+  Division Support Base - Gagetown, also level 6, and the two outlines'
+  shared edge is drawn differently, so cells along it alternate; the
+  marking above does not separate two gap-fill cities of one level. OSM
+  also still has the parishes the 2023 reform replaced, at level 8
+  (Burton Parish, Petersville Parish). Every place scoring above ~21,000
+  that was checked is a true positive; between 10 and 20 pieces most are not.
 - **Territories with no region tier.** Fixed 2026-10-15. A city with no
   region is dropped (`emitCity`), so a country configured `region: []`
   lost every city it had unless it was in `CITY_STATES`. Thirteen were
@@ -2396,6 +2456,22 @@ worldwide resolved data (`make netherlands`) and
 - **Sejong had no city.** `세종특별자치시` is a level-4 special city with
   level-8 dong inside and nothing at level 6. Fixed 2026-10-16 by
   `REGION_CITIES`. See "Regions that are one town had no city" (Cross-cutting patterns).
+
+## Sri Lanka (LK)
+
+`region [4]` (146.5%, territorial waters included), `city [5]`: the 25
+districts.
+
+- **Colombo answers Colombo District.** *(open)* Reported 2026-10-16 by the
+  user. 6.927811, 79.862537 returns `region Western Province`, `city Colombo
+  District`; it should be Colombo. The capitals check passes anyway, since
+  `Colombo` is a whole word of `Colombo District` (`namedFor`), so this one
+  is a case with the exact name. OSM has Colombo at level 8 (relation 16132,
+  Colombo Municipal Council, 46.8 km^2), but level 8 holds only a handful of
+  towns (Colombo, Galle, Matara, Weligama, Moragolla), and level 6 only 15
+  divisions (1,698 km^2). Likely fix: the India shape, level 8 primary with
+  the districts filling by coverage (`primaryLevel: 8`, `coverageGapFill:
+  [5]`).
 
 ## Sudan (SD)
 

@@ -83,3 +83,36 @@ test("a district holding two parishes does not take their border cells", () => {
   assert.equal(cellOf(3, 1), 22);
   assert.equal(cellOf(2, 3), 20, "the district keeps the land no parish covers");
 });
+
+test("a gap-fill city takes no cell a primary city contains, not even along its own edge", () => {
+  // A corporation (30) and a smaller mandal (31) that reaches into it, drawn
+  // from another source (Hyderabad). The mandal's west edge, x = 1.51, lies
+  // inside a depth-6 cell that the corporation contains whole.
+  const mandal = (gapFill: boolean): CandidateEntry => ({
+    globalId: 31,
+    shape: packFeature(square(1.51, 0.5, 4, 2.5)),
+    ancestorIds: [1, 0],
+    ...(gapFill ? { gapFill: true } : {}),
+  });
+  const corporation: CandidateEntry = { globalId: 30, shape: packFeature(square(0, 0, 3.01, 3)), ancestorIds: [1, 0] };
+  const cellsOf = (mandalIsGapFill: boolean) => {
+    const candidates = new CandidateIndex([entries[0]!, entries[1]!, corporation, mandal(mandalIsGapFill)]).candidatesForBbox(0, 0, 4, 4);
+    const records = buildChunkRecords(candidates, bounds, 6);
+    return (lon: number, lat: number) => {
+      const x = Math.floor((lon / 4) * 64);
+      const y = Math.floor((lat / 4) * 64);
+      return records.find((r) => {
+        const { x: cx, y: cy } = mortonDecode(r.code, 6);
+        const size = 2 ** (6 - r.depth);
+        return x >= cx && x < cx + size && y >= cy && y < cy + size;
+      })!.globalId;
+    };
+  };
+  const before = cellsOf(false);
+  assert.equal(before(2, 1), 31, "two primaries: the smaller wins the overlap");
+  const after = cellsOf(true);
+  assert.equal(after(2, 1), 30, "the overlap stays the corporation's");
+  assert.equal(after(1.52, 1), 30, "so does the cell the mandal's edge crosses inside it");
+  assert.equal(after(3.5, 1), 31, "the mandal names the land outside the corporation");
+  assert.equal(after(3.03, 1), 31, "and the corporation's edge cell, where it holds under a quarter");
+});

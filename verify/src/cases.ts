@@ -1586,6 +1586,16 @@ export const CASES: Case[] = [
 		section: "Germany",
 		entry: "The German-Luxembourg condominium was a city.",
 	},
+	{
+		name: "Colombo is a city, not Colombo District",
+		at: [6.927811, 79.862537],
+		country: "Sri Lanka",
+		region: "Western Province",
+		city: "Colombo",
+		status: "open",
+		section: "Sri Lanka",
+		entry: "Colombo answers Colombo District.",
+	},
 ];
 
 // ---- Capitals ----

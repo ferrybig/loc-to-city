@@ -28,7 +28,16 @@ function pruneAncestors(candidates: IndexedCandidate[]): IndexedCandidate[] {
   return candidates.filter((c) => !ancestorIds.has(c.globalId));
 }
 
-/** Of two candidates equally good for a cell, the one that gets it: the
+/** A city's ancestors are its region and country. */
+function isCity(candidate: IndexedCandidate): boolean {
+  return candidate.ancestorIds.length === 2;
+}
+
+/** Of two candidates equally good for a cell, the one that gets it: not a
+ * gap-fill city (`CityProperties.gapFill`: it names what primary cities
+ * leave, so where it overlaps one, the primary keeps the cell; drawn from
+ * other sources, their shared edges otherwise trade cells back and forth,
+ * Hyderabad and the mandals around it), then the
  * smaller, then (for identical polygons, which only differ in this) the
  * finer tier -- a city over a region over a country -- then the lower
  * global id (cities in a region are numbered by their `id` property, OSM's
@@ -40,6 +49,7 @@ function pruneAncestors(candidates: IndexedCandidate[]): IndexedCandidate[] {
  * flipped between builds for no reason (countries.md, "Capitals that are
  * their own region"). */
 function preferred(a: IndexedCandidate, b: IndexedCandidate): IndexedCandidate {
+  if (a.gapFill !== b.gapFill) return a.gapFill ? b : a;
   if (a.area !== b.area) return a.area < b.area ? a : b;
   if (a.ancestorIds.length !== b.ancestorIds.length) return a.ancestorIds.length > b.ancestorIds.length ? a : b;
   return a.globalId <= b.globalId ? a : b;
@@ -158,8 +168,14 @@ export function buildChunkRecords(
     let best: IndexedCandidate | undefined;
     let bestScore = -1;
     const crossing = relevant.filter((candidate) => !containsCell.has(candidate.globalId));
+    // Except a gap-fill city's border inside a primary city: that is where
+    // the two overlap, and the primary keeps it (`preferred`).
+    const primaryCityContains = relevant.some(
+      (candidate) => containsCell.has(candidate.globalId) && isCity(candidate) && !candidate.gapFill,
+    );
     if (crossing.length < relevant.length) {
       for (const candidate of crossing) {
+        if (primaryCityContains && candidate.gapFill) continue;
         const score = countContainedSamples(candidate.geometry, bounds);
         if (score < CROSSING_MIN_SHARE * AREA_SHARE_SAMPLE_COUNT) continue;
         if (score > bestScore || (score === bestScore && preferred(candidate, best!) === candidate)) {

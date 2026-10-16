@@ -454,8 +454,14 @@ encodes the resulting records → `writer.ts` assembles the final buffer.
 lands — not batched until the end, which matters for progress reporting on
 a big build.
 Candidate array order is not significant: every pick in `quadtree.ts`
-goes through `preferred` (smaller area, then finer tier, then lower
-global id), a total order. It used to be first-in-array-wins, which made
+goes through `preferred` (not a gap-fill city, then smaller area, then
+finer tier, then lower global id), a total order. A gap-fill city from a
+coarser level than its country's primary one (`CityProperties.gapFill`, set
+by prepare-world; a finer one, like Varadero in Cárdenas, is a real place
+and is not marked) also never wins a border
+cell at max depth that a primary city contains: where the two overlap, the
+primary keeps it, or their differently drawn edges trade cells (Hyderabad
+and its mandals; `verify/src/islands.ts` counts the pieces). It used to be first-in-array-wins, which made
 the few hundred OSM relations with identical geometry flip between builds
 whenever any candidate was added, since that reorders the R-tree's
 search results. Keep it a total order.

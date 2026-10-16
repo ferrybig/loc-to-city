@@ -28,6 +28,8 @@ export interface CandidateEntry {
   globalId: number;
   shape: PackedShape;
   ancestorIds: number[];
+  /** A city added by data-ingest's gap-fill (`CityProperties.gapFill`). */
+  gapFill?: boolean;
 }
 
 export interface IndexedCandidate {
@@ -39,6 +41,7 @@ export interface IndexedCandidate {
   geometry: PackedGeometry;
   area: number;
   ancestorIds: number[];
+  gapFill: boolean;
 }
 
 /** bbox-based candidate lookup (the STRtree-equivalent from the Python
@@ -48,9 +51,9 @@ export class CandidateIndex {
   private readonly tree = new RBush<IndexedCandidate>();
 
   constructor(entries: CandidateEntry[]) {
-    const items: IndexedCandidate[] = entries.map(({ globalId, shape, ancestorIds }) => {
+    const items: IndexedCandidate[] = entries.map(({ globalId, shape, ancestorIds, gapFill = false }) => {
       const [minX, minY, maxX, maxY] = shape.bbox;
-      return { minX, minY, maxX, maxY, globalId, geometry: shape.geometry, area: shape.area, ancestorIds };
+      return { minX, minY, maxX, maxY, globalId, geometry: shape.geometry, area: shape.area, ancestorIds, gapFill };
     });
     this.tree.load(items);
   }

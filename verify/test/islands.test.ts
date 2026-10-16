@@ -108,3 +108,14 @@ test("a corner touch across chunks does not join", () => {
 	const upperJoined = scanChunk(chunkOf(["....", "....", "....", "...A"]), D);
 	assert.equal(combineIslands([lower, upperJoined], 1).get(A)?.islands, 1);
 });
+
+test("places sharing an edge are neighbours, inside a chunk and across a border", () => {
+	const left = scanChunk(chunkOf(["AAAB", "AAAB", "....", "...."]), D);
+	const right = scanChunk(chunkOf(["C...", "C...", "....", "...."]), D);
+	const places = combineIslands([left, right, undefined, undefined], 2);
+	assert.deepEqual(places.get(A)?.neighbours.sort(), [B]);
+	assert.deepEqual(
+		places.get(B)?.neighbours.sort(),
+		[A, "C".charCodeAt(0)].sort(),
+	);
+});

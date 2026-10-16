@@ -504,17 +504,17 @@ async function main(): Promise<void> {
   // them (UG's Bugisa sub-region spans five districts, Mbale City among
   // them): it is dropped, and the fill names its land.
   const realCitiesByCountry = new Map<string, RealCity[]>();
-  const emitReal = async (candidate: CityCandidateMeta, geometryJson: string): Promise<boolean> => {
+  const emitReal = async (candidate: CityCandidateMeta, geometryJson: string, gapFill = false): Promise<boolean> => {
     const only = VORONOI_CITY_FALLBACK_HOLES_IN.get(candidate.country);
-    if (!VORONOI_CITY_FALLBACK_HOLES.has(candidate.country) && !only) return emitCity(candidate, geometryJson);
+    if (!VORONOI_CITY_FALLBACK_HOLES.has(candidate.country) && !only) return emitCity(candidate, geometryJson, gapFill);
     const region = regionOf(candidate);
-    if (only && !(region && only.includes(region))) return emitCity(candidate, geometryJson);
+    if (only && !(region && only.includes(region))) return emitCity(candidate, geometryJson, gapFill);
     const geometry = JSON.parse(geometryJson) as Polygon | MultiPolygon;
     if (region && shareInOtherRegions(geometry, candidate.bbox, candidate.country, region, regionIndex) > 0.5) {
       console.error(`  hole fill: ${candidate.country} ${candidate.name} (${candidate.id}) lies mostly in other regions, dropped`);
       return false;
     }
-    if (!(await emitCity(candidate, geometryJson))) return false;
+    if (!(await emitCity(candidate, geometryJson, gapFill))) return false;
     let real = realCitiesByCountry.get(candidate.country);
     if (!real) realCitiesByCountry.set(candidate.country, (real = []));
     real.push({ bbox: candidate.bbox, geometry });
@@ -542,11 +542,60 @@ async function main(): Promise<void> {
 
   console.error("Pass 3/4: gap-fill geometry...");
   const gapFillById = new Map<string, CityCandidateMeta>();
-  for (const candidate of tracker.gapFill()) gapFillById.set(candidate.id, candidate);
+  // A gap-fill city from a coarser level than its primaries (a taluka
+  // around India's corporations, a New York town around its villages) names
+  // what they leave, so the compressor gives a cell both contain to the
+  // primary (`CityProperties.gapFill`). One from a finer level is a real
+  // place that a coarser primary merely overlaps (Varadero in Cárdenas),
+  // and keeps the smaller-wins rule.
+  const primaryLevelFor = (candidate: CityCandidateMeta): number | undefined => {
+    const overrides = COUNTRY_ADMIN_LEVELS[candidate.country]?.overrides;
+    const region = overrides ? resolveCandidateRegion(candidate) : null;
+    return (region ? overrides?.[region]?.[0] : undefined) ?? primary.primaryLevelByCountry.get(candidate.country);
+  };
+  const isCoarserFill = (candidate: CityCandidateMeta): boolean => {
+    const level = primaryLevelFor(candidate);
+    return level !== undefined && candidate.level < level;
+  };
+  // A coarser gap-fill city named like a primary at least half its size that
+  // it overlaps is that city drawn twice (Kolkata district around the
+  // Kolkata corporation, Hyderabad's and Chennai's districts): it would name
+  // only the slivers where its outline sticks out past the primary's.
+  const primariesByName = new Map<string, CityCandidateMeta[]>();
+  for (const p of tracker.primaryById.values()) {
+    for (const name of new Set([p.name, p.nameEn])) {
+      if (!name) continue;
+      const key = `${p.country}\t${name}`;
+      const list = primariesByName.get(key);
+      if (list) list.push(p);
+      else primariesByName.set(key, [p]);
+    }
+  }
+  const duplicateOf = (c: CityCandidateMeta): CityCandidateMeta | undefined => {
+    for (const name of new Set([c.name, c.nameEn])) {
+      if (!name) continue;
+      const found = primariesByName.get(`${c.country}\t${name}`)?.find(
+        (p) =>
+          p.area >= c.area / 2 &&
+          p.bbox[0] < c.bbox[2] && c.bbox[0] < p.bbox[2] && p.bbox[1] < c.bbox[3] && c.bbox[1] < p.bbox[3],
+      );
+      if (found) return found;
+    }
+    return undefined;
+  };
+  for (const candidate of tracker.gapFill()) {
+    const duplicate = isCoarserFill(candidate) ? duplicateOf(candidate) : undefined;
+    if (duplicate) {
+      console.error(`  gap-fill: ${candidate.country} ${candidate.name} (${candidate.id}) is primary ${duplicate.id} drawn again, dropped`);
+      continue;
+    }
+    gapFillById.set(candidate.id, candidate);
+  }
   console.error(`  ${gapFillById.size.toLocaleString()} gap-fill cities`);
 
   for await (const { id, geometryJson } of streamGeometries(files, gapFillById)) {
-    if (await emitReal(gapFillById.get(id)!, geometryJson)) cityCount++;
+    const candidate = gapFillById.get(id)!;
+    if (await emitReal(candidate, geometryJson, isCoarserFill(candidate))) cityCount++;
   }
 
   // The Voronoi hole fill (VORONOI_CITY_FALLBACK_HOLES' doc comment).
@@ -701,7 +750,7 @@ async function main(): Promise<void> {
   }
   /** `geometryJson` is the geometry's JSON text, written out as is -- for
    * an OSM city, the exact text osmium wrote, never parsed. */
-  async function emitCity(candidate: EmittableCity, geometryJson: string): Promise<boolean> {
+  async function emitCity(candidate: EmittableCity, geometryJson: string, gapFill = false): Promise<boolean> {
     if (!candidate.name) {
       skippedNoName++;
       return false;
@@ -718,6 +767,7 @@ async function main(): Promise<void> {
       ...(candidate.nameEn ? { nameEn: candidate.nameEn } : {}),
       region,
       country: candidate.country,
+      ...(gapFill ? { gapFill: true } : {}),
     };
     const regionKey = `${candidate.country}\t${region}`;
     citiesByRegion.set(regionKey, (citiesByRegion.get(regionKey) ?? 0) + 1);
