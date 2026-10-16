@@ -495,7 +495,7 @@ Winchester). For the levels a country lists there, each candidate carries a
 grid over its bbox that every primary clears where it contains a cell
 centre, and the candidate is added when `MIN_UNCOVERED_KM2` is left (half of
 itself for a candidate under twice that: Lakshadweep's island taluks). GB,
-BA, BG, IN, LT, PY and SK use it. It needs the compressor's max-depth rule (a candidate
+BA, BG, CA, IN, LT, PY and SK use it. It needs the compressor's max-depth rule (a candidate
 crossing a cell with >= 25% of it beats one containing it), or the added
 districts take every border cell between the parishes they contain.
 

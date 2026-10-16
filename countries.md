@@ -1186,7 +1186,12 @@ tessellates its country, so the bug was always grain, not coverage.
 
 ## Canada (CA)
 
-`region [4]`, `city [8, 6]` (31.4% at 8, gap-fill 6).
+`region [4]`, `city [8, 6]`, `primaryLevel: 8`, `coverageGapFill: [6]`:
+municipalities (8, 31.4%) primary, regional districts, counties and MRCs
+(6, 66.2%) fill what they leave. Every province lists the same `[8, 6]` in
+`overrides` (Ontario and Alberta need one for `wholeUnits`, and a level
+some region overrides gap-fills only in regions that list it), except New
+Brunswick, `[6]`.
 
 - **Resolved at regional-district grain, not city.** Terrace, BC used to
   resolve to `Regional District of Kitimat-Stikine`: level 6 (regional
@@ -1197,11 +1202,40 @@ tessellates its country, so the bug was always grain, not coverage.
   below the US's equivalent 64.0% because incorporated-place coverage is
   thinner nationally. Most remaining "misses" are not wrong (GeoNames lists
   neighbourhoods such as Abbottsfield, Aberdeen, Agincourt North, which
-  correctly resolve to Beverly, Kamloops, Scarborough).
+  correctly resolve to Beverly, Kamloops, Scarborough). The override was
+  later lost, see the next entry.
 - **Guelph gap-fill.** Guelph, Ontario is `place=city` at level 6 (Ontario's
   regional-municipality tier), a single-tier city distinct from the
   level-8 municipalities. Gap-filled at 6; `search` found no Guelph before.
-- **Terrace does not resolve on the current builds.** *(open)* 54.5164,
+- **Terrace does not resolve on the current builds.** Fixed 2026-10-16.
+  Found while following the user's report of an isolated cell at Stanley
+  Bridge, PEI (46.463773, -63.457975), and Vancouver answered `Metro
+  Vancouver Regional District` too. When level 6 was added to `city` as a
+  gap-fill level (`[8, 6]`, for Guelph), the area vote, which takes the
+  finest listed level covering 60%, picked 6: the regional districts became
+  the primaries, and a municipality was gap-filled only where none covered
+  its point, which inside a regional district is never. Pinned with
+  `primaryLevel: 8`, and the regional districts are in `coverageGapFill`, so
+  they name only what the municipalities leave (and, as coarser gap-fill
+  cities, never a cell a municipality contains; see "Overlapping cities
+  traded cells"). That alone split three single-tier cities that OSM
+  subdivides at level 8: Toronto into its pre-1998 municipalities (North
+  York, Scarborough, Etobicoke), Ottawa into Nepean, and Edmonton into
+  planning areas (Central Core, Mill Woods); `wholeUnits` keeps them whole.
+  And New Brunswick's level 8 is the parishes the 2023 reform abolished
+  (City of Moncton answered Moncton Parish); its municipalities and rural
+  districts are level 6 and cover it, so its override is `[6]`. 1,670
+  cities500 places changed, all in Canada, none to `city -` and 5 from it.
+  By name, 751 now contain the cities500 name and did not, 4 did and do
+  not: PEI and Northwest Territories places now in a community of their
+  municipality (Rural Municipality of Belfast -> Eldon, Town of Three Rivers
+  -> Brudenell), the same grain as Halifax Regional Municipality -> Dartmouth
+  and Halifax. The rest: Metro Vancouver -> Vancouver, North Vancouver,
+  Burnaby, Coquitlam, Surrey (250), Region of Waterloo -> Kitchener,
+  Waterloo, Cambridge, Agglomération de Montréal -> Montréal, Capital
+  Regional District -> Victoria, Saanich, Québec's MRCs and Ontario's
+  counties -> their municipalities. Stanley Bridge's isolated cell is gone.
+  The old notes: 54.5164,
   -128.6003 returns `Regional District of Kitimat-Stikine`, although the
   entry above was verified fixed. `data/02-resolved/world/cities-filtered.geojsonseq`
   (built 2026-10-09 13:00) has no Canadian feature named `Terrace` at all

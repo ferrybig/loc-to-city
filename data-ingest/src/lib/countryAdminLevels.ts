@@ -147,6 +147,8 @@ export interface CountryAdminLevels {
  *   over level 8 (municipalities, 31.4%), resolving Terrace, BC as
  *   "Regional District of Kitimat-Stikine". Overridden to level 8: against
  *   cities500's 3,298 Canadian entries it name-matches 31.3% vs 14.8%.
+ *   Pinned with `primaryLevel` since level 6 joined `city` (Guelph): the
+ *   vote takes the finest listed level covering 60%, which was 6 again.
  * - ET, AF: the generated pick put regions one tier too fine (zones /
  *   districts, since their share edged out the real top tier by <0.5%)
  *   and cities on a sparse tier (ET woredas 12.6%, AF city nahias 0.6%).
@@ -499,7 +501,41 @@ export const COUNTRY_ADMIN_LEVELS: Record<string, CountryAdminLevels> = {
   BW: { region: [4], city: [6] }, // region 99.8%, city 18.1%
   BY: { region: [4], city: [8, 6] }, // region 100.0%, city 99.5% (8) + gap-fill 6 -- see override note above
   BZ: { region: [4], city: [8] }, // region 115.9%, city 5.3%
-  CA: { region: [4], city: [8, 6] }, // region 128.2%, city 31.4% (8) + gap-fill 6 -- see override note above
+  CA: {
+    region: [4],
+    city: [8, 6],
+    // Municipalities (8, 31.4%) primary; regional districts and counties
+    // (6, 66.2%) fill by coverage. Without the pin the vote picked 6, hiding
+    // every municipality inside a regional district (Vancouver, Terrace).
+    primaryLevel: 8,
+    coverageGapFill: [6],
+    overrides: {
+      // The country's own levels, for every province: `wholeUnits` needs an
+      // override for Ontario and Alberta (three single-tier cities that OSM
+      // subdivides at 8: Toronto's pre-1998 municipalities, Ottawa's Nepean,
+      // Edmonton's planning areas), and a level that some region overrides
+      // gap-fills only in regions that list it (`createGapFillTracker`).
+      Alberta: [8, 6],
+      "British Columbia": [8, 6],
+      Manitoba: [8, 6],
+      "Newfoundland and Labrador": [8, 6],
+      "Northwest Territories": [8, 6],
+      "Nova Scotia": [8, 6],
+      Ontario: [8, 6],
+      "Prince Edward Island": [8, 6],
+      Québec: [8, 6],
+      Saskatchewan: [8, 6],
+      Yukon: [8, 6],
+      "ᓄᓇᕗᑦ Nunavut": [8, 6],
+      // The 2023 reform made level 6 the municipalities and rural districts,
+      // covering the province; level 8 is the abolished parishes.
+      "New Brunswick / Nouveau-Brunswick": [6],
+    },
+    wholeUnits: {
+      Ontario: { level: 6, names: ["Toronto", "Ottawa"] },
+      Alberta: { level: 6, names: ["Edmonton"] },
+    },
+  },
   CD: { region: [4], city: [6] }, // region 100.2%, city 42.6%
   CF: { region: [4], city: [8] }, // region 100.1%, city 0.2%
   CG: { region: [4], city: [6] }, // region 99.3%, city 81.4%
