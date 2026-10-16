@@ -164,7 +164,7 @@ export const CASES: Case[] = [
 	},
 	{
 		name: "Old Basing and Lychpit is one parish, a village and a suburb",
-		at: [51.269890, -1.044946],
+		at: [51.26989, -1.044946],
 		region: "England",
 		city: "Old Basing and Lychpit",
 		status: "false-positive",
@@ -1523,7 +1523,7 @@ export const CASES: Case[] = [
 	},
 	{
 		name: "Navi Mumbai is its corporation, not Thane Subdistrict",
-		at: [19.0330, 73.0297],
+		at: [19.033, 73.0297],
 		country: "India",
 		region: "Maharashtra",
 		city: "Navi Mumbai",
