@@ -655,7 +655,7 @@ async function main(): Promise<void> {
   // A region that is one city (REGION_CITIES' doc comment) is its own city
   // too, unless anything else already is a city inside it.
   for (const [code, regionCities] of REGION_CITIES) {
-    for (const { region, city } of regionCities) {
+    for (const { region, city, cityEn } of regionCities) {
       const candidate = [...finalRegions.values()].find((r) => r.country === code && r.name === region);
       const inside = citiesByRegion.get(`${code}\t${region}`) ?? 0;
       if (!candidate || inside > 0) {
@@ -669,8 +669,8 @@ async function main(): Promise<void> {
       const emitted = await emitCity(
         {
           id: `region-city:${candidate.id}`,
-          name: city ?? candidate.name,
-          nameEn: city ? undefined : candidate.nameEn,
+          name: city ?? candidate.localName ?? candidate.name,
+          nameEn: city ? cityEn : candidate.nameEn,
           country: code,
           repPoint,
           region,

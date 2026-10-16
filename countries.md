@@ -600,8 +600,43 @@ below).
     53.1251, 8.7465). It is noisier, since the point can fall between cities.
     Not triaged; the largest groups are the United States 37, Uruguay 18,
     Indonesia 14, Thailand 11, Montenegro 9, Panama 8.
-  Cases: Kranj, Izola, Abidjan, Cetinje, Paphos, Rason and Ménaka are in
-  `verify/src/cases.ts` as open.
+  Cases: Kranj and Izola are in `verify/src/cases.ts` as open. Abidjan,
+  Cetinje, Paphos, Rason and Ménaka resolve since 2026-10-16 (next entry).
+  Slovenia's (Kranj, Izola, Ljubljana) are a different shape: its regions
+  are Voronoi cells named for GeoNames' admin1 codes, which in Slovenia are
+  the municipalities, so a region and the city of the same name compete
+  (see Slovenia).
+- **Regions that are one town had no city.** Fixed 2026-10-16. From the
+  "one town" group of the entry above, each region was checked twice: which
+  OSM relations cover its town (a scratch scan of the extract), and which
+  cities500 places answer it with `city -`. Two fixes, by how many towns the
+  region holds:
+  - **One town, nothing at the city level inside: `REGION_CITIES`.** Banjul;
+    Honiara (its 11 cities500 places are its wards); Osh City (`Ош шаары`,
+    shown as `Ош` / Osh); Sejong; Rason (Rajin and Sŏnbong are its two
+    districts); Paphos Municipality (`Δήμος Πάφου`, shown as `Πάφος` /
+    Paphos: Cyprus' regions are its municipalities, and Paphos' holds no
+    level-8 community, only quarters); Labuan; Abidjan and Yamoussoukro,
+    whose autonomous districts have no department (Côte d'Ivoire's city
+    tier) inside. The last three hold more than one town: Bingerville,
+    Anyama and Songon answer Abidjan, and Attiégouakro's villages answer
+    Yamoussoukro. That is the grain of the country's city tier (a
+    department, a daerah), not a town inside it. Kaesong (`개성시`) was
+    tried and skipped by the build, since it already holds 3 cities.
+    `REGION_CITIES` entries take a `cityEn` now, for a city named unlike
+    its region.
+  - **Several towns: the city hole fill** (`VORONOI_CITY_FALLBACK_HOLES`)
+    for Bahrain (city tier 0.6%), Djibouti (Djibouti and Balbala, and the
+    towns of Ali Sabieh and Arta), Montenegro (city tier 9.6%: Cetinje and
+    places in 16 more municipalities) and Mali (Ménaka region, no cercles).
+  Measured against the previous build: 186 cities500 answers changed, all in
+  these 11 countries. 185 went from `city -` to a city. The other,
+  Ibarac (Montenegro), went from Rožaje to its own name; it is a separate
+  village of 3,135 next to the town. Five capitals resolve since:
+  Yamoussoukro, Djibouti, Banjul, Honiara and Manama.
+  Not done: Delhi, which holds New Delhi and more (see India), Kigali,
+  whose districts tile it (Nyarugenge holds the centre), Kanifing, which is
+  Serekunda's municipality but not named for it, and Niamey 5.
 - **Territories with no region tier.** Fixed 2026-10-15. A city with no
   region is dropped (`emitCity`), so a country configured `region: []`
   lost every city it had unless it was in `CITY_STATES`. Thirteen were
@@ -689,7 +724,7 @@ below).
     Port-aux-Français (Fr. S. Antarctic Lands); Adamstown (Pitcairn Is.);
     Grytviken (S. Geo. and the Is.); Jamestown (Saint Helena); Gustavia
     (St-Barthélemy); Marigot (St-Martin)
-  - **The capital is only a region** (14; nine left on 2026-10-14, see "Countries with a thin city tier", Hamilton on 2026-10-15, see "Territories with no region tier", and Vilnius the same day, see Lithuania): the region carries the
+  - **The capital is only a region** (10; Yamoussoukro, Djibouti, Banjul and Honiara left on 2026-10-16, see "Regions that are one town had no city"; nine left on 2026-10-14, see "Countries with a thin city tier", Hamilton on 2026-10-15, see "Territories with no region tier", and Vilnius the same day, see Lithuania): the region carries the
     capital's name and no city covers the point. This is the previous
     entry ("Capitals that are their own region"). Its `REGION_CITIES`
     took 13 capitals off this list on 2026-10-13 (Vienna, Minsk, Prague,
@@ -700,17 +735,16 @@ below).
     The rest are either a province named after its seat or not checked
     yet (that entry says which).
     Thimphu (Bhutan); Praia (Cabo Verde; at this location the city's name
-    ends up in the region slot, see Cabo Verde); Yamoussoukro
-    (Côte d'Ivoire); Djibouti (Djibouti); Banjul (Gambia); Male
+    ends up in the region slot, see Cabo Verde); Male
     (Maldives); Saipan (N. Mariana Is.); Yaren (Nauru);
-    Castries (Saint Lucia); Ljubljana (Slovenia); Honiara (Solomon Is.);
+    Castries (Saint Lucia); Ljubljana (Slovenia);
     Basseterre (St. Kitts and Nevis)
-  - **A region around it, no city** (20; Khartoum and Lomé left on 2026-10-14; Brasília moved on 2026-10-14, see Brazil; Guernsey left on 2026-10-14, it has a city and only the spelling differed): the region is a province,
+  - **A region around it, no city** (19; Manama left on 2026-10-16 with Bahrain's city hole fill; Khartoum and Lomé left on 2026-10-14; Brasília moved on 2026-10-14, see Brazil; Guernsey left on 2026-10-14, it has a city and only the spelling differed): the region is a province,
     parish or federal district (New Delhi is "Delhi"), and no city covers the point. Washington
     ("District of Columbia") was one and resolves since 2026-10-13
     (`REGION_CITIES` with a `city` name). New Delhi is not
     that simple: Delhi holds New Delhi and more.
-    Manama (Bahrain); Bridgetown (Barbados); Belmopan (Belize); Road Town (British Virgin Is.); Quito (Ecuador); Suva
+    Bridgetown (Barbados); Belmopan (Belize); Road Town (British Virgin Is.); Quito (Ecuador); Suva
     (Fiji); Nuuk (Greenland); Saint George's (Grenada); New Delhi (India); Macau (Macao); Antananarivo
     (Madagascar); Plymouth (Montserrat); Ngerulmud (Palau); Kigali
     (Rwanda); Apia (Samoa); Victoria (Seychelles); Kingstown (St. Vin. and
@@ -909,6 +943,14 @@ tessellates its country, so the bug was always grain, not coverage.
   `VORONOI_REGION_HOLES` the land joins `Bakı` (its places are GeoNames
   admin1 Baku, like the nearest covered ones in the core), and the
   districts are cities in it: Zabrat answers `Bakı`, `Sabunçu rayonu`.
+
+## Bahrain (BH)
+
+`region [4]`, `city [10]` (0.6%), city hole fill.
+
+- **No town had a city.** Fixed 2026-10-16 by the city hole fill: Manama,
+  Al Muharraq, Ar Rifā‘ and Bahrain's other cities500 places name the land
+  around them. See "Regions that are one town had no city" (Cross-cutting patterns).
 
 ## Belarus (BY)
 
@@ -1130,6 +1172,19 @@ tessellates its country, so the bug was always grain, not coverage.
   one region holding its 5 cities) before the region-seeding fix in the
   README; all 23 regions are there now.
 
+## Côte d'Ivoire (CI)
+
+`region [4]`, `city [5]` (departments, 99.1%), `REGION_CITIES` for Abidjan
+and Yamoussoukro.
+
+- **The autonomous districts had no city.** 5.36, -4.0083 returned
+  `region Abidjan`, `city -`, as did Yamoussoukro: both districts are
+  level-4 regions with no level-5 department inside (Abidjan's communes are
+  level-8 `place=suburb` relations). Fixed 2026-10-16 by `REGION_CITIES`.
+  Bingerville, Anyama and Songon now answer Abidjan, and Attiégouakro's
+  villages Yamoussoukro, which is the department grain the rest of the
+  country answers at. See "Regions that are one town had no city" (Cross-cutting patterns).
+
 ## Croatia (HR)
 
 - **Liberpolis resolves to no country.** *(false positive)* 45.77468,
@@ -1168,6 +1223,10 @@ tessellates its country, so the bug was always grain, not coverage.
   Petra, İksilodimbu) still had a region while regions were simplified,
   only because a simplified Republic-side region overshot onto them; with
   full-precision regions they are dropped like the rest (2026-10-13).
+- **Paphos had no city.** 34.772, 32.4297 returned `region Δήμος Πάφου`,
+  `city -`: the region tier is the municipalities, and Paphos' holds no
+  level-8 community, only level-9 quarters. Fixed 2026-10-16 by
+  `REGION_CITIES`, shown as `Πάφος` / Paphos. See "Regions that are one town had no city" (Cross-cutting patterns).
 
 ## Czechia (CZ)
 
@@ -1201,6 +1260,15 @@ tessellates its country, so the bug was always grain, not coverage.
 - **Cities outside the 42.6% of level-6 polygons.** Fixed 2026-10-14. 81
   places of 50,000+: named 32 → 60, no city 28 → 0 by
   `VORONOI_CITY_FALLBACK_HOLES`.
+
+## Djibouti (DJ)
+
+`region [4]`, `city [6]` (79.2%), city hole fill.
+
+- **Djibouti, Ali Sabieh and Arta had no city.** Their regions hold
+  several towns each and no level-6 relation. Fixed 2026-10-16 by the city
+  hole fill: Djibouti and Balbala, Ali Sabieh, Arta, Holhol and the other
+  cities500 places. See "Regions that are one town had no city" (Cross-cutting patterns).
 
 ## Egypt (EG)
 
@@ -1284,6 +1352,15 @@ tessellates its country, so the bug was always grain, not coverage.
 - **Suburbs do not beat their city.** 43.745057, 7.214584 (Bellet, a
   quarter of Nice) resolves to `Nice`, not `Bellet`, on
   `world-high-res.bin`. Spot-check in `verify/src/cases.ts`.
+
+## Gambia (GM)
+
+`region [4]`, `city [6]`, `REGION_CITIES` for Banjul.
+
+- **Banjul had no city.** Its level-4 region holds only Banjul (a level-5
+  relation of the same name, below the city level). Fixed 2026-10-16 by
+  `REGION_CITIES`. Kanifing is not listed: it is Serekunda's municipality
+  and not named for the town. See "Regions that are one town had no city" (Cross-cutting patterns).
 
 ## Georgia (GE)
 
@@ -1472,6 +1549,14 @@ tessellates its country, so the bug was always grain, not coverage.
   region, most places got no city. Measured against cities500 places of
   50,000+: named for the point's city 4 → 9 of 9, no city 5 → 0.
 
+## Kyrgyzstan (KG)
+
+`region [4]`, `city [6]`, `REGION_CITIES` for Osh.
+
+- **Osh had no city.** `Ош шаары` (Osh City) is a level-4 region with
+  nothing at level 6 inside. Fixed 2026-10-16 by `REGION_CITIES`, shown as
+  `Ош` / Osh. See "Regions that are one town had no city" (Cross-cutting patterns).
+
 ## Laos (LA)
 
 `region [4]`, `city [6]`.
@@ -1593,8 +1678,8 @@ tessellates its country, so the bug was always grain, not coverage.
 
 ## Malaysia (MY)
 
-`region [4]`, `city [6]` (100.8%), `REGION_CITIES` for Kuala Lumpur and
-Putrajaya.
+`region [4]`, `city [6]` (100.8%), `REGION_CITIES` for Kuala Lumpur,
+Putrajaya and Labuan.
 
 - **The federal territories had no city.** Kuala Lumpur (3.1412,
   101.68653) returned `Kuala Lumpur`, `city -`, and so did Putrajaya: each
@@ -1602,7 +1687,18 @@ Putrajaya.
   inside it. Fixed 2026-10-13 by `REGION_CITIES`, which emits each
   territory polygon as the city too (see "Capitals that are their own
   region"). Labuan, the third, is an island territory whose town
-  (Victoria) is not the whole of it, and is not listed.
+  (Victoria) is not the whole of it, and was not listed at first. It is
+  since 2026-10-16: the city tier is the districts (daerah), and Labuan is
+  one district-sized territory with no district inside, so `Labuan` is the
+  grain every other Malaysian answer has. See "Regions that are one town had no city" (Cross-cutting patterns).
+
+## Mali (ML)
+
+`region [4]`, `city [6]` (cercles, 86.3%), city hole fill.
+
+- **Ménaka had no city.** The region has no cercles in OSM. Fixed
+  2026-10-16 by the city hole fill (Ménaka, Andéranboukan, Inékar). See
+  "Regions that are one town had no city" (Cross-cutting patterns).
 
 ## Malta (MT)
 
@@ -1684,6 +1780,15 @@ Putrajaya.
   106.88324 returns `region Ulaanbaatar`, `city Bayangol`. The user is not
   sure, but thinks the region and city levels need to be lower. Not
   checked.
+
+## Montenegro (ME)
+
+`region [6]` (municipalities), `city [8]` (9.6%), city hole fill.
+
+- **Most municipalities had no city.** Cetinje (42.3931, 18.9115) and
+  cities500 places in 16 more municipalities answered `city -`. Fixed 2026-10-16 by
+  the city hole fill. Ibarac, a village of 3,135 next to Rožaje, now
+  answers its own name instead of Rožaje. See "Regions that are one town had no city" (Cross-cutting patterns).
 
 ## Namibia (NA)
 
@@ -1849,6 +1954,16 @@ worldwide resolved data (`make netherlands`) and
 
 - **No city tier.** Fixed 2026-10-14. Places of 50,000+: named 1 → 13 of
   13, no city 12 → 0.
+
+## North Korea (KP)
+
+`region [4]`, `city [6]`, `REGION_CITIES` for Rason.
+
+- **Rason had no city.** `라선시` is a level-4 special city whose two
+  districts (Rajin, Sŏnbong) are level 7, below the city level. Fixed
+  2026-10-16 by `REGION_CITIES`. Kaesong (`개성시`) was tried too and
+  skipped: it already holds 3 cities, so its GeoNames point answering
+  `city -` is a gap between them. See "Regions that are one town had no city" (Cross-cutting patterns).
 
 ## North Macedonia (MK)
 
@@ -2176,6 +2291,15 @@ worldwide resolved data (`make netherlands`) and
   the entry above ("A handful of cities land in the wrong synthesized
   region") is the same code path.
 
+## Solomon Islands (SB)
+
+`region [4]`, `city [5]` (28.5%), `REGION_CITIES` for Honiara.
+
+- **Honiara had no city.** A level-4 region with only level-9 wards inside.
+  Fixed 2026-10-16 by `REGION_CITIES`. The hole fill was not used: it would
+  have named Honiara's wards (Kukum, Vura, ...), which GeoNames lists as
+  places. See "Regions that are one town had no city" (Cross-cutting patterns).
+
 ## Somalia (SO)
 
 - **Somaliland resolves to no country.** 10.611344, 47.369614 returned
@@ -2185,6 +2309,14 @@ worldwide resolved data (`make netherlands`) and
   resolve since candidates Natural Earth places nowhere get their country
   from the outlines: 10.611344, 47.369614 is `Sanaag` / `Ceerigaabo` (see
   "Places Natural Earth puts at sea were dropped").
+
+## South Korea (KR)
+
+`region [4]`, `city [6]`, `REGION_CITIES` for Sejong.
+
+- **Sejong had no city.** `세종특별자치시` is a level-4 special city with
+  level-8 dong inside and nothing at level 6. Fixed 2026-10-16 by
+  `REGION_CITIES`. See "Regions that are one town had no city" (Cross-cutting patterns).
 
 ## Sudan (SD)
 

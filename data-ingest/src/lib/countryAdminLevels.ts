@@ -784,8 +784,8 @@ export const VORONOI_CITY_FALLBACK_WITHIN_REGIONS: ReadonlyMap<string, readonly 
  * Bugisa sub-region, `shareInOtherRegions`). See countries.md,
  * "Countries with a thin city tier". */
 export const VORONOI_CITY_FALLBACK_HOLES: ReadonlySet<string> = new Set([
-  "AE", "AI", "AO", "AW", "AZ", "BF", "BI", "BS", "BW", "CD", "CF", "CW", "GE", "GW", "LR", "LS", "MR", "MW", "NA", "NE", "PH", "PY", "QA",
-  "SD", "SX", "SZ", "TG", "TT", "UG", "WF",
+  "AE", "AI", "AO", "AW", "AZ", "BF", "BH", "BI", "BS", "BW", "CD", "CF", "CW", "DJ", "GE", "GW", "LR", "LS", "ME", "ML", "MR", "MW", "NA",
+  "NE", "PH", "PY", "QA", "SD", "SX", "SZ", "TG", "TT", "UG", "WF",
 ]);
 
 /** The hole fill (`VORONOI_CITY_FALLBACK_HOLES`) for only these regions of a
@@ -886,7 +886,8 @@ export const CITY_STATES: ReadonlyMap<string, { region: string; city?: string }>
  * region with `city -`. Country code -> the regions (by the exact name the
  * country's regions resolve to, as in `overrides`) whose polygon is also
  * emitted as a city, named `city` when given (District of Columbia is
- * Washington) and after the region otherwise. Only for a region that holds
+ * Washington), with `cityEn` as its international name, and after the
+ * region otherwise. Only for a region that holds
  * no other city: a region-sized city next to real ones would win their
  * shared border cells (see `overrides`), so prepare-world.ts skips, with a
  * warning, a listed region that has any. Hand-reviewed, same opt-in
@@ -894,15 +895,23 @@ export const CITY_STATES: ReadonlyMap<string, { region: string; city?: string }>
  * under other names (Tashkent, Yerevan, Astana) is a different shape, and a
  * province merely named after its seat (Lilongwe, Maseru) is not a city.
  * See countries.md's "Capitals that are their own region". */
-export const REGION_CITIES: ReadonlyMap<string, readonly { region: string; city?: string }[]> = new Map([
+export const REGION_CITIES: ReadonlyMap<string, readonly { region: string; city?: string; cityEn?: string }[]> = new Map([
   ["AE", [{ region: "دبي", city: "Dubai" }]],
   ["AT", [{ region: "Wien" }]],
   ["BY", [{ region: "Мінск" }]],
   ["CD", [{ region: "Kinshasa" }]],
+  // The autonomous districts, with no department (the city tier) inside.
+  ["CI", [{ region: "Abidjan" }, { region: "Yamoussoukro" }]],
+  // Cyprus' regions are its municipalities; Paphos' holds no community.
+  ["CY", [{ region: "Δήμος Πάφου", city: "Πάφος", cityEn: "Paphos" }]],
   ["CZ", [{ region: "Praha" }]],
   ["DE", [{ region: "Berlin" }, { region: "Hamburg" }]],
   ["GE", [{ region: "თბილისი" }]],
+  ["GM", [{ region: "Banjul" }]],
   ["GN", [{ region: "Conakry" }]],
+  ["KG", [{ region: "Ош шаары", city: "Ош", cityEn: "Osh" }]],
+  ["KP", [{ region: "라선시" }]],
+  ["KR", [{ region: "세종특별자치시" }]],
   [
     "LV",
     [
@@ -916,10 +925,11 @@ export const REGION_CITIES: ReadonlyMap<string, readonly { region: string; city?
     ],
   ],
   ["MU", [{ region: "Port Louis" }]],
-  ["MY", [{ region: "Kuala Lumpur" }, { region: "Putrajaya" }]],
+  ["MY", [{ region: "Kuala Lumpur" }, { region: "Putrajaya" }, { region: "Labuan" }]],
   ["QA", [{ region: "الدوحة" }]],
   ["RO", [{ region: "București" }]],
   ["RU", [{ region: "Москва" }, { region: "Санкт-Петербург" }, { region: "Севастополь" }]],
+  ["SB", [{ region: "Honiara" }]],
   ["TJ", [{ region: "Душанбе" }]],
   ["UA", [{ region: "Київ" }]],
   ["US", [{ region: "District of Columbia", city: "Washington" }]],
