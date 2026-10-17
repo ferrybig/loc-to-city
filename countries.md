@@ -737,6 +737,12 @@ below).
   district, Kafr al Kurdī, and Weitersfeld an der Mur back in Austria (was
   a Slovenian Voronoi region). The Libyan, Chadian and Nigerien places of
   the entry above are city-against-city borders and barely changed.
+  Bisected 2026-10-17 on the saved builds (`data/03-final/builds.tsv`):
+  Egypt / Libya / Chad / Slovenia pieces were 4,183 / 4,643 / 3,530 / 4,844
+  at f98b2b5 and 10,177 / 13,535 / 18,963 / 10,489 at 0d303fb, so the rule
+  is what added them; 798 / 2,448 / 1,344 / 85 now, below both. (The drop
+  from 374,455 extra pieces worldwide at 9c18e96 to 127,778 at f98b2b5 is
+  "break ties by tier and id": identical polygons no longer alternate.)
 - **Territories with no region tier.** Fixed 2026-10-15. A city with no
   region is dropped (`emitCity`), so a country configured `region: []`
   lost every city it had unless it was in `CITY_STATES`. Thirteen were

@@ -388,6 +388,16 @@ iterate on compressor logic, rebuild just `world.bin` from existing
 `02-resolved` output, or use `make netherlands`/`make europe` for a smaller
 dataset.
 
+**Keep the build a commit produced.** When a change came with a new build
+and you are asked to commit it, also save that build as
+`data/03-final/<short-hash>_world_high_res.bin` (`<short-hash>_world.bin`
+for the low-res one; gitignored, `cp --reflink=auto` is free on this
+btrfs disk), keeping its mtime, and add a row to
+`data/03-final/builds.tsv` (which also records how the older, deployed
+builds were matched to their commits). They are what bisects an artifact on
+the map: run the islands count (`verify/src/islands.ts`) or a lookup on each
+to see whether it is new or preexisting.
+
 ### Worldwide extraction/build pipeline
 
 ```bash
