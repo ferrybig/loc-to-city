@@ -116,9 +116,10 @@ npm test -w demo                           # unit tests (not e2e)
 npm test -w verify                         # world spot-checks against world-high-res.bin, else world.bin; CGEODATA_WORLD_BIN overrides (skipped without one) + ledger consistency
 node verify/src/export.ts data/03-final/world-high-res.bin --out data/03-final/world-high-res.checks.json
                                            # the same checks as JSON; the demo draws them as markers
-node verify/src/islands.ts [file.bin] [--level city|region|country|all] [--top N] [--per-chunk out.tsv]
+node verify/src/islands.ts [file.bin] [--level city|region|country|all] [--top N] [--per-chunk out.tsv] [--by-country]
                                            # separate pieces per place, ranked: 1 is normal, 2-4 an enclave or
-                                           # a corner-touching sliver, 20+ two overlapping polygons trading cells
+                                           # a corner-touching sliver, 20+ two overlapping polygons trading cells;
+                                           # --by-country: pieces per city, so small countries with many stand out
 ```
 
 Each workspace's test script is `node --test test/*.test.ts` (Node's built-in

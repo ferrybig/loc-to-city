@@ -6,7 +6,7 @@
  * mean two OSM polygons lying on top of each other, each winning scattered
  * cells from the other (Hyderabad).
  *
- *   node verify/src/islands.ts [file.bin] [--level city|region|country|all] [--top N] [--min N] [--per-chunk out.tsv] [--place ID]
+ *   node verify/src/islands.ts [file.bin] [--level city|region|country|all] [--top N] [--min N] [--per-chunk out.tsv] [--place ID] [--by-country]
  *
  * Only cities are ranked by default: a region's or country's own cells are
  * what its cities leave, so they break up wherever cities do (unincorporated
@@ -27,7 +27,10 @@
  *
  * `--per-chunk` writes pass 1's result: chunk, place id, islands in that
  * chunk, and their border masks. `--place` lists every island of one place
- * (an id from the ranking, or `cgeodata search`).
+ * (an id from the ranking, or `cgeodata search`). `--by-country` ranks
+ * countries instead, by their cities' pieces per city: about 1 is clean,
+ * a country with a few cities and many pieces stands out however small it
+ * is, where the per-place ranking puts big countries first.
  */
 import { createWriteStream } from "node:fs";
 import { parseArgs } from "node:util";
@@ -342,7 +345,7 @@ export function combineIslands(
 }
 
 const USAGE =
-	"usage: islands.ts [file.bin] [--level city|region|country|all] [--top N] [--min N] [--per-chunk out.tsv] [--place ID]";
+	"usage: islands.ts [file.bin] [--level city|region|country|all] [--top N] [--min N] [--per-chunk out.tsv] [--place ID] [--by-country]";
 
 async function main(): Promise<void> {
 	const { values, positionals } = parseArgs({
@@ -353,6 +356,7 @@ async function main(): Promise<void> {
 			min: { type: "string", default: "2" },
 			"per-chunk": { type: "string" },
 			place: { type: "string" },
+			"by-country": { type: "boolean", default: false },
 		},
 	});
 	const file = positionals[0] ?? pickWorldBin();
@@ -423,6 +427,44 @@ async function main(): Promise<void> {
 		);
 		for (const piece of entry?.pieces ?? [])
 			console.log(`${piece.cells}\t${pointOf(piece)}\t${linkTo(piece)}`);
+		return;
+	}
+
+	if (values["by-country"]) {
+		// Pieces counts every island of the country's cities; a city with no
+		// cells (hidden under another) adds none, and "extra" is pieces beyond
+		// one per drawn city.
+		const byCountry = new Map<
+			number,
+			{ name: string; cities: number; drawn: number; pieces: number }
+		>();
+		for await (const city of reader.places({ level: "city" })) {
+			let entry = byCountry.get(city.country.id);
+			if (!entry) {
+				entry = {
+					name: city.country.localName,
+					cities: 0,
+					drawn: 0,
+					pieces: 0,
+				};
+				byCountry.set(city.country.id, entry);
+			}
+			entry.cities++;
+			const islands = combined.get(city.id)?.islands ?? 0;
+			if (islands > 0) {
+				entry.drawn++;
+				entry.pieces += islands;
+			}
+		}
+		const rows = [...byCountry.entries()].sort(
+			([idA, a], [idB, b]) =>
+				b.pieces / b.cities - a.pieces / a.cities || idA - idB,
+		);
+		console.log("pieces/city\textra/city\tcities\tdrawn\tpieces\tcountry\tid");
+		for (const [id, c] of rows.slice(0, top))
+			console.log(
+				`${(c.pieces / c.cities).toFixed(2)}\t${((c.pieces - c.drawn) / c.cities).toFixed(2)}\t${c.cities}\t${c.drawn}\t${c.pieces}\t${c.name}\t${id}`,
+			);
 		return;
 	}
 

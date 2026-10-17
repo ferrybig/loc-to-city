@@ -680,6 +680,19 @@ below).
   Kolkata district's slivers (3.69 km^2 left at 50-150 m) from Coalville's
   unparished town in North West Leicestershire (3.45 km^2), on grids of
   ~200 m cells, and lost Coalville its city.
+  Re-tested 2026-10-17, after "Region borders cut lines through cities"
+  traced border lines to 0d303fb, to see whether this fix was a patch on that
+  one (each switched off, compared with 1d7c17d's build). The max-depth
+  exception is gone already (that entry's rule covers it), and the six New
+  York villages no longer need the marking. The marking in `preferred` is
+  still needed: without it Hyderabad is 25 pieces (7 with it), Chennai
+  Corporation 25 (1), and 37 Indian places answer their mandal or taluk
+  again (Secunderabad: Alwal mandal; Ambattur, Alandur). It decides the
+  inside of an overlap, which no border rule touches. The "drawn again"
+  drop changes no answer, but without it Kolkata district (39 pieces) and
+  Chennai district (5) come back as places of their own; kept. Neither
+  residual spot of the next entry changed with that rule: both are outline
+  slivers.
 - **A few cells still trade places at Hyderabad and Kolkata.** *(open)*
   Checked by the user on the map after the fix above was deployed
   (2026-10-16): both are much improved, and the rest is a few cells,
@@ -2211,6 +2224,18 @@ worldwide resolved data (`make netherlands`) and
 - **Islamabad answers with a zone.** *(open)* Reported 2026-10-14 while improving capitals, looked up on `world-high-res.bin`. 33.72148, 73.04329
   returns `region Islamabad Capital Territory`, `city Zone 1`. The user
   says it is not clear what is going on. Not investigated.
+
+## Palestine (PS)
+
+`region [4]`, `city [6]` (94.3%).
+
+- **The cities are the Oslo areas.** *(open)* Found 2026-10-17 by
+  `islands.ts --by-country`, where Palestine leads by far: 5 cities in 289
+  pieces (57.8 per city; Libya, next, has 20.2). Its level-6 relations are
+  `منطقة أ` / `منطقة ب` / `שטח C` (Areas A, B and C) and `אזור H2`
+  (Hebron's H2), which really are hundreds of separate enclaves, so the
+  pieces are genuine; but they are not cities. Not looked at: which level
+  holds the West Bank's and Gaza's municipalities.
 
 ## Philippines (PH)
 
