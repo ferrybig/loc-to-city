@@ -727,6 +727,18 @@ below).
   pieces, Tahanea 38, Aratika 23). Their outlines are rings of motu thinner
   than a cell, and each motu the cells catch is a piece of its own; with no
   city next to them their score is only their own count.
+  Ranked per country on 2026-10-17 (`islands.ts --by-country`, pieces per
+  city, `1d7c17d`) and checked on the map by the user:
+  - **True positives**, Voronoi borders: Libya (20.2 per city; 26.785422,
+    19.043384 and 21.793614, 19.331217), Eritrea (13.9; 15.198392,
+    38.978376), Chad (12.6; 16.566277, 15.802975), Mali (10.4; 16.639070,
+    -3.072481).
+  - **False positives**, islands in real life: St-Barthélemy (17, one city
+    over many islands), Indonesia, Solomon Islands, New Caledonia, Jersey.
+    Papua New Guinea (14.2) too: its land border is twisty (-6.568606,
+    141.272163) and its cities, which look like districts (level 5), hold
+    many small islands (-10.782047, 151.883240). Saudi Arabia (4.1) and
+    Palestine (57.8, see Palestine) also checked and false.
 - **Region borders cut lines through cities.** Fixed 2026-10-16, reported
   by the user on Egypt. 0d303fb (2026-10-14) let a candidate crossing a
   max-depth cell with >= 25% of it take the cell from one containing it, so
@@ -2229,13 +2241,14 @@ worldwide resolved data (`make netherlands`) and
 
 `region [4]`, `city [6]` (94.3%).
 
-- **The cities are the Oslo areas.** *(open)* Found 2026-10-17 by
-  `islands.ts --by-country`, where Palestine leads by far: 5 cities in 289
-  pieces (57.8 per city; Libya, next, has 20.2). Its level-6 relations are
-  `منطقة أ` / `منطقة ب` / `שטח C` (Areas A, B and C) and `אזור H2`
-  (Hebron's H2), which really are hundreds of separate enclaves, so the
-  pieces are genuine; but they are not cities. Not looked at: which level
-  holds the West Bank's and Gaza's municipalities.
+- **The cities are the Oslo areas.** *(false positive)* Found 2026-10-17
+  by `islands.ts --by-country`, where Palestine leads by far: 5 cities in
+  289 pieces (57.8 per city; Libya, next, has 20.2). Its level-6 relations
+  are `منطقة أ` / `منطقة ب` / `שטח C` (Areas A, B and C) and `אזור H2`
+  (Hebron's H2), which really are hundreds of separate enclaves. Checked by
+  the user: a false positive of the island count, the pieces are what the
+  war made of the West Bank. Not looked at: which level holds the West
+  Bank's and Gaza's municipalities.
 
 ## Philippines (PH)
 
@@ -2476,6 +2489,19 @@ worldwide resolved data (`make netherlands`) and
   (13 provinces) / city 6 (governorates): Riyadh -> `Riyadh Region / Riyadh
   Governorate`, Jeddah -> `Makkah Region / Jeddah Governorate`. Level 10 was
   1.5% coverage and urban neighbourhoods (Thulaim).
+
+## Singapore (SG)
+
+`region [5]`, `city [7]` (region 153.1%, city 119.4%).
+
+- **The levels are far too fine.** *(open)* Reported 2026-10-17 by the
+  user. The regions are the 5 planning regions (Central, East, North,
+  North-east, West Region) and the cities are 331 planning subzones (level
+  7: Sungei Road, Little India, Bugis, Marina East and a separate `Marina
+  East (mp)`), so a point in the city-state answers a neighbourhood, never
+  Singapore. The coverage above 100% at both levels says the relations
+  overlap as well. Not looked at yet: the level-6 planning areas, and
+  whether Singapore should be a city-state (`CITY_STATES`) with one city.
 
 ## Slovakia (SK)
 
