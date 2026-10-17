@@ -469,13 +469,15 @@ goes through `preferred` (not a gap-fill city, then smaller area, then
 finer tier, then lower global id), a total order. A gap-fill city from a
 coarser level than its country's primary one (`CityProperties.gapFill`, set
 by prepare-world; a finer one, like Varadero in Cárdenas, is a real place
-and is not marked) ranks last. At max depth a candidate crossing a cell
-with >= 25% of it takes the cell from one containing it (a parish from its
-district), but only when `preferred` ranks it above every candidate
-containing the cell: otherwise its border becomes a line of its own cells
-through the other one (a governorate's border through an Egyptian Voronoi
-city spanning it, a mandal's edge through Hyderabad; `verify/src/islands.ts`
-counts the pieces). It used to be first-in-array-wins, which made
+and is not marked) ranks last. A max-depth cell no candidate decides alone
+goes to the answer most of its 25 sample points get, each by the rule a
+whole cell gets (the candidates containing the point, less the ancestors of
+any other among them, then `preferred`; pruned ancestors take part). Any
+other rule lets a border cell disagree with the cells on both sides, and a
+border becomes a line of cells of its own: a district's along its parishes'
+borders, a governorate's through an Egyptian Voronoi city spanning it, a
+Libyan Voronoi city's along the edge of a smaller region it reaches into
+(`verify/src/islands.ts` counts the pieces). It used to be first-in-array-wins, which made
 the few hundred OSM relations with identical geometry flip between builds
 whenever any candidate was added, since that reorders the R-tree's
 search results. Keep it a total order.
@@ -509,9 +511,10 @@ Winchester). For the levels a country lists there, each candidate carries a
 grid over its bbox that every primary clears where it contains a cell
 centre, and the candidate is added when `MIN_UNCOVERED_KM2` is left (half of
 itself for a candidate under twice that: Lakshadweep's island taluks). GB,
-BA, BG, CA, IN, LT, PY and SK use it. It needs the compressor's max-depth rule (a candidate
-crossing a cell with >= 25% of it beats one containing it), or the added
-districts take every border cell between the parishes they contain.
+BA, BG, CA, IN, LT, PY and SK use it. It needs the compressor's max-depth rule (a cell
+goes to what most of its sample points get, the parish where a parish is),
+or the added districts take every border cell between the parishes they
+contain.
 
 **Borrowed `name:en`** (`CountryAdminLevels.nameEnFromWikidata`): a candidate
 with no `name:en` takes it from any relation of its country with the same

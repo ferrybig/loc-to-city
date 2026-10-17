@@ -732,7 +732,8 @@ below).
   - **True positives**, Voronoi borders: Libya (20.2 per city; 26.785422,
     19.043384 and 21.793614, 19.331217), Eritrea (13.9; 15.198392,
     38.978376), Chad (12.6; 16.566277, 15.802975), Mali (10.4; 16.639070,
-    -3.072481).
+    -3.072481). Fixed the same day, see "Cities reaching into a smaller
+    region drew lines".
   - **False positives**, islands in real life: St-Barthélemy (17, one city
     over many islands), Indonesia, Solomon Islands, New Caledonia, Jersey.
     Papua New Guinea (14.2) too: its land border is twisty (-6.568606,
@@ -768,6 +769,42 @@ below).
   is what added them; 798 / 2,448 / 1,344 / 85 now, below both. (The drop
   from 374,455 extra pieces worldwide at 9c18e96 to 127,778 at f98b2b5 is
   "break ties by tier and id": identical polygons no longer alternate.)
+  The rule was replaced on 2026-10-17 by sampling each point (see "Cities
+  reaching into a smaller region drew lines"), which answers these cases
+  the same way.
+- **Cities reaching into a smaller region drew lines.** Fixed 2026-10-17,
+  the true positives the user found with `islands.ts --by-country` (see
+  "Border artifacts found by the island count"). A city that reaches into
+  another region, a Voronoi city clipped only to its country or a Malian
+  cercle drawn before Taoudénit was split off Timbuktu, loses the overlap to
+  that region where the region is smaller (`preferred`). But on its edge
+  with the region's own cities, the compressor pruned the region (an
+  ancestor of a city touching the cell), so the cell went to one of the two
+  cities by share, and the foreign city's edge became a line of its cells
+  through the region: Tāzirbū across Al-Jufra (26.785422, 19.043384) and
+  Tibesti (21.793614, 19.331217), Dek'emhāre across Maekel (15.198392,
+  38.978376), Salal across Kanem (16.566277, 15.802975), Tombouctou Cercle
+  across Timbuktu (16.639070, -3.072481). The max-depth cell now goes to
+  what most of its 25 sample points get, each by the rule a whole cell
+  gets: the candidates containing the point, less the ancestors of any
+  other among them, then `preferred`. A pruned region takes part where it
+  meets a city that is not its own; a point only pruned regions hold (the
+  sea off a coastal town, Munford's unincorporated hole) has no vote, or
+  coastal towns lose their coast cells: the first version let those points
+  vote, and 323 cities500 places lost their city (Necoclí, Lorne, Flagami).
+  This replaces the rule of "Region borders cut lines through cities" (a
+  crossing candidate with 25% of the cell, if `preferred` over every one
+  containing it), and gives the same answer in its cases. Pieces: Libya
+  2,448 -> 131, Chad 1,344 -> 360, Eritrea 360 -> 114, Mali 500 -> 21,
+  Egypt 798 -> 144; 113,780 extra pieces worldwide -> 101,572, places in 50+
+  pieces 201 -> 170. 10 cities500 places changed, border places both ways
+  (Upton Lea: Slough, was Wexham Court; Pointe-à-la-Croix and Möng Yang gain
+  their city; Dračevo loses Skopje to Kisela Voda's own land). The build
+  takes ~20% longer (5:28, was 4:37): a pruned outline's samples are taken
+  only where it meets a foreign candidate. What is left in Chad (Salamat,
+  153 pieces) are wedges, not lines: a Voronoi city reaching into a region
+  with no city of its own there; clipping Voronoi cities to their region
+  would remove them.
 - **Territories with no region tier.** Fixed 2026-10-15. A city with no
   region is dropped (`emitCity`), so a country configured `region: []`
   lost every city it had unless it was in `CITY_STATES`. Thirteen were

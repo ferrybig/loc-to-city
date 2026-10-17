@@ -170,3 +170,55 @@ test("two regions' border does not cut through a bigger city of a third region e
   assert.equal(cellOf(2.03, 1.5), 2, "the regions' border cell goes to the region holding most of it");
   assert.equal(cellOf(2.03, 3), 50, "the city keeps its own region");
 });
+
+test("a city reaching into a smaller region draws no line along that region's own city", () => {
+  // City 60 (region 1) reaches into region 2, which is smaller, so region 2
+  // wins where they overlap. City 61 is region 2's own; the two cities meet
+  // at x = 3.05, inside a depth-6 cell where region 2 is pruned for 61.
+  const regionEntries: CandidateEntry[] = [
+    entries[0]!,
+    { globalId: 1, shape: packFeature(square(0, 0, 2, 4)), ancestorIds: [0] },
+    { globalId: 2, shape: packFeature(square(2, 0, 4, 2)), ancestorIds: [0] },
+    { globalId: 3, shape: packFeature(square(2, 2, 4, 4)), ancestorIds: [0] },
+    { globalId: 60, shape: packFeature(square(0, 0, 3.05, 4)), ancestorIds: [1, 0] },
+    { globalId: 61, shape: packFeature(square(3.05, 0, 4, 2)), ancestorIds: [2, 0] },
+  ];
+  const candidates = new CandidateIndex(regionEntries).candidatesForBbox(0, 0, 4, 4);
+  const records = buildChunkRecords(candidates, bounds, 6);
+  const cellOf = (lon: number, lat: number) => {
+    const x = Math.floor((lon / 4) * 64);
+    const y = Math.floor((lat / 4) * 64);
+    return records.find((r) => {
+      const { x: cx, y: cy } = mortonDecode(r.code, 6);
+      const size = 2 ** (6 - r.depth);
+      return x >= cx && x < cx + size && y >= cy && y < cy + size;
+    })!.globalId;
+  };
+  assert.equal(cellOf(2.5, 1), 2, "the smaller region wins where it overlaps the city");
+  assert.equal(cellOf(3.03, 1), 2, "and the cell on the cities' edge, mostly that overlap");
+  assert.equal(cellOf(3.5, 1), 61);
+  assert.equal(cellOf(1, 1), 60);
+});
+
+test("a city's own region does not take its coast for the sea it holds", () => {
+  // Region 1 reaches into the sea east of x = 2.01, its city 70 ends there:
+  // the cell at the coast is mostly sea, but the region is the city's own.
+  const coastEntries: CandidateEntry[] = [
+    entries[0]!,
+    { globalId: 1, shape: packFeature(square(0, 0, 4, 4)), ancestorIds: [0] },
+    { globalId: 70, shape: packFeature(square(0, 0, 2.01, 4)), ancestorIds: [1, 0] },
+  ];
+  const candidates = new CandidateIndex(coastEntries).candidatesForBbox(0, 0, 4, 4);
+  const records = buildChunkRecords(candidates, bounds, 6);
+  const cellOf = (lon: number, lat: number) => {
+    const x = Math.floor((lon / 4) * 64);
+    const y = Math.floor((lat / 4) * 64);
+    return records.find((r) => {
+      const { x: cx, y: cy } = mortonDecode(r.code, 6);
+      const size = 2 ** (6 - r.depth);
+      return x >= cx && x < cx + size && y >= cy && y < cy + size;
+    })!.globalId;
+  };
+  assert.equal(cellOf(2.03, 1), 70, "the coast cell stays the city's");
+  assert.equal(cellOf(3, 1), 1, "the sea beyond is the region's");
+});

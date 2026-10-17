@@ -1,9 +1,9 @@
 import { mortonEncode } from "@ferrybig/cgeodata-reader/format";
 import type { IndexedCandidate } from "./candidateIndex.ts";
-import { AREA_SHARE_SAMPLE_COUNT, type CellBounds, classifyCell, countContainedSamples } from "./geometry.ts";
+import { AREA_SHARE_SAMPLE_COUNT, type CellBounds, classifyCell, containedSampleMask } from "./geometry.ts";
 
-/** Share of a max-depth cell a candidate crossing it needs to take it from one containing it. */
-const CROSSING_MIN_SHARE = 0.25;
+/** Every sample point of a cell (`containedSampleMask`). */
+const ALL_SAMPLES = 2 ** AREA_SHARE_SAMPLE_COUNT - 1;
 
 export interface ChunkRecord {
   code: number;
@@ -155,40 +155,74 @@ export function buildChunkRecords(
       return;
     }
 
-    // A candidate that contains the whole cell scores 100% by definition, so
-    // whenever a bigger one overlaps smaller ones it beats every one of them
-    // on every border cell (a district over the parishes it holds: each
-    // parish border turned district-named). A candidate whose boundary crosses
-    // the cell and that holds a real share of it takes the cell instead, but
-    // only from candidates it beats where both contain a cell (`preferred`):
-    // otherwise its border is a line of its own cells through the other one.
-    // A region's border then does not cut through a smaller city of another
-    // region (Egypt's Voronoi cities span their governorates' borders), nor a
-    // gap-fill city's border through a primary city it overlaps (Hyderabad
-    // and its mandals, whose edges are drawn differently).
+    // A max-depth cell that no candidate decides alone goes to the place
+    // most of it would get as a cell of its own: at each sample point, the
+    // candidates containing that point, less the ancestors of any other
+    // among them, `preferred` between the rest; the most frequent answer
+    // wins. Any other rule makes a border cell disagree with the cells on
+    // both sides, and a border becomes a line of cells of its own:
+    // - a district over its parishes, if containing the cell won it: every
+    //   parish border district-named;
+    // - a region crossing a city of another region it overlaps, if a large
+    //   enough share won it: a line of region cells through the city
+    //   (Egypt's Voronoi cities spanning their governorates' borders);
+    // - a city reaching into another region that is smaller than it (the
+    //   region wins inside), if that region was pruned for its own city
+    //   touching the cell: a line of the city's cells along that city's
+    //   edge (Tāzirbū across Al-Jufra, Libya; a Malian cercle drawn before
+    //   Taoudénit was split off Timbuktu).
+    // A point where only candidates pruned above remain (an ancestor of a
+    // candidate touching the cell) has no vote: a region never takes a cell
+    // from its own city for the sea or the unincorporated land beside it
+    // (coastal towns, Munford's hole). Where such a region meets a candidate
+    // that is not its own, as in the last case above, it does count. Points
+    // with the same candidates around them share an answer.
+    // A pruned candidate's samples are only needed where a candidate that
+    // is not its own descendant contains the point, which is rare: the
+    // country and region outlines pruned here are the biggest polygons.
+    const pruned = touching.filter((candidate) => !relevant.includes(candidate));
+    const masks = relevant.map((candidate) =>
+      containsCell.has(candidate.globalId) ? ALL_SAMPLES : containedSampleMask(candidate.geometry, bounds),
+    );
+    const prunedMasks: (number | undefined)[] = [];
+    const prunedMask = (j: number): number => {
+      const candidate = pruned[j]!;
+      prunedMasks[j] ??= containsCell.has(candidate.globalId) ? ALL_SAMPLES : containedSampleMask(candidate.geometry, bounds);
+      return prunedMasks[j];
+    };
+    const answers = new Map<string, IndexedCandidate | undefined>();
+    const votes = new Map<IndexedCandidate, number>();
+    for (let sample = 0; sample < AREA_SHARE_SAMPLE_COUNT; sample++) {
+      const bit = 2 ** sample;
+      const here = relevant.filter((_, i) => masks[i]! & bit);
+      if (here.length === 0) continue;
+      let key = "";
+      for (let i = 0; i < relevant.length; i++) if (masks[i]! & bit) key += `${i},`;
+      for (let j = 0; j < pruned.length; j++) {
+        const id = pruned[j]!.globalId;
+        if (here.some((candidate) => !candidate.ancestorIds.includes(id)) && prunedMask(j) & bit) {
+          here.push(pruned[j]!);
+          key += `p${j},`;
+        }
+      }
+      let answer = answers.get(key);
+      if (!answers.has(key)) {
+        const ancestors = new Set(here.flatMap((candidate) => candidate.ancestorIds));
+        answer = here.filter((candidate) => !ancestors.has(candidate.globalId)).reduce(preferred);
+        answers.set(key, answer);
+      }
+      votes.set(answer!, (votes.get(answer!) ?? 0) + 1);
+    }
     let best: IndexedCandidate | undefined;
-    let bestScore = -1;
-    for (const candidate of relevant) {
-      if (containsCell.has(candidate.globalId)) continue;
-      if (!containing.every((other) => preferred(candidate, other) === candidate)) continue;
-      const score = countContainedSamples(candidate.geometry, bounds);
-      if (score < CROSSING_MIN_SHARE * AREA_SHARE_SAMPLE_COUNT) continue;
-      if (score > bestScore || (score === bestScore && preferred(candidate, best!) === candidate)) {
-        bestScore = score;
+    let bestVotes = 0;
+    for (const [candidate, count] of votes) {
+      if (count > bestVotes || (count === bestVotes && preferred(candidate, best!) === candidate)) {
+        bestVotes = count;
         best = candidate;
       }
     }
-    if (!best) {
-      best = relevant[0]!;
-      bestScore = -1;
-      for (const candidate of relevant) {
-        const score = countContainedSamples(candidate.geometry, bounds);
-        if (score > bestScore || (score === bestScore && preferred(candidate, best) === candidate)) {
-          bestScore = score;
-          best = candidate;
-        }
-      }
-    }
+    // No sample point inside any candidate: a sliver of each, at most.
+    best ??= relevant.reduce(preferred);
     emit(cellX, cellY, depth, best.globalId);
   }
 

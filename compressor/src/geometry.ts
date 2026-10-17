@@ -149,7 +149,7 @@ interface IndexedRing {
    * for it to be worth it. Every edge is listed in each band its y-range
    * overlaps, so a query only walks the edges near its own y (or y-range)
    * instead of all of them -- the ray casts (`ringToggle`,
-   * `countContainedSamples`) and the boundary walk (`boundaryContact`, the
+   * `containedSampleMask`) and the boundary walk (`boundaryContact`, the
    * dominant cost of a build) all use it. A country the size of Russia has
    * tens of thousands of edges in one ring. */
   bands: number[][] | null;
@@ -272,7 +272,7 @@ function rayCrossesEdge(coords: Float64Array, i: number, x: number, y: number): 
  * polygon`. Turf v7 delegates to `point-in-polygon-hao`, which uses
  * exact/robust arithmetic to be correct on degenerate input -- profiled as
  * ~80% of a real worldwide build's chunk-compression time, almost all of it
- * in `countContainedSamples` below (up to 25 calls per candidate per
+ * in `containedSampleMask` below (up to 25 calls per candidate per
  * still-ambiguous max-depth cell). Plain floating point is enough here for
  * the same reason it already was in `segmentContact`: these aren't
  * adversarial inputs, just ordinary OSM/Natural Earth coordinates, and a
@@ -406,17 +406,19 @@ export function classifyCell(
   return contact === CONTACT_GRAZE ? "crosses" : "disjoint";
 }
 
-// 5x5 = 25 sample points per ambiguous max-depth cell. At most 31: a row's
-// samples are tracked as the bits of one int (see countContainedSamples).
+// 5x5 = 25 sample points per ambiguous max-depth cell. At most 31 in all:
+// a cell's samples are tracked as the bits of one int (containedSampleMask).
 const AREA_SHARE_SAMPLE_GRID = 5;
-/** The most `countContainedSamples` can return. */
+/** How many sample points `containedSampleMask` has bits for. */
 export const AREA_SHARE_SAMPLE_COUNT = AREA_SHARE_SAMPLE_GRID * AREA_SHARE_SAMPLE_GRID;
 // The current cell's sample longitudes, shared by every row.
 const sampleLons = new Float64Array(AREA_SHARE_SAMPLE_GRID);
 
 /**
- * Approximates a candidate's share of a cell's area by counting how many of
- * a small grid of sample points inside the cell it contains. This stands in
+ * Which of a small grid of sample points inside the cell the geometry
+ * contains: bit `iy * AREA_SHARE_SAMPLE_GRID + ix`, row by row from the
+ * cell's south edge. The compressor decides an ambiguous max-depth cell
+ * from these (quadtree.ts). This stands in
  * for Section 10's "largest area share" tie-break at max_depth without
  * calling an exact polygon-clipping routine -- originally to avoid Turf
  * v7's `intersect()` (BigNumber arithmetic, profiled at ~45% of a real
@@ -430,14 +432,14 @@ const sampleLons = new Float64Array(AREA_SHARE_SAMPLE_GRID);
  * and compared against all of them, with the samples' parities kept as
  * bits of one int, rather than walking the same band once per sample.
  */
-export function countContainedSamples(geometry: PackedGeometry, bounds: CellBounds): number {
+export function containedSampleMask(geometry: PackedGeometry, bounds: CellBounds): number {
   const { coords } = geometry;
   const rings = ringsOf(geometry);
   for (let ix = 0; ix < AREA_SHARE_SAMPLE_GRID; ix++) {
     sampleLons[ix] = bounds.lonMin + ((ix + 0.5) / AREA_SHARE_SAMPLE_GRID) * (bounds.lonMax - bounds.lonMin);
   }
 
-  let count = 0;
+  let mask = 0;
   for (let iy = 0; iy < AREA_SHARE_SAMPLE_GRID; iy++) {
     const lat = bounds.latMin + ((iy + 0.5) / AREA_SHARE_SAMPLE_GRID) * (bounds.latMax - bounds.latMin);
     let inside = 0;
@@ -461,9 +463,9 @@ export function countContainedSamples(geometry: PackedGeometry, bounds: CellBoun
       }
       inside ^= toggles & eligible;
     }
-    for (; inside !== 0; inside &= inside - 1) count++;
+    mask |= inside << (iy * AREA_SHARE_SAMPLE_GRID);
   }
-  return count;
+  return mask;
 }
 
 /** Bit ix set when a ray from sample ix of the current row (`sampleLons`,
