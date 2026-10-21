@@ -4,7 +4,7 @@ Turns a latitude/longitude into the country, region and city it lies in,
 using real administrative boundaries from OpenStreetMap rather than "the
 nearest labelled point", which goes wrong near borders. Lookups run
 in-process against a single CGEODATA file (a worldwide one is about
-71 MiB), reading and decoding only the small part of the file each lookup
+61 MiB), reading and decoding only the small part of the file each lookup
 needs.
 
 - No runtime dependencies. Works in Node.js (24 or newer) and in browsers.
@@ -159,8 +159,8 @@ effectively **required**:
 
 | File | Without it |
 |---|---|
-| `world.search-index.bin` | every `search()` scans every name: ~340 ms on a worldwide file |
-| `world.locate-index.bin` | every `locate()` decodes the whole file: ~4 s on a worldwide file |
+| `world.search-index.bin` | every `search()` scans every name: ~430 ms on a worldwide file |
+| `world.locate-index.bin` | every `locate()` decodes the whole file: ~1.2 s on a worldwide file |
 
 `openFile("world.bin")` picks up `world.search-index.bin` and
 `world.locate-index.bin` next to it, the first time a `search()` or
@@ -193,17 +193,17 @@ it and can be built where it's used.
 
 - **Cache**: decoded chunks and names are kept in a least-recently-used
   cache, by default up to 64 MiB (`open(input, { cacheBytes })`). A
-  worldwide file decodes to about 1 GB in all and its largest chunk to
-  about 3 MB. Lookups in a few regions fit easily. Lookups scattered over
+  worldwide file decodes to about 635 MB in all and its largest chunk to
+  about 1.8 MB. Lookups in a few regions fit easily. Lookups scattered over
   a whole continent re-decode chunks unless you give the cache more room.
   `0` turns caching off.
 - **Event loop**: every read is asynchronous, and decodes take turns, one
   per macrotask, even when many lookups run at once. The longest the
   reader holds the event loop is one chunk's decode: under 1 ms for most
-  chunks, about 6 ms for the largest chunk of a worldwide file (12 ms
+  chunks, about 3 ms for the largest chunk of a worldwide file (8 ms
   without WebAssembly SIMD).
 - **Decoding**: the WebAssembly decoder keeps one block of memory, as
-  big as the largest chunk it has decoded (about 3 MB for a worldwide
+  big as the largest chunk it has decoded (about 1.8 MB for a worldwide
   file), while decodes follow each other, and frees it once none has run
   for a second. An idle reader holds only its cache.
 - **Synchronous methods** answer from memory only: `lookupCached()`,
