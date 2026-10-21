@@ -1376,6 +1376,7 @@ export class CGeoDataReader {
 				parseChunk(
 					await inflateBlock(this.inflater, compressed),
 					this.header.maxDepth,
+					this.header.version,
 				),
 			),
 		);

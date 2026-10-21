@@ -78,7 +78,7 @@ test("a point only a region covers shows no city", async ({ page }) => {
 	await expect(popup(page)).toContainText("Place id: 2");
 });
 
-test("a point in a gap resolves to nothing", async ({ page }) => {
+test("a point in an empty cell resolves to nothing", async ({ page }) => {
 	await page.goto("/");
 	await clickLatLng(page, 30, 100);
 

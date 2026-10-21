@@ -107,11 +107,15 @@ function isMultipleOf(value: number, span: number): boolean {
 	return value < 0x80000000 ? (value & (span - 1)) === 0 : value % span === 0;
 }
 
-/** Parses one already-inflated chunk block (Section 8.2) and checks the
- * cheap Section 8.5 invariants a reader can verify without external
- * context (place ids are validated by the caller, which has the place
- * table). */
-export function parseChunk(buf: Uint8Array, maxDepth: number): ChunkRecords {
+/** Parses one already-inflated chunk block (Section 8.2, or Section 8.6's
+ * layout for a `version` 0 file) and checks the cheap Section 8.5
+ * invariants a reader can verify without external context (place ids
+ * are validated by the caller, which has the place table). */
+export function parseChunk(
+	buf: Uint8Array,
+	maxDepth: number,
+	version: number,
+): ChunkRecords {
 	if (maxDepth > MAX_SUPPORTED_DEPTH) {
 		throw new RangeError(
 			`max_depth ${maxDepth} is past the ${MAX_SUPPORTED_DEPTH} this reader supports`,
@@ -129,6 +133,9 @@ export function parseChunk(buf: Uint8Array, maxDepth: number): ChunkRecords {
 
 	const { value: recordCount, bytesRead: b3 } = readVarint(buf, offset);
 	offset += b3;
+	if (version !== 0) {
+		return parseRecords(buf, offset, palette, recordCount, maxDepth);
+	}
 	const { value: codesLength, bytesRead: b4 } = readVarint(buf, offset);
 	offset += b4;
 
@@ -250,4 +257,124 @@ export function parseChunk(buf: Uint8Array, maxDepth: number): ChunkRecords {
 	}
 
 	return { palette, codes, depths, paletteIndices };
+}
+
+/** The rest of a chunk block from its `depths` on (Section 8.2): the
+ * records tile the chunk from code 0, so each code is where the record
+ * before it ends (Section 8.4). */
+function parseRecords(
+	buf: Uint8Array,
+	offset: number,
+	palette: number[],
+	recordCount: number,
+	maxDepth: number,
+): ChunkRecords {
+	const paletteCount = palette.length;
+	const indexWidth = paletteIndexWidth(paletteCount);
+	const end = offset + recordCount * (1 + indexWidth);
+	if (end > buf.length) {
+		throw new CGeoDataFormatError(
+			"chunk depths and palette_indices run past end of block",
+		);
+	}
+	if (end !== buf.length) {
+		throw new CGeoDataFormatError(
+			"chunk block has trailing bytes after palette_indices",
+		);
+	}
+	// A copy, not a view, so the inflated block can be freed. Not
+	// `buf.slice()`: the block is a Buffer, whose `slice` returns a view.
+	const depths = new Uint8Array(buf.subarray(offset, offset + recordCount));
+	const paletteIndices = readLittleEndian(
+		buf,
+		offset + recordCount,
+		indexWidth,
+		recordCount,
+	);
+
+	const codes = new Uint32Array(recordCount);
+	if (!deriveCodes(depths, maxDepth, codes)) {
+		throw recordError(depths, maxDepth);
+	}
+	let maxIndex = 0;
+	for (let j = 0; j < recordCount; j++) {
+		const k = paletteIndices[j]!;
+		if (k > maxIndex) maxIndex = k;
+	}
+	if (maxIndex > paletteCount) {
+		const j = paletteIndices.findIndex((k) => k > paletteCount);
+		throw new CGeoDataFormatError(
+			`record ${j} has palette index ${paletteIndices[j]} > P (${paletteCount})`,
+		);
+	}
+	return { palette, codes, depths, paletteIndices };
+}
+
+/** Fills `codes` with each record's code (Section 8.4), or returns false
+ * when a record breaks invariant 1, 2 or 3 of Section 8.5, for
+ * `recordError` to say which. In integers while every code and span fits
+ * in 31 bits (max_depth 15 and under), else in doubles. */
+function deriveCodes(
+	depths: Uint8Array,
+	maxDepth: number,
+	codes: Uint32Array,
+): boolean {
+	const n = depths.length;
+	// span[d]: how many max-depth cells a depth-d record covers, 4^(D-d);
+	// 0 past max_depth.
+	if (maxDepth <= 15) {
+		const span = new Int32Array(256);
+		for (let d = 0; d <= maxDepth; d++) span[d] = 1 << (2 * (maxDepth - d));
+		const maxCode = 1 << (2 * maxDepth);
+		let code = 0;
+		for (let j = 0; j < n; j++) {
+			const size = span[depths[j]!]!;
+			if (size === 0 || (code & (size - 1)) !== 0 || code >= maxCode) {
+				return false;
+			}
+			codes[j] = code;
+			code += size;
+		}
+		return code <= maxCode;
+	}
+	const span = new Float64Array(256);
+	for (let d = 0; d <= maxDepth; d++) span[d] = 4 ** (maxDepth - d);
+	const maxCode = 4 ** maxDepth;
+	let code = 0;
+	for (let j = 0; j < n; j++) {
+		const size = span[depths[j]!]!;
+		if (size === 0 || code % size !== 0 || code >= maxCode) return false;
+		codes[j] = code;
+		code += size;
+	}
+	return code <= maxCode;
+}
+
+/** The error for the first record `deriveCodes` refused. */
+function recordError(depths: Uint8Array, maxDepth: number): Error {
+	const maxCode = 4 ** maxDepth;
+	let code = 0;
+	for (let j = 0; j < depths.length; j++) {
+		const depth = depths[j]!;
+		if (depth > maxDepth) {
+			return new CGeoDataFormatError(
+				`record ${j} has depth ${depth} > max_depth ${maxDepth}`,
+			);
+		}
+		if (code >= maxCode) {
+			return new CGeoDataFormatError(
+				`record ${j} starts past the end of the chunk`,
+			);
+		}
+		const size = 4 ** (maxDepth - depth);
+		if (code % size !== 0) {
+			return new CGeoDataFormatError(
+				`record ${j} at code ${code} is not aligned to its depth ${depth}`,
+			);
+		}
+		code += size;
+	}
+	return new CGeoDataFormatError(
+		`record ${depths.length - 1} runs past the end of the chunk`,
+	);
 }

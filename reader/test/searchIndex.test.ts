@@ -501,7 +501,7 @@ test("buildSearchIndex: by area, the table is ranked by area and bound to the ch
 	const index = await SearchIndex.open(bytes);
 	assert.equal(index.relevanceRule, 1);
 	// Section B.8: the C.4 checksum, header to place table, not B.8's.
-	assert.equal(index.sourceChecksum, 0x334bf7a76cac66ean);
+	assert.equal(index.sourceChecksum, 0xfc0348f51391f7a1n);
 	// B.12.4: `a` is `0 4` plainly, `0 2` by area (Noord-Holland's 14).
 	assert.deepEqual(await index.shortQuery("a"), [0, 2]);
 

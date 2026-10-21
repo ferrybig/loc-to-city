@@ -1,14 +1,14 @@
 # CGEODATA: A Compact Binary Format for Reverse Geocoding
 
-Version 0 (draft)
+Version 1 (draft)
 
 ## Abstract
 
 This document specifies CGEODATA, a binary file format that maps a WGS84
 coordinate to the country, region, and city that contain it, and that
 carries a searchable list of those places. The format stores a quadtree
-partition of the world as sorted Morton codes, split into independently
-compressed chunks so that a lookup reads only a small part of the file.
+partition of the world as its leaf cells in Morton order, split into
+independently compressed chunks so that a lookup reads only a small part of the file.
 The place list is stored as delta-coded hierarchy counts plus
 keyframe-compressed name blocks, so that names can be recovered by index
 without decompressing the whole list.
@@ -45,8 +45,7 @@ but large and requires polygon arithmetic at query time.
 CGEODATA stores the result of point-in-polygon classification instead of
 the polygons: the world is recursively subdivided into cells until each
 cell is attributed to a single place, and the resulting leaf cells are
-stored as a sorted list of Morton codes. A lookup is then one binary
-search.
+stored in Morton order. A lookup is then one binary search.
 
 ### 1.2. Design Goals
 
@@ -224,7 +223,7 @@ and a CGEODATA file never refers to them.
 | Field                | Type       | Description |
 |----------------------|------------|-------------|
 | `signature`          | 8 bytes    | The ASCII bytes `CGEODATA` (`43 47 45 4f 44 41 54 41`). |
-| `version`            | varint     | File kind and format version, `kind × 16 + version`. A CGEODATA file is kind `0`; this document specifies version `0`, so the field is `0`. See below. |
+| `version`            | varint     | File kind and format version, `kind × 16 + version`. A CGEODATA file is kind `0`; this document specifies version `1`, so the field is `1`. See below. |
 | `attribution_length` | varint     | Byte length of `attribution`. |
 | `attribution`        | bytes      | UTF-8 text, MAY contain Markdown, intended for display to humans, for example `[OpenStreetMap](https://openstreetmap.org/copyright)`. MAY be empty. |
 | `width_exp`          | u8         | The chunk grid has `W = 2^width_exp` columns. |
@@ -253,6 +252,11 @@ is not the kind they expect, or whose version they do not implement.
 Version `0` of any kind is a pre-release version: files written under
 this document carry no compatibility promise once the version number
 changes.
+
+Version `1` of kind `0` differs from version `0` only in the layout of a
+chunk: version `0` stored every record's Morton code, which version `1`
+derives from the depths ([Section 8.6](#86-version-0-chunks)). A reader
+MAY read both.
 
 Constraints:
 
@@ -502,8 +506,7 @@ minimum full-precision code of any point inside it, which is the
 invariant the lookup in [Section 9](#9-lookup-procedure) depends on.
 
 Codes are chunk-local. Cell `(0, 0)` is the chunk's own south-west
-corner, not the world's. This keeps codes, and the deltas between them,
-small.
+corner, not the world's. This keeps codes small.
 
 For `D = 2` the sixteen full-precision codes are laid out as follows
 (north is up):
@@ -524,20 +527,19 @@ For `D = 2` the sixteen full-precision codes are laid out as follows
 | `palette_count`   | varint                     | `P`, the number of palette entries. |
 | `palette`         | `P` varints, delta-coded   | Place IDs referenced by this chunk, strictly increasing ([Section 8.3](#83-palette)). |
 | `record_count`    | varint                     | `M`, the number of records. |
-| `codes_length`    | varint                     | Byte length of `codes`. |
-| `codes`           | `M` varints, delta-coded   | Stored Morton codes, strictly increasing. |
-| `depths`          | `M` u8                     | Depth `d` of each record, in record order. |
-| `palette_indices` | `M` × `S` bytes            | Palette index of each record, in record order, as unsigned little-endian integers of `S` bytes. |
+| `depths`          | `M` u8                     | Depth `d` of each record, in Morton order. |
+| `palette_indices` | `M` × `S` bytes            | Palette index of each record, in Morton order, as unsigned little-endian integers of `S` bytes. |
 
-The three per-record arrays are stored one after the other rather than
+The two per-record arrays are stored one after the other rather than
 interleaved per record. Grouping same-typed values together lets zlib
 find far more repetition; on the prototype data this columnar layout
 plus delta coding reduced the index about twelvefold compared with
 fixed 8-byte records.
 
-`codes_length` is present because varints are variable width, so the
-start of `depths` cannot otherwise be computed without decoding every
-code. `depths` and `palette_indices` are fixed width and need no length.
+A record's Morton code is not stored: the records tile the chunk in
+Morton order, so each one starts where the one before it ends
+([Section 8.4](#84-records)). Both arrays are fixed width, so the length
+of the block follows from `P` and `M`.
 
 The inflated block MUST contain exactly these fields and nothing else:
 after `palette_indices` the block ends.
@@ -576,7 +578,20 @@ It states that the cell at depth `depths[j]` whose stored code is
 `codes[j]` is attributed to the place selected by `palette_indices[j]`.
 
 A cell denoted by `(code, d)` covers the full-precision code range
-`[code, code + 4^(D-d))`.
+`[code, code + 4^(D-d))`. The records cover the chunk from its first
+full-precision cell on, without gaps, so each code is where the record
+before it ends:
+
+```
+codes[0]   = 0
+codes[j+1] = codes[j] + 4^(D - depths[j])
+```
+
+An empty area between two places is covered by records with palette
+index `0`. The records MAY end before the chunk does: the cells from
+`codes[M-1] + 4^(D - depths[M-1])` up to `4^D` have no record and resolve
+to unknown. A chunk with no place at all need not be stored
+([Section 6.2](#62-layout)).
 
 ### 8.5. Invariants
 
@@ -586,18 +601,45 @@ load time and MUST NOT rely on undefined behaviour if they do not.
 1. `0 <= depths[j] <= D` for every record.
 2. The low `2 × (D - depths[j])` bits of `codes[j]` are zero (the code
    is a stored code as defined in Section 8.1).
-3. Codes are strictly increasing: `codes[j] < codes[j+1]`.
-4. Cells do not overlap. Given invariant 3 this is equivalent to
-   `codes[j] + 4^(D - depths[j]) <= codes[j+1]` for every consecutive
-   pair.
-5. Every code is less than `4^D`.
-6. Every palette index is at most `P`.
+3. The records end within the chunk:
+   `codes[M-1] + 4^(D - depths[M-1]) <= 4^D`.
+4. Every palette index is at most `P`.
 
-Cells need not cover the whole chunk. A writer MAY leave gaps for areas
-with no place; a coordinate in a gap resolves to unknown. Gaps and
-index-`0` records are equivalent for lookup purposes; gaps are smaller,
-while index-`0` records allow a writer to emit a complete partition if
-it prefers.
+Codes are then strictly increasing, every code is less than `4^D`, and
+cells do not overlap, by construction.
+
+### 8.6. Version 0 Chunks
+
+In a version `0` file ([Section 5](#5-header)), a chunk stores every
+record's code, between `record_count` and `depths`:
+
+| Field             | Type                       | Description |
+|-------------------|----------------------------|-------------|
+| `palette_count`   | varint                     | As in Section 8.2. |
+| `palette`         | `P` varints, delta-coded   | As in Section 8.2. |
+| `record_count`    | varint                     | As in Section 8.2. |
+| `codes_length`    | varint                     | Byte length of `codes`. |
+| `codes`           | `M` varints, delta-coded   | Stored Morton codes, strictly increasing. |
+| `depths`          | `M` u8                     | As in Section 8.2. |
+| `palette_indices` | `M` × `S` bytes            | As in Section 8.2. |
+
+The records need not tile the chunk: a writer could leave out any empty
+cell, not only those after the last record, and a coordinate in such a
+gap resolves to unknown. Invariants 1, 2 and 4 of
+[Section 8.5](#85-invariants) apply, and invariant 3 is replaced by:
+
+- Codes are strictly increasing, `codes[j] < codes[j+1]`, and cells do
+  not overlap, `codes[j] + 4^(D - depths[j]) <= codes[j+1]`.
+- Every code is less than `4^D`.
+
+Version `1` dropped the codes because they were nearly all redundant.
+A writer's records hardly ever leave a gap, and where none is left, a
+code delta is the size of the record before it, `4^(D - depths[j])`.
+zlib, which sees the codes and the depths as separate columns, did not
+find that out. In the worldwide file, 1.66 million gaps among 106.4
+million records took 3.77 million index-`0` records (3.5% more records)
+to fill, and the chunks went from 62.2 MB to 45.6 MB (-26.7%), with the
+same cell for every place.
 
 ## 9. Lookup Procedure
 
@@ -625,16 +667,18 @@ following steps. `W`, `H`, and `D` come from the header.
    avoids inconsistent rounding between the two.
 4. **Fetch the chunk.** If `chunk_lengths[i]` is `0`, the result is
    unknown. Otherwise read `length(i)` bytes at `offset(i)`
-   ([Section 6.3](#63-locating-a-chunk)) and inflate them. Readers
-   SHOULD cache inflated chunks.
+   ([Section 6.3](#63-locating-a-chunk)) and inflate them, and compute
+   the records' codes ([Section 8.4](#84-records)). Readers SHOULD cache
+   inflated chunks with their codes.
 5. **Compute the query code** `q` from `(x, y)` with the procedure of
    [Section 8.1](#81-cell-grid-and-morton-codes).
 6. **Binary search.** Find the largest `j` such that `codes[j] <= q`
    (`bisect_right(codes, q) - 1` in Python terms). If no such `j` exists,
    the result is unknown.
 7. **Verify containment.** Let `shift = 2 × (D - depths[j])`. If
-   `(q >> shift) != (codes[j] >> shift)`, the point lies in a gap between
-   records and the result is unknown.
+   `(q >> shift) != (codes[j] >> shift)`, the point lies after the last
+   record (or, in a version `0` file, in a gap between records) and the
+   result is unknown.
 8. **Resolve the palette index.** Let `k = palette_indices[j]`. If `k` is
    `0`, the result is unknown. Otherwise the result is `palette[k - 1]`.
 
@@ -642,7 +686,8 @@ Step 6 is correct because of the invariants of
 [Section 8.5](#85-invariants): every stored code is the minimum code of
 its cell, cells do not overlap, and codes are sorted, so the cell
 containing `q`, if any, is the one with the largest stored code not
-exceeding `q`. Step 7 is required because the partition may have gaps.
+exceeding `q`. Step 7 is required because the records may end before the
+chunk does.
 
 To present the result, the reader resolves the ID to its parents
 ([Section 7.5](#75-resolving-an-identifier)) and recovers the names from
@@ -679,10 +724,17 @@ archiving, where a decoder can stream through each chunk.
 
 **Building records.** The intended construction is recursive: starting
 from the chunk as a depth-`0` cell, stop and emit a record when no place
-touches the cell (or emit nothing), or when exactly one place fully
-contains it; otherwise subdivide, and at depth `D` pick one candidate.
-When several places fully contain a cell (nested administrative levels),
-prefer the smallest.
+touches the cell (with palette index `0`), or when exactly one place
+fully contains it; otherwise subdivide, and at depth `D` pick one
+candidate. When several places fully contain a cell (nested
+administrative levels), prefer the smallest.
+
+**Empty cells.** An empty area between two records is best written as
+the fewest index-`0` records that cover it: each the largest cell that
+starts where the one before it ends and does not reach past the area.
+Four empty siblings make one empty parent, as they would in the
+recursive construction. Empty cells after the last record need no
+record at all.
 
 **Keyframe interval.** See [Section 7.3](#73-name-blocks).
 
@@ -707,10 +759,12 @@ assume that a file is well formed.
   imply; a reader SHOULD inflate with an explicit output limit and reject
   a block that exceeds it, to defend against decompression bombs.
 - Readers MUST check that the inflated chunk contains exactly the bytes
-  its counts require, that every depth is at most `D`, that every
-  palette index is at most `P`, and that every palette entry is less than
-  `N`. Readers MAY additionally verify the ordering and non-overlap
-  invariants of [Section 8.5](#85-invariants).
+  its counts require, that every depth is at most `D`, that the records
+  end within the chunk, that every palette index is at most `P`, and
+  that every palette entry is less than `N`. Readers MAY additionally
+  verify the alignment invariant of [Section 8.5](#85-invariants), and
+  in a version `0` file the ordering and non-overlap invariants of
+  [Section 8.6](#86-version-0-chunks).
 - Readers MUST treat the attribution text and place names as untrusted
   text. Where they are rendered as Markdown or HTML, they MUST be
   sanitised.
@@ -719,7 +773,7 @@ assume that a file is well formed.
 
 ## 12. Open Issues
 
-The following are known gaps or unresolved decisions in version `0`.
+The following are known gaps or unresolved decisions in version `1`.
 
 1. **Latitude scaling.** Because the grid is equirectangular, cells
    shrink in east-west extent towards the poles. A per-row scaling
@@ -740,8 +794,8 @@ The following are known gaps or unresolved decisions in version `0`.
 4. **Fixed three-level hierarchy.** Countries whose cities sit directly
    under the country need a placeholder region.
 5. **Global versus per-chunk depth.** `D` is global. A per-chunk depth
-   would let sparse areas use shorter codes; whether that is worth the
-   complexity has not been measured.
+   would let sparse areas stop at coarser cells; whether that is worth
+   the complexity has not been measured.
 6. **Name escaping.** `|` cannot appear in a name. No real place name
    affected by this is known, but there is no escape mechanism.
 
@@ -756,7 +810,7 @@ entries.
 
 ```
 43 47 45 4f 44 41 54 41   signature "CGEODATA"
-00                        version 0
+01                        version 1
 03  4f 53 4d              attribution_length 3, attribution "OSM"
 01                        width_exp  1  -> W = 2
 01                        height_exp 1  -> H = 2
@@ -824,39 +878,54 @@ and skips `5 mod 4 = 1` entry, arriving at `Zaandam`.
 Stored bytes:
 
 ```
-78 da 63 62 62 66 65 65 60 61 64 66 61 64 62 62 04 42 06 46 26 00 02 22
-00 2c
+78 da 63 62 62 66 67 64 62 62 62 62 64 62 64 62 60 60 60 64 02 00 01 8b
+00 21
 ```
 
-Inflated content (20 bytes):
+Inflated content (18 bytes):
 
 ```
 02                        palette_count P = 2  -> S = 1
 02 03                     palette deltas 2, 3  -> IDs 2 (Noord-Holland), 5 (Zaandam)
-05                        record_count M = 5
-05                        codes_length 5
-00 04 01 03 04            code deltas       -> codes  0, 4, 5, 8, 12
-01 02 02 01 02            depths
-01 02 00 01 02            palette_indices   -> ID 2, ID 5, none, ID 2, ID 5
+07                        record_count M = 7
+01 02 02 02 02 01 02      depths
+01 02 00 00 00 01 02      palette_indices   -> ID 2, ID 5, none, none, none, ID 2, ID 5
 ```
 
-The five records cover the chunk's `4 × 4` cell grid as follows
-(north is up; `A` = Noord-Holland, `B` = Zaandam, `-` = index 0,
-`.` = no record):
+Each record starts where the one before it ends
+([Section 8.4](#84-records)). A depth-1 record spans `4^(2-1) = 4`
+codes and a depth-2 record `1`, so the codes are:
+
+| Record | Depth | Code              | Palette index |
+|--------|-------|-------------------|---------------|
+| 0      | 1     | `0`               | `1`, ID 2     |
+| 1      | 2     | `0 + 4 = 4`       | `2`, ID 5     |
+| 2      | 2     | `4 + 1 = 5`       | `0`, none     |
+| 3      | 2     | `5 + 1 = 6`       | `0`, none     |
+| 4      | 2     | `6 + 1 = 7`       | `0`, none     |
+| 5      | 1     | `7 + 1 = 8`       | `1`, ID 2     |
+| 6      | 2     | `8 + 4 = 12`      | `2`, ID 5     |
+
+The last record ends at `12 + 1 = 13`. The seven records cover the
+chunk's `4 × 4` cell grid as follows (north is up; `A` = Noord-Holland,
+`B` = Zaandam, `-` = index 0, `.` = no record):
 
 ```
  y=3 |  A   A   .   .
  y=2 |  A   A   B   .
- y=1 |  A   A   .   .
+ y=1 |  A   A   -   -
  y=0 |  A   A   B   -
      +-----------------
        x=0 x=1 x=2 x=3
 ```
 
 Record `0` is `(code 0, depth 1)`, the depth-1 cell covering codes
-`0..3`. Record `3` is `(code 8, depth 1)`, covering codes `8..11`. The
-other three are full-precision cells. Codes `6`, `7`, `13`, `14`, and
-`15` have no record.
+`0..3`. Record `5` is `(code 8, depth 1)`, covering codes `8..11`. The
+other five are full-precision cells. Codes `5` to `7` are empty and
+covered by index-`0` records; codes `13` to `15`, after the last record,
+have no record. Records `3` and `4` could not be one depth-1 record:
+codes `6` and `7` are half of the depth-1 cell `4..7`, whose other half
+holds Zaandam and record `2`.
 
 ### A.5. Lookups
 
@@ -877,13 +946,18 @@ point is inside that depth-1 cell. Palette index `1` selects ID `2`:
 **Noord-Holland** (a region-level result).
 
 **`(lat 30, lon 100)`.** `gx = 6`, `gy = floor(120/180 × 8) = 5`;
-chunk `3`, local `x = 2, y = 1`, `q = 6`. The largest stored code
-`<= 6` is record `2` (`code 5, depth 2`). `shift = 0` and `6 != 5`, so
-the point is in a gap: **unknown**.
+chunk `3`, local `x = 2, y = 1`, `q = 6`. The largest code `<= 6` is
+record `3` (`code 6, depth 2`), which matches exactly, but its palette
+index is `0`: **unknown**.
 
 **`(lat 20, lon 170)`.** `gx = 7`, `gy = 4`; local `x = 3, y = 0`,
-`q = 5`. Record `2` matches exactly, but its palette index is `0`:
+`q = 5`. Record `2` matches exactly, and its palette index is `0` too:
 **unknown**.
+
+**`(lat 60, lon 170)`.** `gx = 7`, `gy = floor(150/180 × 8) = 6`;
+chunk `3`, local `x = 3, y = 2`, `q = 13`. The largest code `<= 13` is
+record `6` (`code 12, depth 2`). `shift = 0` and `13 != 12`, so the
+point lies after the last record: **unknown**.
 
 **`(lat -10, lon 10)`.** `gx = 4`, `gy = floor(80/180 × 8) = 3`; chunk
 `c = 1, r = 0`, index `1`. Its length is `0`: **unknown**, with no
@@ -1753,7 +1827,7 @@ of [Section C.8](#c8-worked-example)), the entry of `a` is `0 2`: the
 country still comes first, then `Noord-Holland`, whose area byte `14`
 is larger than `Zaandam`'s `5`, while `Amsterdam` has none. That
 index's `source_checksum` is the one of Section C.8.1,
-`0x334bf7a76cac66ea`. A reader that ranks by Section B.5's order cannot
+`0xfc0348f51391f7a1`. A reader that ranks by Section B.5's order cannot
 use that table, and compares every name instead.
 
 **`ë`, sorted, limit 1.** Its folded form, `e`, differs from its plain
@@ -2177,7 +2251,7 @@ This example indexes the source file of
 ```
 43 47 45 4f 44 41 54 41   signature "CGEODATA"
 21                        version 33 -> kind 2 (place location index), version 1
-ea 66 ac 6c a7 f7 4b 33   source_checksum 0x334bf7a76cac66ea
+a1 f7 91 13 f5 48 03 fc   source_checksum 0xfc0348f51391f7a1
 01                        entry_width 1
 07                        place_count 7
 73 00 73 00 00 74 00      entries of places 0 to 6
@@ -2198,12 +2272,12 @@ All records are in chunk `3` (`c = 1`, `r = 1`), so `gx = 4 + x` and
 |--------|-------------|------------------|------------|-----|--------|------|------|
 | 0      | 0, 1        | 2, Noord-Holland | (4, 4)     | 2   | 4      | 10   | 10   |
 | 1      | 4, 2        | 5, Zaandam       | (6, 4)     | 1   | 1      | 13   | 9    |
-| 3      | 8, 1        | 2, Noord-Holland | (4, 6)     | 2   | 4      | 10   | 14   |
-| 4      | 12, 2       | 5, Zaandam       | (6, 6)     | 1   | 1      | 13   | 13   |
+| 5      | 8, 1        | 2, Noord-Holland | (4, 6)     | 2   | 4      | 10   | 14   |
+| 6      | 12, 2       | 5, Zaandam       | (6, 6)     | 1   | 1      | 13   | 13   |
 
-Record `2` has palette index `0`. The area of Zaandam (`5`) is records
-`1` and `4`. The areas of Noord-Holland (`2`) and of Nederland (`0`),
-which contains it, are all four records. Amsterdam, België, and both
+Records `2` to `4` have palette index `0`. The area of Zaandam (`5`) is
+records `1` and `6`. The areas of Noord-Holland (`2`) and of Nederland
+(`0`), which contains it, are all four records. Amsterdam, België, and both
 Antwerpens have no records, so their entries are `00`.
 
 #### C.8.3. Zaandam
@@ -2215,10 +2289,11 @@ is exactly `T / 2`, so `lo = 9`, `hi = 13`, and
 `fy = floor(22 / 4) = 5`: the median falls midway between Zaandam's two
 cells.
 
-Cell `(6, 5)` is local cell `(2, 1)` of chunk `3`, code `6`, which has
-no record. The nearest cells of the area are record `1`'s `(6, 4)` and
-record `4`'s `(6, 6)`, both one row away. With `g = min(4, 2) = 2`,
-`a = 2` and `b = 1`, both are at squared distance `1`. The tie goes to
+Cell `(6, 5)` is local cell `(2, 1)` of chunk `3`, code `6`, which is
+record `3`, with no place. The nearest cells of the area are record
+`1`'s `(6, 4)` and record `6`'s `(6, 6)`, both one row away. With
+`g = min(4, 2) = 2`, `a = 2` and `b = 1`, both are at squared distance
+`1`. The tie goes to
 the lower row, `(6, 4)`: local cell `(2, 0)` of chunk `3`, code `4`.
 The entry is `2^(2 + 4) + 3 × 16 + 4 = 116`, `74`.
 

@@ -34,7 +34,7 @@ function hexBytes(hex: string): Uint8Array {
 const APPENDIX_C_BYTES = hexBytes(`
 	43 47 45 4f 44 41 54 41
 	21
-	ea 66 ac 6c a7 f7 4b 33
+	a1 f7 91 13 f5 48 03 fc
 	01
 	07
 	73 00 73 00 00 74 00
@@ -56,7 +56,7 @@ test("buildLocateIndex: reproduces the Appendix C.8 file byte for byte", async (
 
 test("prefixChecksum: FNV-1a of everything before the first chunk (C.8.1)", async () => {
 	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
-	assert.equal(await reader.prefixChecksum(), 0x334bf7a76cac66ean);
+	assert.equal(await reader.prefixChecksum(), 0xfc0348f51391f7a1n);
 	assert.equal(
 		await reader.prefixChecksum(),
 		referenceFnv1a64(APPENDIX_A_BYTES.subarray(0, 131)),
@@ -338,7 +338,7 @@ test("representativeCell: the result is in the area and doesn't depend on record
 
 test("LocateIndex.open: reads the header and entries of the C.8 file", async () => {
 	const index = await LocateIndex.open(APPENDIX_C_BYTES);
-	assert.equal(index.sourceChecksum, 0x334bf7a76cac66ean);
+	assert.equal(index.sourceChecksum, 0xfc0348f51391f7a1n);
 	assert.equal(index.entryWidth, 1);
 	assert.equal(index.placeCount, 7);
 	assert.deepEqual(

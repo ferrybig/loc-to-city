@@ -362,7 +362,7 @@ test("build-locate-index: writes the Appendix C.8 file, which locate picks up ne
 		readFileSync(indexPath).toString("hex"),
 		"4347454f44415441" +
 			"21" +
-			"ea66ac6ca7f74b33" +
+			"a1f79113f54803fc" +
 			"01" +
 			"07" +
 			"73007300007400" +
@@ -525,7 +525,7 @@ test("info: reports Appendix A's header, counts and byte split", () => {
 	const { stdout, status } = run(["info", fixturePath, "--json"]);
 	assert.equal(status, 0);
 	assert.deepEqual(JSON.parse(stdout), {
-		version: 0,
+		version: 1,
 		attribution: "OSM",
 		grid: { width: 2, height: 2, widthExp: 1, heightExp: 1 },
 		maxDepth: 2,

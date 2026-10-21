@@ -175,7 +175,7 @@ function corrupt(rand: () => number, records: Records): Block {
 function parseWith(wasm: boolean, bytes: Uint8Array, maxDepth: number) {
 	useWasmChunkDecoder(wasm);
 	try {
-		return parseChunk(bytes, maxDepth);
+		return parseChunk(bytes, maxDepth, 0);
 	} catch (error) {
 		return error as Error;
 	} finally {
@@ -300,7 +300,7 @@ test("the fast path checks alignment in every byte of a code", () => {
 test("the fast path holds no WebAssembly memory once idle", async () => {
 	const block = encode(randomRecords(mulberry32(3), 10, 200));
 	assert.ok(block.recordCount >= WASM_MIN_RECORDS);
-	parseChunk(block.bytes, 10);
+	parseChunk(block.bytes, 10, 0);
 	assert.ok(wasmChunkDecoderBytes() > 0);
 	await sleep(1100);
 	assert.equal(wasmChunkDecoderBytes(), 0);

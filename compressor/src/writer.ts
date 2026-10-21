@@ -28,7 +28,7 @@ export function writeCGeoDataFile(opts: WriteFileOptions): Buffer {
 
   const header = Buffer.concat([
     signature,
-    Buffer.from(writeVarint(0)), // version
+    Buffer.from(writeVarint(1)), // version
     Buffer.from(writeVarint(attributionBytes.length)),
     attributionBytes,
     Buffer.from([opts.widthExp, opts.heightExp, opts.maxDepth, opts.keyframeExp]),
