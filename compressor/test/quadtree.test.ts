@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Feature, Polygon } from "geojson";
+import type { Feature, MultiPolygon, Polygon } from "geojson";
 import { CandidateIndex, packFeature, type CandidateEntry, type IndexedCandidate } from "../src/candidateIndex.ts";
 import { buildChunkRecords } from "../src/quadtree.ts";
 import { mortonDecode } from "@ferrybig/cgeodata-reader/format";
@@ -221,4 +221,66 @@ test("a city's own region does not take its coast for the sea it holds", () => {
   };
   assert.equal(cellOf(2.03, 1), 70, "the coast cell stays the city's");
   assert.equal(cellOf(3, 1), 1, "the sea beyond is the region's");
+});
+
+test("four siblings that resolve to one place come back as their parent", () => {
+  // City 80 covers the whole chunk; 81 is a gap-fill city inside it, whose
+  // boundary crosses cells but which never wins one (a primary keeps the
+  // overlap). Every cell is 80's, so the subdivision its edges force is
+  // undone all the way back up to the root.
+  const mergeEntries: CandidateEntry[] = [
+    { globalId: 80, shape: packFeature(square(0, 0, 4, 4)), ancestorIds: [] },
+    { globalId: 81, shape: packFeature(square(1.03, 1.03, 2.97, 2.97)), ancestorIds: [], gapFill: true },
+  ];
+  const candidates = new CandidateIndex(mergeEntries).candidatesForBbox(0, 0, 4, 4);
+  const records = buildChunkRecords(candidates, bounds, 6);
+  assert.deepEqual(records, [{ code: 0, depth: 0, globalId: 80 }]);
+});
+
+test("siblings that resolve to different places are kept apart", () => {
+  // As above, plus city 82 over the south-west quadrant exactly: it wins
+  // that quadrant (the smaller of two containing it), so the root's four
+  // children disagree and stay four records -- each of the other three
+  // still merged back from the cells 81's edges split it into.
+  const mergeEntries: CandidateEntry[] = [
+    { globalId: 80, shape: packFeature(square(0, 0, 4, 4)), ancestorIds: [] },
+    { globalId: 81, shape: packFeature(square(1.03, 1.03, 2.97, 2.97)), ancestorIds: [], gapFill: true },
+    { globalId: 82, shape: packFeature(square(0, 0, 2, 2)), ancestorIds: [] },
+  ];
+  const candidates = new CandidateIndex(mergeEntries).candidatesForBbox(0, 0, 4, 4);
+  const records = buildChunkRecords(candidates, bounds, 6);
+  assert.deepEqual(records, [
+    { code: 0, depth: 1, globalId: 82 },
+    { code: 1024, depth: 1, globalId: 80 },
+    { code: 2048, depth: 1, globalId: 80 },
+    { code: 3072, depth: 1, globalId: 80 },
+  ]);
+});
+
+test("four cells of one place that are not their parent are not merged into it", () => {
+  // City 90 is four specks, each strictly inside a different max-depth cell
+  // of one depth-4 cell. Every one of those four depth-5 cells comes back as
+  // a single record -- but a max-depth record of a quarter of it, its other
+  // three quarters touching no place at all. Merging the four would hand 90
+  // the whole depth-4 cell, sixteen times the land it covers.
+  const speck = (x: number, y: number) =>
+    [[[x, y], [x + 0.01, y], [x + 0.01, y + 0.01], [x, y + 0.01], [x, y]]] as number[][][];
+  const specks: Feature<MultiPolygon> = {
+    type: "Feature",
+    properties: {},
+    geometry: {
+      type: "MultiPolygon",
+      coordinates: [speck(0.01, 0.01), speck(0.135, 0.01), speck(0.01, 0.135), speck(0.135, 0.135)],
+    },
+  };
+  const candidates = new CandidateIndex([
+    { globalId: 90, shape: packFeature(specks), ancestorIds: [] },
+  ]).candidatesForBbox(0, 0, 4, 4);
+  const records = buildChunkRecords(candidates, bounds, 6);
+  assert.deepEqual(
+    records.map((r) => r.depth),
+    [6, 6, 6, 6],
+    "one max-depth record per speck, not one depth-4 cell",
+  );
+  assert.deepEqual(new Set(records.map((r) => r.globalId)), new Set([90]));
 });

@@ -75,6 +75,23 @@ function preferred(a: IndexedCandidate, b: IndexedCandidate): IndexedCandidate {
  * region but outside every one of its cities -- still correctly falls back
  * to that region once no city touches that specific cell anymore.
  *
+ * Subdivision is forced by *any* surviving candidate's boundary crossing
+ * the cell, including one that then wins nothing: all four children can
+ * still resolve to the same place, each by its own route (full containment
+ * on one side, the sample vote on the other). `recurse` therefore returns
+ * its subtree's records instead of pushing them into one array, and four
+ * children that came back as one record each *at the child depth*, for the
+ * same place, are replaced by the single record their parent would have
+ * emitted (a child only part of which any place touches comes back as one
+ * record too, of that part, at a deeper depth: merging four of those would
+ * hand the place the empty cells in between). That is
+ * lossless on the wire -- a record's `code` and `depth` already describe a
+ * cell of any size, and not every leaf reaches max_depth anyway -- and it
+ * cascades, since a merged record is itself one of four siblings one level
+ * up. Measured on `world-high-res.bin`: 166,081,761 records down to
+ * 106,377,942 (-36.0%), 73,911,162 chunk bytes down to 62,220,461
+ * (-15.8%).
+ *
  * `rootCandidates` must already be the result of querying the spatial
  * index for `chunkBounds` (i.e. `CandidateIndex.candidatesForBbox`) --
  * this function never touches the index itself, which is what makes it
@@ -87,8 +104,6 @@ export function buildChunkRecords(
   chunkBounds: CellBounds,
   maxDepth: number,
 ): ChunkRecord[] {
-  const records: ChunkRecord[] = [];
-
   function cellBoundsOf(cellX: number, cellY: number, depth: number): CellBounds {
     const cellsPerSide = 2 ** depth;
     const lonWidth = (chunkBounds.lonMax - chunkBounds.lonMin) / cellsPerSide;
@@ -98,14 +113,19 @@ export function buildChunkRecords(
     return { lonMin, lonMax: lonMin + lonWidth, latMin, latMax: latMin + latHeight };
   }
 
-  function emit(cellX: number, cellY: number, depth: number, globalId: number): void {
+  /** The one record a cell resolving as a whole produces. */
+  function recordFor(cellX: number, cellY: number, depth: number, globalId: number): ChunkRecord[] {
     const fullX = cellX * 2 ** (maxDepth - depth);
     const fullY = cellY * 2 ** (maxDepth - depth);
-    records.push({ code: mortonEncode(fullX, fullY, maxDepth), depth, globalId });
+    return [{ code: mortonEncode(fullX, fullY, maxDepth), depth, globalId }];
   }
 
-  function recurse(cellX: number, cellY: number, depth: number, candidates: IndexedCandidate[]): void {
-    if (candidates.length === 0) return;
+  /** A cell no place touches: shared, so the common case allocates nothing.
+   * Never handed out as the result -- `buildChunkRecords` copies it. */
+  const EMPTY: ChunkRecord[] = [];
+
+  function recurse(cellX: number, cellY: number, depth: number, candidates: IndexedCandidate[]): ChunkRecord[] {
+    if (candidates.length === 0) return EMPTY;
 
     const bounds = cellBoundsOf(cellX, cellY, depth);
 
@@ -116,7 +136,7 @@ export function buildChunkRecords(
     const bboxOverlapping = candidates.filter(
       (c) => c.minX < bounds.lonMax && c.maxX > bounds.lonMin && c.minY < bounds.latMax && c.maxY > bounds.latMin,
     );
-    if (bboxOverlapping.length === 0) return;
+    if (bboxOverlapping.length === 0) return EMPTY;
 
     // One classification per candidate answers both questions this cell
     // needs -- "does it touch" and "does it fully contain" -- so the
@@ -129,7 +149,7 @@ export function buildChunkRecords(
       touching.push(candidate);
       if (relation === "contains") containsCell.add(candidate.globalId);
     }
-    if (touching.length === 0) return;
+    if (touching.length === 0) return EMPTY;
 
     // Ignore any candidate that's an ancestor of a more specific candidate
     // also touching this same cell -- only for *deciding* this cell (the
@@ -142,17 +162,37 @@ export function buildChunkRecords(
     const containing = relevant.filter((candidate) => containsCell.has(candidate.globalId));
     if (containing.length === relevant.length) {
       const winner = containing.reduce(preferred);
-      emit(cellX, cellY, depth, winner.globalId);
-      return;
+      return recordFor(cellX, cellY, depth, winner.globalId);
     }
 
     if (depth < maxDepth) {
       const childDepth = depth + 1;
-      recurse(cellX * 2, cellY * 2, childDepth, touching);
-      recurse(cellX * 2 + 1, cellY * 2, childDepth, touching);
-      recurse(cellX * 2, cellY * 2 + 1, childDepth, touching);
-      recurse(cellX * 2 + 1, cellY * 2 + 1, childDepth, touching);
-      return;
+      // In Morton order, so the concatenation below is already sorted by
+      // code (the final sort then only has to confirm it).
+      const sw = recurse(cellX * 2, cellY * 2, childDepth, touching);
+      const se = recurse(cellX * 2 + 1, cellY * 2, childDepth, touching);
+      const nw = recurse(cellX * 2, cellY * 2 + 1, childDepth, touching);
+      const ne = recurse(cellX * 2 + 1, cellY * 2 + 1, childDepth, touching);
+      // Nothing here needed subdividing after all: four children that each
+      // resolved as a whole, to the same place, are this cell. A candidate
+      // whose boundary crosses the cell but wins none of it forces the
+      // subdivision above, and this is what takes it back.
+      //
+      // `depth === childDepth` is what says a child resolved as a whole,
+      // and one record is not enough on its own: a child only part of
+      // which any place touches at all also returns a single record, of
+      // that part, and merging those four would hand the place the cells
+      // in between -- four islands of one city, one per quadrant, would
+      // become the whole cell.
+      const whole = (child: ChunkRecord[]): ChunkRecord | undefined =>
+        child.length === 1 && child[0]!.depth === childDepth ? child[0] : undefined;
+      const first = whole(sw);
+      if (first) {
+        const { globalId } = first;
+        const same = (child: ChunkRecord[]): boolean => whole(child)?.globalId === globalId;
+        if (same(se) && same(nw) && same(ne)) return recordFor(cellX, cellY, depth, globalId);
+      }
+      return [...sw, ...se, ...nw, ...ne];
     }
 
     // A max-depth cell that no candidate decides alone goes to the place
@@ -223,10 +263,10 @@ export function buildChunkRecords(
     }
     // No sample point inside any candidate: a sliver of each, at most.
     best ??= relevant.reduce(preferred);
-    emit(cellX, cellY, depth, best.globalId);
+    return recordFor(cellX, cellY, depth, best.globalId);
   }
 
-  recurse(0, 0, 0, rootCandidates);
+  const records = [...recurse(0, 0, 0, rootCandidates)];
   records.sort((a, b) => a.code - b.code);
   return records;
 }

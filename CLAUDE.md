@@ -482,6 +482,36 @@ the few hundred OSM relations with identical geometry flip between builds
 whenever any candidate was added, since that reorders the R-tree's
 search results. Keep it a total order.
 
+**Sibling merge after subdivision** (`quadtree.ts`'s `recurse`): a cell
+subdivides when *any* surviving candidate's boundary crosses it, including
+a candidate that then wins nothing, so all four children can still resolve
+to the same place — one by full containment, its sibling by the max-depth
+sample vote. `recurse` therefore returns its subtree's records instead of
+pushing them into one array, and four children that each came back as one
+record *at the child depth*, for the same place, are replaced by the single
+record the parent would have emitted. Lossless on the wire: a record's
+`code` and `depth` already describe a cell of any size (not every leaf
+reaches max_depth anyway), so a merged record is indistinguishable from one
+that resolved at that depth directly, and the reader needs no change. It
+cascades, since a merged record is itself one of four siblings one level up.
+**The "at the child depth" half of the test is the whole correctness
+argument**: a child only part of which any place touches *also* comes back
+as a single record — of that part, at a deeper depth — and merging four of
+those hands the place the empty cells in between (four specks of one city,
+one per quadrant, became the whole cell; 88,542 records' worth of ocean on
+the first worldwide build, caught by diffing against an independent
+record-level simulation). Measured on `world-high-res.bin`: 166,081,761
+records → 106,377,942 (-36.0%), 75,935,694 bytes → 64,244,778 (-15.4%);
+on `world.bin` 14,370,096 → 9,344,604 records (-35.0%) and 10,460,502 →
+9,491,199 bytes (-9.3%). zlib already eats the long runs of equal
+depth/palette bytes that sibling groups make, so the byte win was not
+obvious in advance and was measured (re-encoding every chunk of a finished
+file with `chunkEncoder.ts`) before the code was touched. Correctness was
+checked by walking both builds' records against each other: 6.38 billion
+cells, the same cell → place function, and all 419 `verify/` spot-checks
+byte-identical. Found by a peer agent fact-checking a blog post about this
+repo against the source.
+
 **`geometry.ts`'s `classifyCell`** replaced turf's `booleanContains`/
 `booleanIntersects` — those gave wrong answers on multi-part polygons at
 country/region scale (verified: turf claimed full containment where
