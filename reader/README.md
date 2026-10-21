@@ -8,10 +8,10 @@ in-process against a single CGEODATA file (a worldwide one is about
 needs.
 
 - No runtime dependencies. Works in Node.js (24 or newer) and in browsers.
-  Also reads files of the format's previous version, 0, whose chunks
-  decode with WebAssembly SIMD where the platform allows it, and in
-  plain JavaScript (about twice as slow) where it doesn't, such as a
-  page whose Content Security Policy lacks `'wasm-unsafe-eval'`.
+  Chunks decode with WebAssembly SIMD where the platform allows it, and
+  in plain JavaScript (about 1.5x as slow, twice for a file of the
+  format's previous version, 0) where it doesn't, such as a page whose
+  Content Security Policy lacks `'wasm-unsafe-eval'`.
 - Async throughout: reads never block, and the event loop is never held
   for more than one chunk's decode.
 - Includes place search (diacritic-insensitive, all alternative names)
@@ -203,10 +203,10 @@ it and can be built where it's used.
   reader holds the event loop is one chunk's decode: under 1 ms for most
   chunks, about 3 ms for the largest chunk of a worldwide file (8 ms
   for a version 0 file without WebAssembly SIMD).
-- **Decoding**: the WebAssembly decoder (version 0 files only) keeps one
-  block of memory, as big as the largest chunk it has decoded (about
-  1.8 MB for a worldwide file), while decodes follow each other, and
-  frees it once none has run for a second. An idle reader holds only its cache.
+- **Decoding**: the WebAssembly decoder keeps one block of memory, as
+  big as the largest chunk it has decoded (about 2 MB for a worldwide
+  file), while decodes follow each other, and frees it once none has run
+  for a second. An idle reader holds only its cache.
 - **Synchronous methods** answer from memory only: `lookupCached()`,
   `placeIds()`, `chunkIndexAt()`, `subtreeIdRanges()`, `placeCounts`,
   `header`.

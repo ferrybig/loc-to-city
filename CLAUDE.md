@@ -212,11 +212,16 @@ index-0 records (`compressor/src/chunkEncoder.ts`'s `gapCells`), and each
 code is where the record before it ends. On `world-high-res.bin` that is
 64,244,778 → 47,620,804 bytes (-25.9%) for 3.5% more records, the same
 cell → place for all 106,377,942 placed records. The reader still reads
-version 0 files, and only those use the WebAssembly path below.
+version 0 files.
 
-Version 0 chunks of 64+ records decode through a WebAssembly
-SIMD fast path (`reader/wasm/chunkDecoder.wat`, ~5x the JavaScript
-parser): `npm run build:wasm -w reader` compiles it into the committed
+Chunks of 64+ records decode through a WebAssembly SIMD fast path
+(`reader/wasm/chunkDecoder.wat`): `parse` decodes a version 0 chunk's
+stored codes (~5x the JavaScript parser), `parseDepths` derives a
+version 1 chunk's (16 records at a time up to `max_depth` 13, so the
+codes stay in 32-bit lanes; one at a time deeper). The version 1 one is
+~1.5x `deriveCodes` and ~10-15% on bulk lookups: what is left is
+copying the block in and the codes out. Both share `$indicesOk`.
+`npm run build:wasm -w reader` compiles it into the committed
 `src/chunkDecoderWasm.ts` (wabt is a devDependency only), and
 `test/chunkDecoder.test.ts` fails when that file is stale. The `.wat`
 never reports an error: it accepts a block or declines it, and a

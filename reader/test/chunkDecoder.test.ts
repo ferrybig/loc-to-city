@@ -6,6 +6,7 @@ import { generate } from "../scripts/build-wasm.ts";
 import { parseChunk } from "../src/chunk.ts";
 import {
 	decodeChunkCodes,
+	decodeDepthCodes,
 	useWasmChunkDecoder,
 	WASM_MIN_RECORDS,
 	wasmChunkDecoderAvailable,
@@ -45,11 +46,13 @@ interface Block {
 
 /** Random valid records at `maxDepth`: a quadtree subdivided mostly near
  * its finest levels, as real chunks are, with some cells left out (gaps,
- * so multi-byte deltas) and palette indices up to `paletteCount`. */
+ * so multi-byte deltas; each leaf is kept with chance `keep`) and palette
+ * indices up to `paletteCount`. At most 3000 records, the first ones. */
 function randomRecords(
 	rand: () => number,
 	maxDepth: number,
 	paletteCount: number,
+	keep = 0.95,
 ): Records {
 	const records: Records = {
 		maxDepth,
@@ -63,7 +66,7 @@ function randomRecords(
 		const stop =
 			depth === maxDepth || rand() < (maxDepth - depth > 4 ? 0.02 : 0.35);
 		if (stop) {
-			if (rand() < 0.95) {
+			if (rand() < keep) {
 				records.codes.push(code);
 				records.depths.push(depth);
 				records.indices.push(Math.floor(rand() * (paletteCount + 1)));
@@ -172,10 +175,15 @@ function corrupt(rand: () => number, records: Records): Block {
 	return encode(r);
 }
 
-function parseWith(wasm: boolean, bytes: Uint8Array, maxDepth: number) {
+function parseWith(
+	wasm: boolean,
+	bytes: Uint8Array,
+	maxDepth: number,
+	version = 0,
+) {
 	useWasmChunkDecoder(wasm);
 	try {
-		return parseChunk(bytes, maxDepth, 0);
+		return parseChunk(bytes, maxDepth, version);
 	} catch (error) {
 		return error as Error;
 	} finally {
@@ -304,4 +312,199 @@ test("the fast path holds no WebAssembly memory once idle", async () => {
 	assert.ok(wasmChunkDecoderBytes() > 0);
 	await sleep(1100);
 	assert.equal(wasmChunkDecoderBytes(), 0);
+});
+
+// ── Version 1: codes derived from the depths ─────────────────────────────
+
+/** A version 1 chunk's records (Section 8.4): every leaf of a random
+ * quadtree, in order and without gaps, sometimes cut short. */
+function randomTiling(
+	rand: () => number,
+	maxDepth: number,
+	paletteCount: number,
+): Records {
+	const r = randomRecords(rand, maxDepth, paletteCount, 1);
+	const n =
+		rand() < 0.5 ? r.codes.length : 1 + Math.floor(rand() * r.codes.length);
+	return {
+		...r,
+		codes: r.codes.slice(0, n),
+		depths: r.depths.slice(0, n),
+		indices: r.indices.slice(0, n),
+	};
+}
+
+/** A version 1 block (Section 8.2) and where its depths start. */
+interface DepthBlock {
+	bytes: Uint8Array;
+	depthsStart: number;
+	recordCount: number;
+	paletteCount: number;
+	width: number;
+}
+
+function encodeDepths({
+	paletteCount,
+	depths,
+	indices,
+}: Pick<Records, "paletteCount" | "depths" | "indices">): DepthBlock {
+	const width = paletteCount <= 255 ? 1 : paletteCount <= 65535 ? 2 : 3;
+	const head = [
+		...writeVarint(paletteCount),
+		...(paletteCount > 0 ? writeVarint(7) : []),
+		...new Array<number>(Math.max(0, paletteCount - 1)).fill(1),
+		...writeVarint(depths.length),
+	];
+	const indexBytes = indices.flatMap((k) =>
+		[k & 0xff, (k >> 8) & 0xff, (k >> 16) & 0xff].slice(0, width),
+	);
+	return {
+		bytes: Uint8Array.from([...head, ...depths, ...indexBytes]),
+		depthsStart: head.length,
+		recordCount: depths.length,
+		paletteCount,
+		width,
+	};
+}
+
+/** `records` (a tiling) broken in one way, most aimed at a single check;
+ * a changed depth also moves every code after it. */
+function corruptDepths(rand: () => number, records: Records): DepthBlock {
+	const pick = (n: number) => Math.floor(rand() * n);
+	const { maxDepth, depths, paletteCount } = records;
+	const d = [...depths];
+	const indices = [...records.indices];
+	const j = pick(d.length);
+	switch (pick(7)) {
+		case 0: // a depth past max_depth, as far as 255
+			d[j] = rand() < 0.5 ? 255 : maxDepth + 1 + pick(255 - maxDepth);
+			break;
+		case 1: // a bigger cell, mostly off its span's grid
+			d[j] = Math.max(0, d[j]! - 1 - pick(2));
+			break;
+		case 2: // a smaller cell, so every code after it moves
+			d[j] = Math.min(maxDepth, d[j]! + 1);
+			break;
+		case 3: // a palette index past P
+			indices[j] = paletteCount + 1;
+			break;
+		case 4: {
+			// one more record after a chunk the records already fill
+			const fill = gapDepths(endOf(d, maxDepth), 4 ** maxDepth, maxDepth);
+			d.push(...fill, d[d.length - 1]!);
+			indices.push(...fill.map(() => 0), 1);
+			break;
+		}
+		case 5: // two neighbours swapped
+			if (j > 0) [d[j - 1], d[j]] = [d[j]!, d[j - 1]!];
+			break;
+		default: {
+			const block = encodeDepths({ paletteCount, depths: d, indices });
+			block.bytes[
+				block.depthsStart + pick(block.bytes.length - block.depthsStart)
+			] = pick(256);
+			return block;
+		}
+	}
+	return encodeDepths({ paletteCount, depths: d, indices });
+}
+
+/** Where records of `depths` end, laid end to end from code 0. */
+function endOf(depths: number[], maxDepth: number): number {
+	return depths.reduce((code, depth) => code + 4 ** (maxDepth - depth), 0);
+}
+
+/** The depths of the fewest aligned cells from code `start` up to `end`
+ * (as the compressor's gapCells). */
+function gapDepths(start: number, end: number, maxDepth: number): number[] {
+	const depths: number[] = [];
+	for (let code = start; code < end; ) {
+		let depth = 0;
+		while (
+			code % 4 ** (maxDepth - depth) !== 0 ||
+			code + 4 ** (maxDepth - depth) > end
+		)
+			depth++;
+		depths.push(depth);
+		code += 4 ** (maxDepth - depth);
+	}
+	return depths;
+}
+
+function decodeDepths(block: DepthBlock, maxDepth: number) {
+	return decodeDepthCodes(
+		block.bytes,
+		block.depthsStart,
+		block.recordCount,
+		maxDepth,
+		block.paletteCount,
+		block.width,
+	);
+}
+
+test("the version 1 fast path derives random chunks' codes exactly as the JavaScript parser does", () => {
+	const rand = mulberry32(4);
+	let big = 0;
+	for (let round = 0; round < 300; round++) {
+		const maxDepth = 1 + Math.floor(rand() * 16);
+		const paletteCount = [0, 1, 200, 255, 256, 70000][round % 6]!;
+		const block = encodeDepths(randomTiling(rand, maxDepth, paletteCount));
+		const js = parseWith(false, block.bytes, maxDepth, 1);
+		assert.ok(!(js instanceof Error), `round ${round}: ${js}`);
+		assert.deepEqual(parseWith(true, block.bytes, maxDepth, 1), js);
+		const codes = decodeDepths(block, maxDepth);
+		assert.ok(codes, `round ${round}: a valid block was declined`);
+		assert.deepEqual(codes, js.codes);
+		if (block.recordCount >= WASM_MIN_RECORDS) big++;
+	}
+	assert.ok(big > 100, `only ${big} blocks big enough to take the fast path`);
+});
+
+test("the version 1 fast path declines every block the JavaScript parser rejects", () => {
+	const rand = mulberry32(5);
+	let rejected = 0;
+	for (let round = 0; round < 300; round++) {
+		const maxDepth = 2 + Math.floor(rand() * 15);
+		const paletteCount = [1, 255, 256, 70000][round % 4]!;
+		const records = randomTiling(rand, maxDepth, paletteCount);
+		for (let m = 0; m < 40; m++) {
+			const block = corruptDepths(rand, records);
+			const js = parseWith(false, block.bytes, maxDepth, 1);
+			const codes = decodeDepths(block, maxDepth);
+			if (js instanceof Error) {
+				rejected++;
+				assert.equal(codes, undefined, `round ${round}.${m}: ${js.message}`);
+			} else if (codes) {
+				assert.deepEqual(codes, js.codes, `round ${round}.${m}`);
+			}
+			assert.deepEqual(parseWith(true, block.bytes, maxDepth, 1), js);
+		}
+	}
+	assert.ok(rejected > 4000, `only ${rejected} corrupted blocks rejected`);
+});
+
+test("the version 1 fast path checks alignment in every byte of a code", () => {
+	// A record whose code is a multiple of 2^bit but not of its span
+	// 2^(bit + 2), inside the 16-record path: max-depth cells up to code
+	// 14, the fewest cells up to 2^bit, that record, then max-depth cells.
+	const maxDepth = 13;
+	for (const bit of [8, 16, 22]) {
+		const depths = new Array<number>(14).fill(maxDepth);
+		depths.push(...gapDepths(14, 2 ** bit, maxDepth));
+		const j = depths.length;
+		depths.push(maxDepth - bit / 2 - 1);
+		depths.push(...new Array<number>(40).fill(maxDepth));
+		assert.ok(j < depths.length - (depths.length % 16));
+		const indices = depths.map(() => 1);
+		const block = encodeDepths({ paletteCount: 1, depths, indices });
+		const js = parseWith(false, block.bytes, maxDepth, 1);
+		assert.match(String(js), new RegExp(`record ${j} .* not aligned`));
+		assert.equal(decodeDepths(block, maxDepth), undefined, `bit ${bit}`);
+		// Accepted with that record a max-depth cell instead.
+		depths[j] = maxDepth;
+		const fixed = encodeDepths({ paletteCount: 1, depths, indices });
+		const codes = decodeDepths(fixed, maxDepth);
+		assert.ok(codes, `bit ${bit}: declined`);
+		assert.equal(codes[j], 2 ** bit);
+	}
 });

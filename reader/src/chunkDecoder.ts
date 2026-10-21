@@ -1,10 +1,10 @@
 import { CHUNK_DECODER_WASM } from "./chunkDecoderWasm.ts";
 
 /**
- * `parseChunk`'s fast path for a version 0 file, whose chunks store their
- * codes (binary-format.md Section 8.6): wasm/chunkDecoder.wat, a
- * WebAssembly SIMD decoder for those codes that checks every invariant
- * `parseChunk` does. A version 1 chunk has no codes to decode. It only
+ * `parseChunk`'s fast path: wasm/chunkDecoder.wat, a WebAssembly SIMD
+ * decoder for a chunk's codes -- stored in a version 0 file
+ * (binary-format.md Section 8.6), derived from the depths in version 1
+ * (Section 8.4) -- that checks every invariant `parseChunk` does. It only
  * ever accepts or declines a block: a declined one --
  * malformed, or valid but unusual -- is parsed again in JavaScript,
  * which throws the error or returns the records. Platforms without
@@ -37,6 +37,14 @@ type Parse = (
 	out: number,
 ) => number;
 
+type ParseDepths = (
+	recordCount: number,
+	maxDepth: number,
+	paletteCount: number,
+	indexWidth: number,
+	out: number,
+) => number;
+
 // The slice of the WebAssembly JS API used here: the global exists in
 // every browser and in Node.js, but this package compiles against the
 // plain ES lib (no DOM), whose typings don't declare it.
@@ -55,6 +63,7 @@ declare const WebAssembly: {
 interface Instance {
 	memory: WasmMemory;
 	parse: Parse;
+	parseDepths: ParseDepths;
 }
 
 /** The compiled module; null once compiling failed. */
@@ -98,6 +107,7 @@ function getInstance(): Instance | undefined {
 	instance = {
 		memory: exports.memory as WasmMemory,
 		parse: exports.parse as Parse,
+		parseDepths: exports.parseDepths as ParseDepths,
 	};
 	return instance;
 }
@@ -133,10 +143,51 @@ export function decodeChunkCodes(
 	paletteCount: number,
 	indexWidth: number,
 ): Uint32Array | undefined {
+	return run(buf, codesStart, recordCount, (decoder, out) =>
+		decoder.parse(
+			codesLength,
+			recordCount,
+			maxDepth,
+			paletteCount,
+			indexWidth,
+			out,
+		),
+	);
+}
+
+/**
+ * The codes of the version 1 chunk block `buf` (Section 8.2), whose
+ * depths start at `depthsStart`, derived from them (Section 8.4) and
+ * checked as `decodeChunkCodes` checks a version 0 block, under the same
+ * conditions.
+ */
+export function decodeDepthCodes(
+	buf: Uint8Array,
+	depthsStart: number,
+	recordCount: number,
+	maxDepth: number,
+	paletteCount: number,
+	indexWidth: number,
+): Uint32Array | undefined {
+	return run(buf, depthsStart, recordCount, (decoder, out) =>
+		decoder.parseDepths(recordCount, maxDepth, paletteCount, indexWidth, out),
+	);
+}
+
+/** Copies `buf` from `start` on into the instance's memory, from address
+ * 0, and hands `parse` where the codes go: the codes it wrote, or
+ * undefined when it declined the block or the fast path isn't
+ * available. */
+function run(
+	buf: Uint8Array,
+	start: number,
+	recordCount: number,
+	parse: (decoder: Instance, out: number) => number,
+): Uint32Array | undefined {
 	if (!enabled) return undefined;
 	const decoder = getInstance();
 	if (!decoder) return undefined;
-	const blockBytes = buf.length - codesStart;
+	const blockBytes = buf.length - start;
 	// 16 bytes of slack past the block: a 3-byte index is read as 4.
 	const out = Math.ceil((blockBytes + 16) / 16) * 16;
 	const needed = out + 4 * recordCount;
@@ -148,15 +199,8 @@ export function decodeChunkCodes(
 			return undefined; // out of memory: leave it to the JavaScript path
 		}
 	}
-	new Uint8Array(memory.buffer, 0, blockBytes).set(buf.subarray(codesStart));
-	const ok = decoder.parse(
-		codesLength,
-		recordCount,
-		maxDepth,
-		paletteCount,
-		indexWidth,
-		out,
-	);
+	new Uint8Array(memory.buffer, 0, blockBytes).set(buf.subarray(start));
+	const ok = parse(decoder, out);
 	releaseWhenIdle();
 	if (!ok) return undefined;
 	return new Uint32Array(memory.buffer, out, recordCount).slice();

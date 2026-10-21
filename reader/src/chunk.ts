@@ -1,4 +1,8 @@
-import { decodeChunkCodes, WASM_MIN_RECORDS } from "./chunkDecoder.ts";
+import {
+	decodeChunkCodes,
+	decodeDepthCodes,
+	WASM_MIN_RECORDS,
+} from "./chunkDecoder.ts";
 import { CGeoDataFormatError } from "./errors.ts";
 import {
 	readDeltaVarintList,
@@ -291,6 +295,20 @@ function parseRecords(
 		indexWidth,
 		recordCount,
 	);
+
+	// The fast path (./chunkDecoder.ts); a declined block is parsed below.
+	const fast =
+		recordCount >= WASM_MIN_RECORDS && paletteCount < 2 ** 32
+			? decodeDepthCodes(
+					buf,
+					offset,
+					recordCount,
+					maxDepth,
+					paletteCount,
+					indexWidth,
+				)
+			: undefined;
+	if (fast) return { palette, codes: fast, depths, paletteIndices };
 
 	const codes = new Uint32Array(recordCount);
 	if (!deriveCodes(depths, maxDepth, codes)) {
