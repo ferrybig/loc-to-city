@@ -271,7 +271,25 @@ you don't compile this package's sources.
 
 ## CLI
 
-The package installs `cgeodata`, a command-line front end to the same API:
+The package installs `cgeodata` (also as `cgeodata-reader`), a command-line
+front end to the same API. It needs a data file; the demo serves the
+worldwide one, plus the two sidecar indexes that make `search` and
+`--locate` fast (they are picked up automatically when they sit next to the
+`.bin`):
+
+```sh
+wget https://geodata.ferrybig.nl/download/world.bin \
+     https://geodata.ferrybig.nl/download/world.search-index.bin \
+     https://geodata.ferrybig.nl/download/world.locate-index.bin
+```
+
+Then run it without installing anything:
+
+```sh
+npx @ferrybig/cgeodata-reader lookup world.bin 52.37,4.9
+```
+
+or, installed, as `cgeodata`:
 
 ```sh
 cgeodata lookup world.bin 52.37,4.9            # or points on stdin, one per line

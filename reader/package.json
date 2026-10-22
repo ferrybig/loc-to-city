@@ -46,7 +46,11 @@
 		"./package.json": "./package.json"
 	},
 	"bin": {
-		"cgeodata": "./dist/cli.js"
+		"cgeodata": "./dist/cli.js",
+		"cgeodata-reader": "./dist/cli.js"
+	},
+	"publishConfig": {
+		"access": "public"
 	},
 	"files": [
 		"dist",
