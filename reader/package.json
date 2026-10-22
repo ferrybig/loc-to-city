@@ -1,6 +1,6 @@
 {
 	"name": "@ferrybig/cgeodata-reader",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Reverse geocoding without a database: resolves a latitude/longitude to its country, region and city from OpenStreetMap boundaries, reading a compact CGEODATA file. No dependencies; Node.js and browsers.",
 	"keywords": [
 		"reverse-geocoding",
