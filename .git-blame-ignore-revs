@@ -4,3 +4,6 @@
 
 # Format reader/ and demo/ with biome: tab indentation
 3ef13d6f2ee631f4b5ce03cda374ee445ea0a5c4
+
+# reader: biome-format tsconfig.json and typedoc.json
+ac35fed0b1d80fbcfbfa686756f31d39d0bf0fa6
