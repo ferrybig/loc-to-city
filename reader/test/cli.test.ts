@@ -566,3 +566,14 @@ test("usage errors exit 2 without touching the file; help exits 0", () => {
 	assert.match(run(["help", "search"]).stdout, /^usage: cgeodata search/);
 	assert.equal(run(["help", "frobnicate"]).status, 2);
 });
+
+test("--version and -v print the package's own version", () => {
+	const manifest = JSON.parse(
+		readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+	) as { version: string };
+	for (const flag of ["--version", "-v"]) {
+		const result = run([flag]);
+		assert.equal(result.status, 0);
+		assert.equal(result.stdout, `${manifest.version}\n`);
+	}
+});

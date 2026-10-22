@@ -21,7 +21,7 @@ existing production system stores one lat/lon point per place (double
 precision, "nanometer precision" the source data doesn't need) and costs
 112MB worldwide.
 
-## Goal: replacing Immich's reverse geocoding
+## Original outdated goal: replacing Immich's reverse geocoding
 
 The concrete motivation for this whole exploration: [Immich](https://immich.app)
 (the self-hosted photo manager) resolves a photo's GPS EXIF data to a

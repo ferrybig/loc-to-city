@@ -8,15 +8,11 @@
 	],
 	"tsconfig": "tsconfig.json",
 	"readme": "README.md",
-	"projectDocuments": [
-		"binary-format.md"
-	],
+	"projectDocuments": ["binary-format.md"],
 	"out": "docs",
 	"excludePrivate": true,
 	"excludeInternal": true,
-	"sort": [
-		"source-order"
-	],
+	"sort": ["source-order"],
 	"validation": {
 		"notExported": true,
 		"notDocumented": true,

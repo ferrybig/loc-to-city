@@ -1,0 +1,75 @@
+name: reader
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "reader/**"
+      - "package.json"
+      - "package-lock.json"
+      - "biome.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/reader.yml"
+  pull_request:
+    paths:
+      - "reader/**"
+      - "package.json"
+      - "package-lock.json"
+      - "biome.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/reader.yml"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: reader
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # 24 is the oldest supported (reader/.nvmrc, "engines"), 26 is what
+        # the rest of the repository runs on.
+        node: [24, 26]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      # Only this workspace's dependencies: the reader is the one published
+      # package and imports nothing from its siblings.
+      - run: npm ci --workspace reader
+        working-directory: .
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npx biome check .
+      # The main entry point is tested in headless Chromium; without it the
+      # test skips itself instead of failing.
+      - run: npx playwright install --with-deps chromium
+      - run: npm test
+      # Fails on any undocumented export.
+      - run: npm run docs
+
+  pack:
+    # What `npx @ferrybig/cgeodata-reader` would run: the packed tarball,
+    # installed outside the repository, against the spec's worked example.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: reader/.nvmrc
+          cache: npm
+      - run: npm ci --workspace reader
+        working-directory: .
+      - run: npm pack --pack-destination "$RUNNER_TEMP"
+      - run: |
+          cp ../data/03-final/appendix-a-example.bin "$RUNNER_TEMP/world.bin"
+          cd "$RUNNER_TEMP"
+          npx --yes ./ferrybig-cgeodata-reader-*.tgz --version
+          npx --yes ./ferrybig-cgeodata-reader-*.tgz lookup world.bin 52.37,4.9 | grep -q "Noord-Holland"

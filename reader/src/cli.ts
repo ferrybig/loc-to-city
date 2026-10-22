@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import { buildLocateIndexCmd } from "./cli/buildLocateIndex.ts";
 import { buildSearchIndexCmd } from "./cli/buildSearchIndex.ts";
 import { chunk } from "./cli/chunk.ts";
@@ -35,6 +36,10 @@ Reads a CGEODATA file. <file.bin> may be "-" to read the file from stdin.
 commands:
 ${COMMANDS.map((c) => `  ${c.name.padEnd(NAME_WIDTH)}  ${c.summary}`).join("\n")}
 
+Options:
+  -h, --help     show this help
+  -v, --version  print the package version
+
 Exit status is 0 on success, 1 when a search matched nothing, 2 on a
 usage or runtime error.`;
 
@@ -42,8 +47,20 @@ function findCommand(name: string): Command | undefined {
 	return COMMANDS.find((c) => c.name === name);
 }
 
+// `../package.json` is the package's own from both `src/` and `dist/`.
+function packageVersion(): string {
+	const manifest = JSON.parse(
+		readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+	) as { version: string };
+	return manifest.version;
+}
+
 async function main(argv: string[]): Promise<number> {
 	const [name, ...rest] = argv;
+	if (name === "--version" || name === "-v") {
+		process.stdout.write(`${packageVersion()}\n`);
+		return 0;
+	}
 	if (
 		name === undefined ||
 		name === "help" ||
