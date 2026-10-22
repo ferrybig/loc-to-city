@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { boundingBoxContains, CGeoDataReader } from "../src/index.ts";
-import { APPENDIX_A_BYTES } from "./fixtures/appendixA.ts";
+import { APPENDIX_A_BYTES, APPENDIX_A_V0_BYTES } from "./fixtures/appendixA.ts";
 
 test("Appendix A fixture is exactly 157 bytes", () => {
 	assert.equal(APPENDIX_A_BYTES.length, 157);
@@ -9,7 +9,8 @@ test("Appendix A fixture is exactly 157 bytes", () => {
 
 // Chunk 3 (row 1, col 1) covers lon [0, 180), lat [0, 90) (Section A.2).
 // Bounding boxes below are worked out by hand from the chunk's decoded
-// records (Section A.4): codes [0, 4, 5, 8, 12], depths [1, 2, 2, 1, 2].
+// records (Section A.4): codes [0, 4, 5, 6, 7, 8, 12], depths
+// [1, 2, 2, 2, 2, 1, 2].
 
 test("lookup 1: (lat 20, lon 100) resolves to Zaandam, Noord-Holland, Nederland", async () => {
 	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
@@ -50,15 +51,14 @@ test("lookup 2: (lat 40, lon 30) resolves to a region-level result (Noord-Hollan
 	assert.ok(boundingBoxContains(result.boundingBox, 40, 30));
 });
 
-test("lookup 3: (lat 30, lon 100) is unknown (gap between records)", async () => {
+test("lookup 3: (lat 30, lon 100) is unknown (palette index 0 between places)", async () => {
 	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
 	const result = await reader.query(30, 100);
 	assert.deepEqual(result.country, null);
 	assert.deepEqual(result.region, null);
 	assert.deepEqual(result.city, null);
-	// No record covers this point, so the box falls back to the single
-	// finest-grain cell (depth 2) containing it: x=2, y=1 -> lon [90, 135),
-	// lat [22.5, 45).
+	// Record 3 (code 6, depth 2), an empty cell between two places: x=2,
+	// y=1 -> lon [90, 135), lat [22.5, 45).
 	assert.deepEqual(result.boundingBox, {
 		minLon: 90,
 		maxLon: 135,
@@ -105,9 +105,51 @@ test("lookup 5: (lat -10, lon 10) is unknown (chunk 1 is empty, no decompression
 	assert.equal(result.chunkIndex, 1);
 });
 
+test("lookup 6: (lat 60, lon 170) is unknown (after the last record)", async () => {
+	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
+	const result = await reader.query(60, 170);
+	assert.deepEqual(result.country, null);
+	assert.deepEqual(result.region, null);
+	assert.deepEqual(result.city, null);
+	// Code 13 has no record, so the box falls back to the single
+	// finest-grain cell (depth 2) containing it: x=3, y=2 -> lon [135, 180),
+	// lat [45, 67.5).
+	assert.deepEqual(result.boundingBox, {
+		minLon: 135,
+		maxLon: 180,
+		minLat: 45,
+		maxLat: 67.5,
+	});
+	assert.equal(result.chunkIndex, 3);
+});
+
+test("the version 0 file of the example answers every cell the same", async () => {
+	const v1 = await CGeoDataReader.open(APPENDIX_A_BYTES);
+	const v0 = await CGeoDataReader.open(APPENDIX_A_V0_BYTES);
+	assert.equal(v0.header.version, 0);
+	// The centre of each of the 8 x 8 full-precision cells.
+	for (let gy = 0; gy < 8; gy++) {
+		for (let gx = 0; gx < 8; gx++) {
+			const lat = -90 + (gy + 0.5) * 22.5;
+			const lon = -180 + (gx + 0.5) * 45;
+			const [a, b] = [await v0.query(lat, lon), await v1.query(lat, lon)];
+			assert.deepEqual(
+				[a.country?.id, a.region?.id, a.city?.id, a.boundingBox],
+				[b.country?.id, b.region?.id, b.city?.id, b.boundingBox],
+				`${lat}, ${lon}`,
+			);
+		}
+	}
+	// Only the empty cells differ: v1 has records for codes 6 and 7.
+	const records = async (reader: CGeoDataReader) =>
+		Array.from((await reader.chunk(3))!.codes);
+	assert.deepEqual(await records(v0), [0, 4, 5, 8, 12]);
+	assert.deepEqual(await records(v1), [0, 4, 5, 6, 7, 8, 12]);
+});
+
 test("header fields match the worked example", async () => {
 	const reader = await CGeoDataReader.open(APPENDIX_A_BYTES);
-	assert.equal(reader.header.version, 0);
+	assert.equal(reader.header.version, 1);
 	assert.equal(reader.header.attribution, "OSM");
 	assert.equal(reader.header.width, 2);
 	assert.equal(reader.header.height, 2);

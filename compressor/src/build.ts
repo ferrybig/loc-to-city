@@ -31,7 +31,7 @@ export function buildCGeoDataFile(
   for (const { chunkIndex, bounds, candidates } of jobs) {
     const startedAt = performance.now();
     const records = buildChunkRecords(candidates, bounds, options.maxDepth);
-    const encoded = records.length === 0 ? null : encodeChunk(records);
+    const encoded = records.length === 0 ? null : encodeChunk(records, options.maxDepth);
     const elapsedMs = performance.now() - startedAt;
 
     options.onChunkBuilt?.({

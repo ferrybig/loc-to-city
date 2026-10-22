@@ -1,9 +1,11 @@
 import { CHUNK_DECODER_WASM } from "./chunkDecoderWasm.ts";
 
 /**
- * `parseChunk`'s fast path: wasm/chunkDecoder.wat, a WebAssembly SIMD
- * decoder for a chunk's codes that checks every invariant `parseChunk`
- * does. It only ever accepts or declines a block: a declined one --
+ * `parseChunk`'s fast path for a version 0 file, whose chunks store their
+ * codes (binary-format.md Section 8.6): wasm/chunkDecoder.wat, a
+ * WebAssembly SIMD decoder for those codes that checks every invariant
+ * `parseChunk` does. A version 1 chunk has no codes to decode. It only
+ * ever accepts or declines a block: a declined one --
  * malformed, or valid but unusual -- is parsed again in JavaScript,
  * which throws the error or returns the records. Platforms without
  * WebAssembly SIMD (or that forbid compiling it, such as a page whose
@@ -114,8 +116,8 @@ function releaseWhenIdle(): void {
 }
 
 /**
- * The codes of the chunk block `buf` (Section 8.2), whose codes start at
- * `codesStart`, checked against every Section 8.5 invariant `parseChunk`
+ * The codes of the version 0 chunk block `buf` (Section 8.6), whose
+ * codes start at `codesStart`, checked against every Section 8.5 invariant `parseChunk`
  * checks -- or undefined when the fast path declined it or isn't
  * available, and the caller should parse the block in JavaScript. The
  * caller has checked that the block is exactly as long as its counts

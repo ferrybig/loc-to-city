@@ -27,7 +27,7 @@ port.on("message", (request: WorkerRequest) => {
     // paths' per-chunk numbers are comparable.
     const startedAt = performance.now();
     const records = buildChunkRecords(candidates, bounds, maxDepth);
-    const bytes = records.length === 0 ? null : encodeChunk(records);
+    const bytes = records.length === 0 ? null : encodeChunk(records, maxDepth);
     const elapsedMs = performance.now() - startedAt;
     const response: WorkerResponse = { type: "done", chunkIndex, recordCount: records.length, bytes, elapsedMs };
     port.postMessage(response);

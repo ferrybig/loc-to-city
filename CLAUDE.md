@@ -191,7 +191,12 @@ concurrent lookups block the event loop for the whole batch; hot loops
 use `lookupCached() ?? await lookup()` so a cache hit never awaits;
 decoded chunks hold codes in a `Uint32Array` and palette indices only
 as wide as the file stores them, since decoded chunks are what fills
-the cache; and those codes decode through their own
+the cache; a version 1 chunk's codes are derived from its depths
+(`chunk.ts`'s `deriveCodes`) in an `Int32Array`-span integer loop with
+the error reporting split off into `recordError` (the first version,
+doubles and a check per record inline, parsed ~2x slower and cost +24%
+on the europe burst; this one is level with version 0's WebAssembly
+path); and a version 0 chunk's stored codes decode through their own
 `readDeltaVarints32Into`, not a `readDeltaVarintsInto` taking either
 array (one function seeing both parsed ~8% slower than with
 `Float64Array` alone, two parse ~20% faster). The reader rejects files
@@ -201,7 +206,15 @@ one zlib block a lookup inflates whole, so deeper chunks only make
 lookups slower (finer cells should come from a bigger chunk grid), and
 32-bit codes depend on it.
 
-Chunks of 64+ records decode through a WebAssembly
+**Format version 1 dropped the codes from chunks** (`binary-format.md`
+Section 8.6): records tile the chunk, empty cells between places are
+index-0 records (`compressor/src/chunkEncoder.ts`'s `gapCells`), and each
+code is where the record before it ends. On `world-high-res.bin` that is
+64,244,778 → 47,620,804 bytes (-25.9%) for 3.5% more records, the same
+cell → place for all 106,377,942 placed records. The reader still reads
+version 0 files, and only those use the WebAssembly path below.
+
+Version 0 chunks of 64+ records decode through a WebAssembly
 SIMD fast path (`reader/wasm/chunkDecoder.wat`, ~5x the JavaScript
 parser): `npm run build:wasm -w reader` compiles it into the committed
 `src/chunkDecoderWasm.ts` (wabt is a devDependency only), and

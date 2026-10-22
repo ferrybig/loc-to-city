@@ -16,7 +16,7 @@ function hexBytes(hex: string): number[] {
 // A.1. Header (17 bytes)
 const HEADER = hexBytes(`
   43 47 45 4f 44 41 54 41
-  00
+  01
   03  4f 53 4d
   01
   01
@@ -52,8 +52,8 @@ const NAME_BLOCK_1 = hexBytes(`
 
 // A.4. Chunk 3 (26 bytes compressed)
 const CHUNK_3 = hexBytes(`
-  78 da 63 62 62 66 65 65 60 61 64 66 61 64 62 62 04 42 06 46 26 00 02 22
-  00 2c
+  78 da 63 62 62 66 67 64 62 62 62 62 64 62 64 62 60 60 60 64 02 00 01 8b
+  00 21
 `);
 
 export const APPENDIX_A_BYTES: Uint8Array = Uint8Array.from([
@@ -63,4 +63,19 @@ export const APPENDIX_A_BYTES: Uint8Array = Uint8Array.from([
 	...NAME_BLOCK_0,
 	...NAME_BLOCK_1,
 	...CHUNK_3,
+]);
+
+/** The same example as a version 0 file (Section 8.6), as Appendix A gave
+ * it before version 1: the chunk stores its codes, and leaves codes 6
+ * and 7 out instead of giving them index-0 records. */
+export const APPENDIX_A_V0_BYTES: Uint8Array = Uint8Array.from([
+	...HEADER.map((b, i) => (i === 8 ? 0 : b)),
+	...DIRECTORY,
+	...PLACE_TABLE_PREFIX,
+	...NAME_BLOCK_0,
+	...NAME_BLOCK_1,
+	...hexBytes(`
+    78 da 63 62 62 66 65 65 60 61 64 66 61 64 62 62 04 42 06 46 26 00 02 22
+    00 2c
+  `),
 ]);

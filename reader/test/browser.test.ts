@@ -130,7 +130,7 @@ test("the main entry point works in a browser, and answers as on Node", {
 			const { wasmChunkDecoderAvailable } = await import(
 				`${origin}/dist/chunkDecoder.js`
 			);
-			const chunk = parseChunk(new Uint8Array(await get("/chunk.bin")), 4);
+			const chunk = parseChunk(new Uint8Array(await get("/chunk.bin")), 4, 0);
 			return {
 				wasm: wasmChunkDecoderAvailable(),
 				chunk: {
@@ -172,7 +172,7 @@ test("the main entry point works in a browser, and answers as on Node", {
 		assert.deepEqual(fromBrowser.locate, await reader.locate(5));
 		assert.equal(fromBrowser.cached, 5);
 		assert.equal(fromBrowser.wasm, true, "no WebAssembly fast path");
-		const chunk = parseChunk(bigChunk, 4);
+		const chunk = parseChunk(bigChunk, 4, 0);
 		assert.deepEqual(fromBrowser.chunk, {
 			...chunk,
 			codes: [chunk.codes.constructor.name, ...chunk.codes],

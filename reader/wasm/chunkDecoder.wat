@@ -1,6 +1,7 @@
-;; Fast path for parseChunk (src/chunk.ts, binary-format.md Section 8.2):
-;; decodes a chunk's delta-coded codes into 32-bit integers and checks
-;; every Section 8.5 invariant parseChunk checks, 16 records at a time
+;; Fast path for parseChunk (src/chunk.ts) on a version 0 file, whose
+;; chunks store their codes (binary-format.md Section 8.6): decodes a
+;; chunk's delta-coded codes into 32-bit integers and checks every
+;; Section 8.5 invariant parseChunk checks, 16 records at a time
 ;; with 128-bit SIMD wherever 16 code deltas in a row take one byte each
 ;; (over 99.9% of them in world.bin).
 ;;
