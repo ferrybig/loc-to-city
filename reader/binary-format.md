@@ -184,6 +184,11 @@ self-contained: it can be inflated without any other block. Readers
 locate a block by the byte lengths recorded in the file, not by scanning
 for stream boundaries.
 
+In a version `2` file ([Section 5](#5-header)) chunks are not compressed
+blocks: a chunk is stored as [Section 8.7](#87-version-2-chunks) lays it
+out, with its own entropy coding. Name blocks are compressed blocks in
+every version.
+
 ## 4. File Layout
 
 A CGEODATA file consists of four consecutive sections, with no padding or
@@ -223,7 +228,7 @@ and a CGEODATA file never refers to them.
 | Field                | Type       | Description |
 |----------------------|------------|-------------|
 | `signature`          | 8 bytes    | The ASCII bytes `CGEODATA` (`43 47 45 4f 44 41 54 41`). |
-| `version`            | varint     | File kind and format version, `kind × 16 + version`. A CGEODATA file is kind `0`; this document specifies version `1`, so the field is `1`. See below. |
+| `version`            | varint     | File kind and format version, `kind × 16 + version`. A CGEODATA file is kind `0`; this document specifies version `2`, so the field is `2`. See below. |
 | `attribution_length` | varint     | Byte length of `attribution`. |
 | `attribution`        | bytes      | UTF-8 text, MAY contain Markdown, intended for display to humans, for example `[OpenStreetMap](https://openstreetmap.org/copyright)`. MAY be empty. |
 | `width_exp`          | u8         | The chunk grid has `W = 2^width_exp` columns. |
@@ -253,10 +258,12 @@ Version `0` of any kind is a pre-release version: files written under
 this document carry no compatibility promise once the version number
 changes.
 
-Version `1` of kind `0` differs from version `0` only in the layout of a
-chunk: version `0` stored every record's Morton code, which version `1`
-derives from the depths ([Section 8.6](#86-version-0-chunks)). A reader
-MAY read both.
+Versions `0`, `1` and `2` of kind `0` differ only in how a chunk is
+stored. Version `0` stored every record's Morton code, which version `1`
+derives from the depths ([Section 8.6](#86-version-0-chunks)). Version
+`2` keeps version `1`'s records but stores them range coded instead of
+in a zlib stream ([Section 8.7](#87-version-2-chunks)). A reader MAY read
+all three.
 
 Constraints:
 
@@ -641,6 +648,201 @@ million records took 3.77 million index-`0` records (3.5% more records)
 to fill, and the chunks went from 62.2 MB to 45.6 MB (-26.7%), with the
 same cell for every place.
 
+### 8.7. Version 2 Chunks
+
+In a version `2` file ([Section 5](#5-header)), a chunk's records are
+those of a version `1` chunk ([Sections 8.4](#84-records) and
+[8.5](#85-invariants)): they tile the chunk from code `0` in Morton order,
+and MAY end before the chunk does. Only their storage differs. The block
+is not a zlib stream:
+
+| Field             | Type                       | Description |
+|-------------------|----------------------------|-------------|
+| `palette_count`   | varint                     | As in Section 8.2, and below `2^26`. |
+| `palette`         | `P` varints, delta-coded   | As in Section 8.2. |
+| `record_count`    | varint                     | As in Section 8.2. |
+| `stream`          | bytes                      | The rest of the block: the records' depths and palette indices, range coded as described below. |
+
+The stream codes the chunk's quadtree as a series of binary decisions:
+whether each node splits, and, for each leaf, which palette index it has.
+Every decision is made with an adaptive probability chosen by a
+**context** from what was already decoded: chiefly the records to the
+west and south of the node, which in Morton order always come first.
+Neighbouring cells usually belong to the same place, so most decisions
+are nearly certain and cost a small fraction of a bit.
+
+#### 8.7.1. Range Decoder
+
+The decoder keeps two unsigned 32-bit integers, `range` and `code`, and a
+position `pos` in `stream`. Each probability `p` is an integer in
+`[1, 4095]`, the chance out of `4096` that a decision is `0`; every
+probability starts at `2048`.
+
+`stream[0]` MUST be `0`. `code` starts as `stream[1..4]` read as a
+big-endian integer, and MUST NOT be `0xFFFFFFFF`; `range` starts as
+`0xFFFFFFFF` and `pos` as `5`. A decision with probability `p` is decoded
+as follows, and `p` is updated in place:
+
+```
+bound = (range >> 12) × p
+if code < bound:
+    range = bound
+    p = p + ((4096 - p) >> 4)
+    bit = 0
+else:
+    code = code - bound
+    range = range - bound
+    p = p - (p >> 4)
+    bit = 1
+while range < 2^24:
+    range = range × 256
+    code = code × 256 + stream[pos]     # reading past the end is an error
+    pos = pos + 1
+```
+
+After the last record, `pos` MUST equal the length of `stream`. This is
+LZMA's range coder [LZMA] with 12-bit probabilities that adapt by a
+sixteenth each time. The matching encoder (informative):
+
+```
+low = 0  (at least 33 bits), range = 0xFFFFFFFF, cache = 0, pending = 1
+
+encode(bit, p):
+    bound = (range >> 12) × p
+    if bit == 0: range = bound;  p = p + ((4096 - p) >> 4)
+    else: low = low + bound;  range = range - bound;  p = p - (p >> 4)
+    while range < 2^24: range = range × 256;  shift_low()
+
+shift_low():
+    if low < 0xFF000000 or low >= 2^32:
+        carry = low >> 32
+        emit (cache + carry) & 0xFF, then pending - 1 bytes of (0xFF + carry) & 0xFF
+        pending = 0
+        cache = (low >> 24) & 0xFF
+    pending = pending + 1
+    low = (low & 0x00FFFFFF) × 256
+
+finish(): shift_low() five times.
+```
+
+Its first byte is always `0`, and the decoder then reads exactly the
+bytes it wrote.
+
+#### 8.7.2. Nodes and Neighbours
+
+A node is a cell of the chunk's quadtree: its depth `d` and its south-west
+corner `(x, y)`, in full-precision cells ([Section 8.1](#81-cell-grid-and-morton-codes)).
+Nodes are visited in pre-order from the root `(d = 0, x = 0, y = 0)`. A
+node at depth `d < D` first decodes a **split** decision
+([Section 8.7.3](#873-contexts)): `1` visits its four children of depth
+`d + 1` in Morton order, south-west `(x, y)`, south-east `(x + h, y)`,
+north-west `(x, y + h)` and north-east `(x + h, y + h)` with
+`h = 2^(D - d - 1)`; `0` makes it a leaf. A node at depth `D` is a leaf
+without a decision. Each leaf is the next record: its depth is `d`, its
+code is where the record before it ends ([Section 8.4](#84-records)), and
+its palette index is decoded as [Section 8.7.4](#874-palette-indices)
+describes. Decoding stops after `record_count` records, wherever the
+traversal is.
+
+A node's **west neighbour** is the record that contains the
+full-precision cell `(x - 1, y)`, and its **south neighbour** the one
+that contains `(x, y - 1)`. There is none when `x = 0` (respectively
+`y = 0`): neighbours never come from another chunk. Both cells have
+lower Morton codes than `(x, y)` and so were decoded before the node. A
+decoder can find them by remembering, for every row and every column of
+full-precision cells, the last record decoded in it: in Morton order the
+last record in row `y` before `(x, y)` is the one at `(x - 1, y)`, and
+likewise for columns.
+
+A neighbour's **category** relative to a node at depth `d` is `0` when
+there is no neighbour, `1` when its record's depth is at most `d`, `2`
+when it is `d + 1`, and `3` when it is deeper.
+
+#### 8.7.3. Contexts
+
+There are five tables of probabilities, each indexed by a context:
+
+| Table         | Entries | Used for |
+|---------------|---------|----------|
+| `split`       | 256     | split decisions, at `16 × d + 4 × cw + cs` |
+| `same_west`   | 544     | "the index is the west neighbour's", at `c` |
+| `same_south`  | 544     | "the index is the south neighbour's", at `c` |
+| `rank_length` | 128     | the unary part of a rank ([Section 8.7.4](#874-palette-indices)) |
+| `rank_bits`   | 1024    | the binary part of a rank |
+
+`cw` and `cs` are the west and south neighbours' categories. For a leaf,
+let `w` and `s` be the west and south neighbours' palette indices, or
+`-1` for a missing one, and `prev` the previous record's palette index,
+or `-1` for the first record. Then
+
+```
+c = 4 × (8 × d + 4 × [w = s] + 2 × [prev = w] + [prev = s]) + cw
+```
+
+where `[...]` is `1` when the comparison holds and `0` otherwise, and
+`-1` equals `-1`.
+
+#### 8.7.4. Palette Indices
+
+The decoder keeps a **move-to-front list** of the palette indices
+`0` to `P`, initially in that order. A leaf's palette index `v` is
+decoded as follows:
+
+1. If there is a west neighbour, a decision in `same_west[c]`: `1` means
+   `v = w`.
+2. Otherwise, or if that decision was `0`: if there is a south
+   neighbour and `s != w`, a decision in `same_south[c]`: `1` means
+   `v = s`.
+3. Otherwise, a **rank** `r`: `v` is the entry of the move-to-front list
+   that has `r` entries before it, not counting entries equal to `w` or
+   `s`. `r + 1` is coded in Elias gamma: let `a` be `1` if there is a
+   west neighbour plus `2` if there is a south neighbour. Decisions in
+   `rank_length[32 × a + k]`, for `k = 0, 1, ...`, are `1` until one is
+   `0`; their number of `1`s is `n`, and MUST be below `32`. Then `n`
+   decisions in `rank_bits[32 × n + k]`, for `k = n - 1` down to `0`,
+   are the bits of `r + 1` below its leading `1`, most significant
+   first. The list MUST have such an entry.
+
+Then `v` is moved to the front of the list.
+
+#### 8.7.5. Bounds and Errors
+
+A decoder MUST reject a block where `record_count` exceeds `4^D` (more
+records than cells), or exceeds `2048` times the length of `stream`, and
+MUST check both before allocating for the records. No stream reaches the
+second bound: every record takes at least one decision, a decision
+takes at least `log2(4096 / 4081)` bits, as no probability passes
+`4081` or drops below `15`, so a byte codes at most about 1500 records.
+
+It MUST also reject a block whose traversal ends (every node visited)
+before `record_count` records, and any of the conditions marked MUST in
+Sections 8.7.1 and 8.7.4. Every record is valid by construction: its
+depth is at most `D`, it is aligned, it ends within the chunk, and its
+palette index is at most `P`.
+
+#### 8.7.6. Design Notes
+
+This section is informative.
+
+The range coder replaced zlib for chunks because the data has structure
+a general-purpose compressor does not see. A version `1` chunk stores
+each depth in a byte, though the depths are just a pre-order listing of
+the quadtree's split flags, which are well predicted by the neighbours'
+depths. Its palette indices are well predicted by the west and south
+neighbours, which in Morton order are not usually the previous record:
+in the worldwide file, 74% of records have their west neighbour's index
+and 19% their south neighbour's, which zlib, looking at one byte column,
+cannot exploit. Measured on the worldwide build (7,608 chunks,
+110 million records), the chunks went from 45.6 MB as version `1` to
+18.5 MB (−59.5%), and the file from 47.6 MB to 20.5 MB.
+
+The cost is decoding speed: about 2.5 binary decisions per record, each
+data-dependent, make a chunk about 4 times as slow to decode as to
+inflate and parse in version `1`. Encoding is faster than zlib's highest
+level. Other layouts were measured on the same file: zlib over split
+flags and neighbour-predicted symbols gave 30.2 MB, and Zopfli, a better
+deflate encoder for version `1` unchanged, about 37.4 MB.
+
 ## 9. Lookup Procedure
 
 To resolve a coordinate `(lat, lon)` to a place ID, a reader performs the
@@ -667,9 +869,10 @@ following steps. `W`, `H`, and `D` come from the header.
    avoids inconsistent rounding between the two.
 4. **Fetch the chunk.** If `chunk_lengths[i]` is `0`, the result is
    unknown. Otherwise read `length(i)` bytes at `offset(i)`
-   ([Section 6.3](#63-locating-a-chunk)) and inflate them, and compute
-   the records' codes ([Section 8.4](#84-records)). Readers SHOULD cache
-   inflated chunks with their codes.
+   ([Section 6.3](#63-locating-a-chunk)) and inflate them (in a version
+   `2` file, decode them per [Section 8.7](#87-version-2-chunks)), and
+   compute the records' codes ([Section 8.4](#84-records)). Readers
+   SHOULD cache decoded chunks with their codes.
 5. **Compute the query code** `q` from `(x, y)` with the procedure of
    [Section 8.1](#81-cell-grid-and-morton-codes).
 6. **Binary search.** Find the largest `j` such that `codes[j] <= q`
@@ -738,12 +941,15 @@ record at all.
 
 **Keyframe interval.** See [Section 7.3](#73-name-blocks).
 
-**Compression.** zlib was chosen over zstd or brotli because it is a
-zero-dependency built-in in Node.js and browsers. The columnar and
-delta-coded layout captures most of the gain regardless of the
-compressor; on the prototype, zstd and brotli were only 10–20% smaller.
-Writers SHOULD use the highest zlib compression level; compression is a
-one-time cost.
+**Compression.** Versions `0` and `1` chose zlib over zstd or brotli
+because it is a zero-dependency built-in in Node.js and browsers. The
+columnar and delta-coded layout captures most of the gain regardless of
+the compressor; on the prototype, zstd and brotli were only 10–20%
+smaller. Writers of those versions SHOULD use the highest zlib
+compression level; compression is a one-time cost. Version `2`'s range
+coder ([Section 8.7](#87-version-2-chunks)) is a model of the data, not
+a general-purpose compressor, and needs no library; see
+[Section 8.7.6](#876-design-notes) for what it gains and costs.
 
 ## 11. Robustness and Security Considerations
 
@@ -765,6 +971,10 @@ assume that a file is well formed.
   verify the alignment invariant of [Section 8.5](#85-invariants), and
   in a version `0` file the ordering and non-overlap invariants of
   [Section 8.6](#86-version-0-chunks).
+- In a version `2` file, readers MUST check [Section 8.7.5](#875-bounds-and-errors)'s
+  bounds on `record_count` before allocating for it, and reject a stream
+  that runs past the end of its block or ends before it. The records'
+  depths, codes and palette indices are valid by construction.
 - Readers MUST treat the attribution text and place names as untrusted
   text. Where they are rendered as Markdown or HTML, they MUST be
   sanitised.
@@ -773,7 +983,7 @@ assume that a file is well formed.
 
 ## 12. Open Issues
 
-The following are known gaps or unresolved decisions in version `1`.
+The following are known gaps or unresolved decisions in version `2`.
 
 1. **Latitude scaling.** Because the grid is equirectangular, cells
    shrink in east-west extent towards the poles. A per-row scaling
@@ -801,8 +1011,9 @@ The following are known gaps or unresolved decisions in version `1`.
 
 ## Appendix A. Worked Example
 
-This appendix gives a complete, valid, synthetic file of 157 bytes and
-walks through several lookups. Its geography is fictional. The file uses
+This appendix gives a complete, valid, synthetic version `1` file of
+157 bytes and walks through several lookups; Section A.6 gives its chunk
+as version `2` stores it. Its geography is fictional. The file uses
 a `2 × 2` chunk grid, a quadtree depth of `2`, and name blocks of `4`
 entries.
 
@@ -962,6 +1173,46 @@ point lies after the last record: **unknown**.
 **`(lat -10, lon 10)`.** `gx = 4`, `gy = floor(80/180 × 8) = 3`; chunk
 `c = 1, r = 0`, index `1`. Its length is `0`: **unknown**, with no
 decompression performed.
+
+### A.6. Chunk 3 as Version 2 (11 bytes)
+
+As a version `2` file, the example is 142 bytes: the header's `version`
+byte is `02`, the directory's last chunk length `0b`, and chunk `3` is
+stored as follows ([Section 8.7](#87-version-2-chunks)):
+
+```
+02                        palette_count P = 2
+02 03                     palette deltas 2, 3  -> IDs 2, 5
+07                        record_count M = 7
+00 a5 11 64 ba 00 00      stream
+```
+
+The stream holds these decisions, in order. `W` and `S` are the west
+and south neighbours' records, `L` the move-to-front list before the
+leaf; every probability used is still at `2048` unless it was used
+before.
+
+| Node `(d; x, y)` | Neighbours                  | Decisions                                          | Record |
+|------------------|-----------------------------|----------------------------------------------------|--------|
+| `(0; 0, 0)`      | none                        | `split[0] = 1`                                     | |
+| `(1; 0, 0)`      | none                        | `split[16] = 0`; `L = 0 1 2`, `r = 1`: `rank_length[0] = 1`, `rank_length[1] = 0`, `rank_bits[32] = 0` | 0: depth 1, index 1 |
+| `(1; 2, 0)`      | W record 0                  | `split[20] = 1`                                    | |
+| `(2; 2, 0)`      | W record 0                  | `same_west[73] = 0`; `L = 1 0 2`, skipping `1`, `r = 1`: `rank_length[32] = 1`, `rank_length[33] = 0`, `rank_bits[32] = 0` | 1: depth 2, index 2 |
+| `(2; 3, 0)`      | W record 1                  | `same_west[73] = 0`; `L = 2 1 0`, skipping `2`, `r = 1`: `rank_length[32] = 1`, `rank_length[33] = 0`, `rank_bits[32] = 0` | 2: depth 2, index 0 |
+| `(2; 2, 1)`      | W record 0, S record 1      | `same_west[65] = 0`, `same_south[65] = 0`; `L = 0 2 1`, skipping `1` and `2`, `r = 0`: `rank_length[96] = 0` | 3: depth 2, index 0 |
+| `(2; 3, 1)`      | W record 3, S record 2      | `same_west[93] = 1`                                | 4: depth 2, index 0 |
+| `(1; 0, 2)`      | S record 0                  | `split[17] = 0`; `same_south[32] = 1`              | 5: depth 1, index 1 |
+| `(1; 2, 2)`      | W record 5, S record 3      | `split[22] = 1`                                    | |
+| `(2; 2, 2)`      | W record 5, S record 3      | `same_west[73] = 0`, `same_south[73] = 0`; `L = 1 0 2`, skipping `1` and `0`, `r = 0`: `rank_length[96] = 0` | 6: depth 2, index 2 |
+
+For example, at `(2; 3, 1)` both neighbours have index `0`, as had the
+previous record, so `c = 4 × (8 × 2 + 4 + 2 + 1) + 1 = 93`, and since
+`s = w` no `same_south` decision follows. At `(1; 2, 2)` the south
+neighbour, record 3, is one level deeper than the node (category `2`),
+so `split[16 × 1 + 4 × 1 + 2] = split[22]`. Decoding stops after the
+seventh record, with three nodes of the traversal still unvisited, and
+`pos` is then `7`, the length of the stream. The records are those of
+Section A.4.
 
 ## Appendix B. Text Search Index
 
@@ -2341,6 +2592,9 @@ A full-precision cell of this file is `45°` wide and `22.5°` high,
 
 ## Appendix D. References
 
+- [LZMA] Pavlov, I., "LZMA SDK", https://www.7-zip.org/sdk.html: the
+  range coder of `LzmaDec.c`, with `kNumBitModelTotalBits` 11 and
+  `kNumMoveBits` 5 where this format uses 12 and 4.
 - [RFC1950] Deutsch, P. and J-L. Gailly, "ZLIB Compressed Data Format
   Specification version 3.3", May 1996.
 - [RFC1951] Deutsch, P., "DEFLATE Compressed Data Format Specification

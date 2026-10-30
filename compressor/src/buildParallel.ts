@@ -1,5 +1,5 @@
 import { buildCGeoDataFile } from "./build.ts";
-import { type BuildOptions, type BuildStats, finishBuild, prepareBuild } from "./buildCore.ts";
+import { type BuildOptions, type BuildStats, finishBuild, formatVersionOf, prepareBuild } from "./buildCore.ts";
 import { enumerateChunkJobs } from "./chunkJobs.ts";
 import { runChunkJobs } from "./chunkWorkerPool.ts";
 import type { HierarchyCountry } from "./hierarchy.ts";
@@ -37,7 +37,7 @@ export async function buildCGeoDataFileParallel(
   // loop below, so progress is visible while the build runs instead of
   // arriving all at once after every chunk is already done. The pool has no
   // notion of the grid, so the chunk count is filled in here.
-  const results = await runChunkJobs(jobs, options.workers, options.maxDepth, (result) => {
+  const results = await runChunkJobs(jobs, options.workers, options.maxDepth, formatVersionOf(options), (result) => {
     options.onChunkBuilt?.({
       chunkIndex: result.chunkIndex,
       chunkCount: width * height,

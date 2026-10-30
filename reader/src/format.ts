@@ -42,6 +42,11 @@ export {
 	resolveIdentifier,
 } from "./placeTable.ts";
 export {
+	decodeRangeCodedRecords,
+	encodeRangeCodedRecords,
+	type RangeCodedRecords,
+} from "./rangeChunk.ts";
+export {
 	containsTokenRun,
 	EXACT_SPELLING_BONUS,
 	foldDiacritics,

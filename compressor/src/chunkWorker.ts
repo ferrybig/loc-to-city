@@ -13,7 +13,7 @@ if (!parentPort) {
   throw new Error("chunkWorker.js must be run as a worker_threads Worker");
 }
 const port = parentPort;
-const { maxDepth } = workerData as ChunkWorkerData;
+const { maxDepth, formatVersion } = workerData as ChunkWorkerData;
 
 port.on("message", (request: WorkerRequest) => {
   if (request.type === "exit") {
@@ -27,7 +27,7 @@ port.on("message", (request: WorkerRequest) => {
     // paths' per-chunk numbers are comparable.
     const startedAt = performance.now();
     const records = buildChunkRecords(candidates, bounds, maxDepth);
-    const bytes = records.length === 0 ? null : encodeChunk(records, maxDepth);
+    const bytes = records.length === 0 ? null : encodeChunk(records, maxDepth, formatVersion);
     const elapsedMs = performance.now() - startedAt;
     const response: WorkerResponse = { type: "done", chunkIndex, recordCount: records.length, bytes, elapsedMs };
     port.postMessage(response);

@@ -20,6 +20,7 @@ import { sampleTile } from "../../demo/src/tiles.ts";
 import { useWasmChunkDecoder } from "../src/chunkDecoder.ts";
 import type { CGeoDataReader } from "../src/index.ts";
 import { openFile } from "../src/node.ts";
+import { useWasmRangeDecoder } from "../src/rangeDecoder.ts";
 
 const SECTIONS: Record<string, (file: string) => void | Promise<void>> = {
 	open,
@@ -33,7 +34,10 @@ const SECTIONS: Record<string, (file: string) => void | Promise<void>> = {
 };
 
 const CACHE_BYTES = process.env.CGEODATA_BENCH_CACHE_BYTES;
-if (process.env.CGEODATA_BENCH_WASM === "0") useWasmChunkDecoder(false);
+if (process.env.CGEODATA_BENCH_WASM === "0") {
+	useWasmChunkDecoder(false);
+	useWasmRangeDecoder(false);
+}
 
 function openReader(file: string): Promise<CGeoDataReader> {
 	return CACHE_BYTES === undefined

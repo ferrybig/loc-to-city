@@ -43,7 +43,8 @@ Five npm workspaces (Node >=26, see `.nvmrc`), all TypeScript, ESM
 `exactOptionalPropertyTypes` in `tsconfig.base.json`:
 
 - **`reader/`** — the format's reference reader. Zero runtime dependencies
-  besides Node's built-in `zlib`. Tested byte-for-byte against
+  besides Node's built-in `zlib` (name blocks, and chunks of version 0
+  and 1 files). Tested byte-for-byte against
   `reader/binary-format.md`'s Appendix A worked example, not just self-consistency
   with the compressor.
 - **`compressor/`** — turns a GeoJSON of city/region/country polygons plus a
@@ -213,6 +214,31 @@ code is where the record before it ends. On `world-high-res.bin` that is
 64,244,778 → 47,620,804 bytes (-25.9%) for 3.5% more records, the same
 cell → place for all 106,377,942 placed records. The reader still reads
 version 0 files, and only those use the WebAssembly path below.
+
+**Format version 2 range codes chunks instead of deflating them**
+(`binary-format.md` Section 8.7, `reader/src/rangeChunk.ts`, which holds
+both the encoder and the JavaScript decoder): the quadtree's split flags
+and each leaf's palette index are binary decisions in an LZMA-style
+adaptive range coder, with contexts from the west and south neighbours
+(74% of records have the west neighbour's index, 19% the south one's).
+On `world-high-res.bin` the chunks went from 45.6 MB to 18.5 MB and the
+file from 47,620,804 to 20,482,701 bytes (-57.0%), the same records in
+every chunk. The cost is decode speed, ~2.5 decisions per record: all
+chunks decode in ~4.7 s vs ~1.1 s for version 1's inflate + parse, the
+europe z4 tile burst is ~3.3x as slow, the initial-view z10 burst ~+9%,
+a cold lookup up to ~30 ms. Encoding is ~9x *faster* than zlib -9. The
+compressor writes version 2 unless given `--format-version 1`;
+`node compressor/src/transcode.ts <in.bin> <out.bin> [--format-version
+1|2] [--check]` re-encodes a finished file's chunks either way in
+seconds, and version 1 -> 2 -> 1 gives back the same bytes. Version 2
+chunks decode through `reader/wasm/rangeDecoder.wat` (no SIMD needed,
+~2.4x the JavaScript decoder), built by the same `npm run build:wasm`
+into `src/rangeDecoderWasm.ts` and held to the same rules as the version 0
+fast path below: it only accepts or declines, the JavaScript decoder is
+the oracle and the only source of errors, `test/rangeChunk.test.ts`
+checks it against thousands of corrupted streams, and every check in the
+`.wat` is one that test fails without, except the two its header names.
+Inlining its `$bit` by hand measured no faster (V8 inlines it).
 
 Version 0 chunks of 64+ records decode through a WebAssembly
 SIMD fast path (`reader/wasm/chunkDecoder.wat`, ~5x the JavaScript

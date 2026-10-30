@@ -79,3 +79,16 @@ export const APPENDIX_A_V0_BYTES: Uint8Array = Uint8Array.from([
     00 2c
   `),
 ]);
+
+/** The same example as a version 2 file (Section A.6): chunk 3 range
+ * coded, 11 bytes instead of 26. */
+export const APPENDIX_A_V2_BYTES: Uint8Array = Uint8Array.from([
+	...HEADER.map((b, i) => (i === 8 ? 2 : b)),
+	...DIRECTORY.map((b, i) => (i === DIRECTORY.length - 1 ? 0x0b : b)),
+	...PLACE_TABLE_PREFIX,
+	...NAME_BLOCK_0,
+	...NAME_BLOCK_1,
+	...hexBytes(`
+    02 02 03 07 00 a5 11 64 ba 00 00
+  `),
+]);

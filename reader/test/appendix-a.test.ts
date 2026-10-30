@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { encodeRangeCodedRecords } from "../src/format.ts";
 import { boundingBoxContains, CGeoDataReader } from "../src/index.ts";
-import { APPENDIX_A_BYTES, APPENDIX_A_V0_BYTES } from "./fixtures/appendixA.ts";
+import {
+	APPENDIX_A_BYTES,
+	APPENDIX_A_V0_BYTES,
+	APPENDIX_A_V2_BYTES,
+} from "./fixtures/appendixA.ts";
 
 test("Appendix A fixture is exactly 157 bytes", () => {
 	assert.equal(APPENDIX_A_BYTES.length, 157);
@@ -145,6 +150,33 @@ test("the version 0 file of the example answers every cell the same", async () =
 		Array.from((await reader.chunk(3))!.codes);
 	assert.deepEqual(await records(v0), [0, 4, 5, 8, 12]);
 	assert.deepEqual(await records(v1), [0, 4, 5, 6, 7, 8, 12]);
+});
+
+test("the version 2 file of the example (Section A.6) has the same records", async () => {
+	assert.equal(APPENDIX_A_V2_BYTES.length, 142);
+	const v1 = await CGeoDataReader.open(APPENDIX_A_BYTES);
+	const v2 = await CGeoDataReader.open(APPENDIX_A_V2_BYTES);
+	assert.equal(v2.header.version, 2);
+	assert.deepEqual(await v2.chunk(3), await v1.chunk(3));
+	for (let gy = 0; gy < 8; gy++) {
+		for (let gx = 0; gx < 8; gx++) {
+			const lat = -90 + (gy + 0.5) * 22.5;
+			const lon = -180 + (gx + 0.5) * 45;
+			assert.deepEqual(await v2.query(lat, lon), await v1.query(lat, lon));
+		}
+	}
+	// And the encoder writes exactly Section A.6's stream.
+	assert.deepEqual(
+		[
+			...encodeRangeCodedRecords(
+				[1, 2, 2, 2, 2, 1, 2],
+				[1, 2, 0, 0, 0, 1, 2],
+				2,
+				2,
+			),
+		],
+		[0x00, 0xa5, 0x11, 0x64, 0xba, 0x00, 0x00],
+	);
 });
 
 test("header fields match the worked example", async () => {
