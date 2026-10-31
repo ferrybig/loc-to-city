@@ -1,5 +1,6 @@
 import type { FeatureCollection, MultiPolygon, Polygon } from "geojson";
 import { type CandidateEntry, CandidateIndex, packFeature } from "./candidateIndex.ts";
+import type { FormatVersion } from "./chunkEncoder.ts";
 import type { CellBounds } from "./geometry.ts";
 import type { HierarchyCountry } from "./hierarchy.ts";
 import { buildNameBlocks } from "./nameBlocks.ts";
@@ -15,6 +16,10 @@ export interface BuildOptions {
   heightExp: number;
   maxDepth: number;
   keyframeExp: number;
+  /** The format version to write (Section 5): 2, the default, range codes
+   * each chunk (Section 8.7); 1 deflates it (Section 8.2), for readers
+   * that predate version 2. */
+  formatVersion?: FormatVersion | undefined;
   /** Region (province) polygons, matched to the hierarchy by `properties.name`.
    * Without these, a point outside every city polygon but still inside a
    * region resolves to "unknown" instead of that region (Section 7.1). */
@@ -48,6 +53,11 @@ export interface BuildOptions {
     recordCount: number;
     elapsedMs: number;
   }) => void;
+}
+
+/** `options.formatVersion`, defaulted. */
+export function formatVersionOf(options: BuildOptions): FormatVersion {
+  return options.formatVersion ?? 2;
 }
 
 export interface BuildStats {
@@ -129,6 +139,7 @@ export function finishBuild(
     attribution: options.attribution,
     widthExp: options.widthExp,
     heightExp: options.heightExp,
+    formatVersion: formatVersionOf(options),
     maxDepth: options.maxDepth,
     keyframeExp: options.keyframeExp,
     countryCount: placeIds.countryCount,

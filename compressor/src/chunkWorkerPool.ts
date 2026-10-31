@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import type { ChunkJob, ChunkWorkerData, WorkerRequest, WorkerResponse } from "./chunkJobs.ts";
+import type { FormatVersion } from "./chunkEncoder.ts";
 
 const WORKER_URL = new URL(
   import.meta.url.endsWith(".ts") ? "./chunkWorker.ts" : "./chunkWorker.js",
@@ -39,6 +40,7 @@ export function runChunkJobs(
   jobs: ChunkJob[],
   workerCount: number,
   maxDepth: number,
+  formatVersion: FormatVersion,
   onResult?: (result: ChunkResult) => void,
 ): Promise<ChunkResult[]> {
   return new Promise((resolve, reject) => {
@@ -79,7 +81,7 @@ export function runChunkJobs(
     }
 
     for (let i = 0; i < poolSize; i++) {
-      const workerData: ChunkWorkerData = { maxDepth };
+      const workerData: ChunkWorkerData = { maxDepth, formatVersion };
       const worker = new Worker(WORKER_URL, { workerData });
       workers.push(worker);
 

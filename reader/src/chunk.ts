@@ -1,5 +1,6 @@
 import { decodeChunkCodes, WASM_MIN_RECORDS } from "./chunkDecoder.ts";
 import { CGeoDataFormatError } from "./errors.ts";
+import { decodeRangeCodedRecords } from "./rangeChunk.ts";
 import {
 	readDeltaVarintList,
 	readDeltaVarints32Into,
@@ -107,8 +108,9 @@ function isMultipleOf(value: number, span: number): boolean {
 	return value < 0x80000000 ? (value & (span - 1)) === 0 : value % span === 0;
 }
 
-/** Parses one already-inflated chunk block (Section 8.2, or Section 8.6's
- * layout for a `version` 0 file) and checks the cheap Section 8.5
+/** Parses one chunk block: already inflated for a `version` 0 or 1 file
+ * (Section 8.2, or Section 8.6's layout for `version` 0), as stored for
+ * `version` 2, whose blocks are not zlib streams (Section 8.7). It checks the cheap Section 8.5
  * invariants a reader can verify without external context (place ids
  * are validated by the caller, which has the place table). */
 export function parseChunk(
@@ -133,6 +135,18 @@ export function parseChunk(
 
 	const { value: recordCount, bytesRead: b3 } = readVarint(buf, offset);
 	offset += b3;
+	if (version >= 2) {
+		return {
+			palette,
+			...decodeRangeCodedRecords(
+				buf,
+				offset,
+				paletteCount,
+				recordCount,
+				maxDepth,
+			),
+		};
+	}
 	if (version !== 0) {
 		return parseRecords(buf, offset, palette, recordCount, maxDepth);
 	}

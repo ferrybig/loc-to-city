@@ -22,7 +22,7 @@ test("encodeChunk fills the gaps between records with index 0, and not the end",
     { code: 8, depth: 1, globalId: 2 },
     { code: 12, depth: 2, globalId: 5 },
   ];
-  const block = inflateSync(encodeChunk(records, 2));
+  const block = inflateSync(encodeChunk(records, 2, 1));
   assert.deepEqual([...block], [2, 2, 3, 7, 1, 2, 2, 2, 2, 1, 2, 1, 2, 0, 0, 0, 1, 2]);
   const chunk = parseChunk(block, 2, 1);
   assert.deepEqual([...chunk.codes], [0, 4, 5, 6, 7, 8, 12]);
@@ -30,9 +30,21 @@ test("encodeChunk fills the gaps between records with index 0, and not the end",
 });
 
 test("encodeChunk starts with a gap when the first record isn't at code 0", () => {
-  const chunk = parseChunk(inflateSync(encodeChunk([{ code: 12, depth: 1, globalId: 7 }], 2)), 2, 1);
+  const chunk = parseChunk(inflateSync(encodeChunk([{ code: 12, depth: 1, globalId: 7 }], 2, 1)), 2, 1);
   assert.deepEqual([...chunk.codes], [0, 4, 8, 12]);
   assert.deepEqual([...chunk.depths], [1, 1, 1, 1]);
   assert.deepEqual([...chunk.paletteIndices], [0, 0, 0, 1]);
   assert.deepEqual(chunk.palette, [7]);
+});
+
+test("encodeChunk's version 2 block holds the same records as version 1's", () => {
+  const records = [
+    { code: 0, depth: 1, globalId: 2 },
+    { code: 4, depth: 2, globalId: 5 },
+    { code: 8, depth: 1, globalId: 2 },
+    { code: 12, depth: 2, globalId: 5 },
+  ];
+  const v1 = parseChunk(inflateSync(encodeChunk(records, 2, 1)), 2, 1);
+  const v2 = parseChunk(encodeChunk(records, 2, 2), 2, 2);
+  assert.deepEqual(v2, v1);
 });

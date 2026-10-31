@@ -1374,7 +1374,10 @@ export class CGeoDataReader {
 			this.checkPalette(
 				index,
 				parseChunk(
-					await inflateBlock(this.inflater, compressed),
+					// Version 2 chunks are range coded, not zlib (Section 8.7).
+					this.header.version >= 2
+						? compressed
+						: await inflateBlock(this.inflater, compressed),
 					this.header.maxDepth,
 					this.header.version,
 				),

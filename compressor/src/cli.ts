@@ -19,6 +19,7 @@ const KNOWN_FLAGS = new Set([
   "attribution",
   "workers",
   "only-chunks",
+  "format-version",
 ]);
 /** Flags that take no value. */
 const SWITCHES = new Set(["unlock-depth-limit"]);
@@ -78,9 +79,11 @@ async function main(): Promise<void> {
       "usage: cgeodata-compress <hierarchy.json> <cities.geojson|.geojsonseq> <out.bin> " +
         "[--regions regions.geojson[seq]] [--countries countries.geojson] " +
         "[--width-exp N] [--height-exp N] [--max-depth N] [--keyframe-exp N] [--attribution TEXT] " +
-        "[--workers N] [--only-chunks LIST] [--unlock-depth-limit]\n" +
+        "[--workers N] [--only-chunks LIST] [--format-version 1|2] [--unlock-depth-limit]\n" +
         "  --only-chunks takes indices and inclusive ranges (e.g. '200' or '200,300-500'); " +
         "every other chunk is left empty. '' builds no chunks at all, just the place table.\n" +
+        "  --format-version 2 (the default) range codes each chunk (reader/binary-format.md Section 8.7); " +
+        "1 deflates it, for readers that predate version 2.\n" +
         `  --unlock-depth-limit allows --max-depth past ${MAX_SUPPORTED_DEPTH} (up to the format's 26), ` +
         "for a file the reader will refuse to open.",
     );
@@ -110,6 +113,11 @@ async function main(): Promise<void> {
     );
   }
   const keyframeExp = headerFlag(flags, "keyframe-exp", 7, 255); // reader/binary-format.md Section 7.3
+  const formatVersionFlag = flags["format-version"] ?? "2";
+  if (formatVersionFlag !== "1" && formatVersionFlag !== "2") {
+    throw new Error(`--format-version must be 1 or 2, got ${JSON.stringify(formatVersionFlag)}`);
+  }
+  const formatVersion: 1 | 2 = formatVersionFlag === "1" ? 1 : 2; // reader/binary-format.md Section 5
   const chunkCount = 2 ** widthExp * 2 ** heightExp;
 
   const onlyChunksFlag = flags["only-chunks"];
@@ -151,6 +159,7 @@ async function main(): Promise<void> {
     heightExp,
     maxDepth,
     keyframeExp,
+    formatVersion,
     regions,
     countries,
     workers,

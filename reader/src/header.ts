@@ -10,8 +10,9 @@ const SIGNATURE = Uint8Array.from([
 
 /** A file's header (Section 5). */
 export interface CGeoDataHeader {
-	/** Format version: 1, or 0 for files written before chunks dropped
-	 * their codes (Section 8.6). This reader reads both. */
+	/** Format version: 2 (range-coded chunks, Section 8.7), 1 (zlib
+	 * chunks), or 0 for files written before chunks dropped their codes
+	 * (Section 8.6). This reader reads all three. */
 	version: number;
 	/** The data's attribution notice, as given when the file was built.
 	 * Show it wherever results are shown. */
@@ -52,7 +53,7 @@ export function parseHeader(buf: Uint8Array): CGeoDataHeader {
 
 	const version = readVarint(buf, offset);
 	offset += version.bytesRead;
-	if (version.value !== 0 && version.value !== 1) {
+	if (version.value > 2) {
 		throw new CGeoDataVersionError(
 			`unsupported CGEODATA version ${version.value}`,
 			version.value,

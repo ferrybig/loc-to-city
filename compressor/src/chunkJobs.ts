@@ -1,5 +1,6 @@
 import { chunkBoundsOf } from "./buildCore.ts";
 import type { CandidateIndex, IndexedCandidate } from "./candidateIndex.ts";
+import type { FormatVersion } from "./chunkEncoder.ts";
 import type { CellBounds } from "./geometry.ts";
 
 /** One chunk's worth of work: everything a worker needs to reproduce
@@ -25,6 +26,7 @@ export type WorkerResponse =
 
 export interface ChunkWorkerData {
   maxDepth: number;
+  formatVersion: FormatVersion;
 }
 
 function coordinateCount(candidate: IndexedCandidate): number {

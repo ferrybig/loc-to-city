@@ -90,10 +90,12 @@ separate axes, not a single dial.
 **Hard constraint on the final solution:** it needs to run from
 JavaScript, since that's what Immich's server (`immich-server`, Node.js)
 actually runs. The on-disk format and algorithms are chosen with that in
-mind: zlib (not zstd/brotli) because both Node's `zlib` module and the
-browser `DecompressionStream` API support it natively with no extra
-dependency; varint decoding and binary search are both trivial loops with
-no library requirement either way. See [The CGEODATA format and its
+mind: zlib (not zstd/brotli) for the name blocks because both Node's
+`zlib` module and the browser `DecompressionStream` API support it
+natively with no extra dependency, and for chunks a range coder of its own
+(format version 2, `reader/binary-format.md` Section 8.7) that needs no
+library at all; varint decoding and binary search are both trivial loops
+with no library requirement either way. See [The CGEODATA format and its
 JavaScript/TypeScript
 implementation](#the-cgeodata-format-and-its-javascripttypescript-implementation)
 below, and [history.md](history.md) for the measurements behind these

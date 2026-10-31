@@ -1,4 +1,4 @@
-import { type BuildOptions, type BuildStats, finishBuild, prepareBuild } from "./buildCore.ts";
+import { type BuildOptions, type BuildStats, finishBuild, formatVersionOf, prepareBuild } from "./buildCore.ts";
 import { encodeChunk } from "./chunkEncoder.ts";
 import { enumerateChunkJobs } from "./chunkJobs.ts";
 import type { HierarchyCountry } from "./hierarchy.ts";
@@ -31,7 +31,7 @@ export function buildCGeoDataFile(
   for (const { chunkIndex, bounds, candidates } of jobs) {
     const startedAt = performance.now();
     const records = buildChunkRecords(candidates, bounds, options.maxDepth);
-    const encoded = records.length === 0 ? null : encodeChunk(records, options.maxDepth);
+    const encoded = records.length === 0 ? null : encodeChunk(records, options.maxDepth, formatVersionOf(options));
     const elapsedMs = performance.now() - startedAt;
 
     options.onChunkBuilt?.({
