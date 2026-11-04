@@ -801,7 +801,7 @@ export const CASES: Case[] = [
 	},
 	{
 		name: "Lotte is in North Rhine-Westphalia, not Lower Saxony",
-		at: [52.2862, 7.9134],
+		at: [52.275169, 7.915649],
 		country: "Germany",
 		region: "Nordrhein-Westfalen",
 		city: "Lotte",
