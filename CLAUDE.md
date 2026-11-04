@@ -34,7 +34,12 @@ tests, the others are `todo` tests; when you fix one, change its `status`
 `verify/test/ledger.test.ts` fails when a case's section or entry is not in
 this file, or its status disagrees with the entry's marker. The same
 results are exported as JSON and drawn as markers on the demo's map (see
-`verify/` below).
+`verify/` below). When the user backs a place with a source (a Wikipedia
+article, say), put the URL inline in the entry it supports, and add it to
+older entries whose evidence it was; the ledger should let a reader verify
+the proof themselves. To measure a candidate `admin_level` for one country
+without a full resolve, see the `check-admin-level` skill
+(`.claude/skills/`).
 
 ## Workspaces
 
@@ -260,7 +265,11 @@ How much slowdown a reader change may cost: a change that buys something
 ~10-15%; "everything 2x as slow" is not acceptable. A cold single lookup up
 to ~50 ms is fine now that it is awaited instead of blocking. **The demo's
 tile burst is the metric that matters most** (see the comment above the
-worker pool in `demo/src/server.ts`): run `npm run bench -w reader --
+worker pool in `demo/src/server.ts`; production is a 2-core/4GB VPS that
+sees a cold burst of ~30-40 tile requests when a page opens, then silence,
+so measure a burst from fully cold workers after >6 s idle on 2 cores, e.g.
+`taskset -c 0,1`, not warm per-tile time; the worker pool's 6 s idle exit is
+deliberate): run `npm run bench -w reader --
 <file.bin>` (burst section first) before and after, put the numbers in the
 commit message, and if a change costs more than ~15% on bursts, find a
 cheaper variant or ask before keeping it. Async zlib (+15-40%) was dropped
@@ -325,7 +334,12 @@ This is `areaTieBreak: "auto"` (CLI `--area-tie-break auto|on|off`). It
 is the one deliberate exception to "index and scan agree": a locate
 index changes the *order* (never the set) of sorted results. Don't "fix"
 that with a chunk-scan fallback for the areas, which costs 5-10 s and was
-rejected (sidecars are built wherever the `.bin` is used). A search
+rejected (sidecars are built wherever the `.bin` is used). The model is:
+only the `.bin` ships, and consumers like Immich build the sidecars on their
+own machine from it. So data a sidecar can derive from the `.bin` belongs in
+a sidecar, not in the main format; when a feature needs it and the sidecar is
+missing, degrade or make it an explicit option, never scan every chunk at
+query time. A search
 index records the order its short-query table was built in
 (`relevance_rule`). The reader only uses the table when it ranks the
 same way, so build the locate index *before* the search index, whose
@@ -771,9 +785,3 @@ for Pass 1), because sixteen threads in polyclip-ts at once took 22 GB.
 Point-in-polygon tests of one polygon against many points use
 `preparedPolygon.ts`, which gives turf's answers exactly, boundary
 included, from a banded edge index.
-
-**Memory-constrained runs**: use
-`systemd-run --user --scope -p MemoryMax=<N>` around a build, and set `N`
-*below* what the system can actually spare — too high and the kernel's
-global OOM killer fires and can kill unrelated processes instead of
-containing the one that's over budget.
