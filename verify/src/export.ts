@@ -27,7 +27,7 @@ import {
 	entryFor,
 	summarize,
 } from "./checksFile.ts";
-import { allChecks, evaluate } from "./evaluate.ts";
+import { allChecks, evaluate, resolvable } from "./evaluate.ts";
 import { RESOLVED_INPUT } from "./pickBin.ts";
 
 const USAGE =
@@ -50,9 +50,14 @@ async function main(): Promise<void> {
 	const reader = await openFile(binPath);
 	const bin = statSync(binPath);
 
-	const checks = allChecks().filter(
+	const all = allChecks().filter(
 		(c) => values.section === undefined || c.section === values.section,
 	);
+	const checks = all.filter((c) => resolvable(c, reader.header));
+	if (all.length > checks.length)
+		console.error(
+			`${all.length - checks.length} checks left out: this build's cells are too coarse for them`,
+		);
 	if (checks.length === 0) {
 		console.error(`no checks in section ${JSON.stringify(values.section)}`);
 		process.exit(2);

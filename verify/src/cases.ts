@@ -52,6 +52,13 @@ export interface Case {
 	city?: Expected;
 	/** Must resolve to a different city id than this point (two same-named places, not one). */
 	otherCityThan?: readonly [lat: number, lon: number];
+	/**
+	 * The coarsest build this check means anything on: the largest cell edge
+	 * in metres (lat or lon, at `at`) a file may have. A place thinner than a
+	 * cell (the Vatican, the Vennbahn's strip) cannot be drawn by a coarser
+	 * build, so there the check is skipped, not failed.
+	 */
+	maxCellMeters?: number;
 	status: Status;
 	/** The `## ` heading of `countries.md` this belongs to, without its ISO code. */
 	section: string;
@@ -825,6 +832,16 @@ export const CASES: Case[] = [
 		entry: "Border artifacts",
 	},
 	{
+		name: "The Vennbahn strip is Belgium, between two German pieces",
+		at: [50.564369, 6.232998],
+		country: "Belgium",
+		region: "Wallonie",
+		maxCellMeters: 100,
+		status: "false-positive",
+		section: "Belgium",
+		entry: "The Vennbahn strip is Belgian",
+	},
+	{
 		name: "Border artifact: Belgian side of the German border",
 		at: [50.710482, 6.090031],
 		country: "Belgium",
@@ -1123,6 +1140,7 @@ export const CASES: Case[] = [
 		country: "Vatican",
 		region: "Vatican",
 		city: "Vatican City",
+		maxCellMeters: 500,
 		status: "fixed",
 		section: "Vatican",
 		entry: "Vatican resolves to Italy",
@@ -1133,6 +1151,7 @@ export const CASES: Case[] = [
 		country: "Vatican",
 		region: "Vatican",
 		city: "Vatican City",
+		maxCellMeters: 500,
 		status: "fixed",
 		section: "Vatican",
 		entry: "Vatican resolves to Italy",

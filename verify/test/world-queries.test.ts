@@ -3,7 +3,13 @@ import { existsSync, statSync } from "node:fs";
 import { test } from "node:test";
 import type { CGeoDataReader } from "@ferrybig/cgeodata-reader";
 import { openFile } from "@ferrybig/cgeodata-reader/node";
-import { allChecks, evaluate, expectedToFail } from "../src/evaluate.ts";
+import {
+	allChecks,
+	cellMeters,
+	evaluate,
+	expectedToFail,
+	resolvable,
+} from "../src/evaluate.ts";
 import { pickWorldBin, RESOLVED_INPUT } from "../src/pickBin.ts";
 
 // Spot-checks against the worldwide build, the counterpart of
@@ -38,7 +44,14 @@ for (const check of allChecks()) {
 		? { skip, todo: `countries.md: ${check.section}` }
 		: { skip };
 	test(`${check.at.join(", ")}: ${title}`, options, async (t) => {
-		const result = await evaluate(await world(), check);
+		const reader = await world();
+		if (!resolvable(check, reader.header)) {
+			t.skip(
+				`cells of ${Math.round(cellMeters(reader.header, check.at[0]))} m are coarser than the ${check.maxCellMeters} m this place needs`,
+			);
+			return;
+		}
+		const result = await evaluate(reader, check);
 		if (result.outcome === "now-passing") {
 			t.diagnostic(
 				`NOW PASSING: ${check.name} -- close "${check.entry}" in countries.md (${check.section}) and change its status`,

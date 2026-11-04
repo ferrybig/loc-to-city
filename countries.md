@@ -1143,6 +1143,22 @@ tessellates its country, so the bug was always grain, not coverage.
 
 `region [4]` (100.1%), `city [9]` (99.9%), `nameEnFromWikidata`.
 
+- **The Vennbahn strip is Belgian.** *(false positive)* 50.564369, 6.232998
+  looks like an artifact on the map: a thin line, about 100 m wide, that says
+  `Belgium` between two pieces of Germany near Monschau. It is right. The
+  [Vennbahn](https://en.wikipedia.org/wiki/Vennbahn) trackbed belongs to
+  Belgium, which created six small exclaves of Germany on the line's western
+  side, of which five remain (it also created one small Belgian
+  counter-enclave, a traffic island in a three-way German road intersection
+  near Fringshaus, which lasted until 1949). Only `world-super-res.bin`
+  (finest cells about 76 m by 98 m here) draws it: it reads `Belgium /
+  Wallonie`, `city -` (no municipality polygon covers the strip).
+  `world-high-res.bin`'s finest cells are about 194 m, wider than the strip,
+  and answer `Germany / Nordrhein-Westfalen / Monschau`. That is why the
+  case carries `maxCellMeters: 100` and is skipped on coarser builds, like
+  the Vatican's (500) on `world.bin`. Related
+  relation: [Verviers arrondissement](https://www.openstreetmap.org/relation/1407211)
+  (`admin_level=7`).
 - **Brussels is `Bruxelles - Brussel`, not Brussels.** Fixed 2026-10-14 by
   `nameEnFromWikidata: true`. 50.85045, 4.34878 returned
   `Bruxelles - Brussel` alone, so the capital check ("named for Brussels")

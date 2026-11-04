@@ -49,9 +49,38 @@ export interface Check {
 	region?: Expected;
 	city?: Expected;
 	otherCityThan?: readonly [lat: number, lon: number];
+	/** See `Case.maxCellMeters`. */
+	maxCellMeters?: number;
 	status: Status;
 	section: string;
 	entry?: string;
+}
+
+const METERS_PER_DEGREE = 111_320;
+
+/** The larger edge, in metres, of a finest cell of this file at `lat`. */
+export function cellMeters(
+	header: Pick<CGeoDataReader["header"], "width" | "height" | "maxDepth">,
+	lat: number,
+): number {
+	const scale = 2 ** header.maxDepth;
+	const lonEdge =
+		(360 / (header.width * scale)) *
+		METERS_PER_DEGREE *
+		Math.cos((lat * Math.PI) / 180);
+	const latEdge = (180 / (header.height * scale)) * METERS_PER_DEGREE;
+	return Math.max(lonEdge, latEdge);
+}
+
+/** Whether a file with these cells is fine enough for the check to mean anything. */
+export function resolvable(
+	check: Pick<Check, "at" | "maxCellMeters">,
+	header: Parameters<typeof cellMeters>[0],
+): boolean {
+	return (
+		check.maxCellMeters === undefined ||
+		cellMeters(header, check.at[0]) <= check.maxCellMeters
+	);
 }
 
 export interface CheckResult {
@@ -193,6 +222,7 @@ function fromCase(c: Case): Check {
 		region,
 		city,
 		otherCityThan,
+		maxCellMeters,
 		status,
 		section,
 		entry,
@@ -206,6 +236,7 @@ function fromCase(c: Case): Check {
 		...(region !== undefined && { region }),
 		...(city !== undefined && { city }),
 		...(otherCityThan !== undefined && { otherCityThan }),
+		...(maxCellMeters !== undefined && { maxCellMeters }),
 		status,
 		section,
 		...(entry !== undefined && { entry }),
