@@ -4,6 +4,10 @@ world-high-res: data/03-final/world-high-res.bin \
 	data/03-final/world-high-res.locate-index.bin \
 	data/03-final/world-high-res.search-index.bin \
 	data/03-final/world-high-res.checks.json
+world-super-res: data/03-final/world-super-res.bin \
+	data/03-final/world-super-res.locate-index.bin \
+	data/03-final/world-super-res.search-index.bin \
+	data/03-final/world-super-res.checks.json
 europe: data/03-final/europe.bin
 netherlands: data/03-final/zuid-holland.bin
 
@@ -42,12 +46,15 @@ KEYFRAME_EXP = 13
 # are filtered from the worldwide one), so every one credits all its sources.
 ATTRIBUTION = "City boundaries from [OpenStreetMap](https://openstreetmap.org/copyright), [Geonames](https://www.geonames.org/), CC BY 4.0 & [Natural Earth](https://www.naturalearthdata.com/) "
 
-WORLD_BINS := data/03-final/world.bin data/03-final/world-high-res.bin
+WORLD_BINS := data/03-final/world.bin data/03-final/world-high-res.bin data/03-final/world-super-res.bin
 FINAL_BINS := $(WORLD_BINS) data/03-final/europe.bin data/03-final/zuid-holland.bin
 
 $(WORLD_BINS): SOURCE = world
 $(WORLD_BINS): KEYFRAME_EXP = 7
 $(WORLD_BINS): COMPRESS_ENV = NODE_OPTIONS="--max-old-space-size=24576"
+data/03-final/world-super-res.bin: GRID_EXP = 9
+data/03-final/world-super-res.bin: MAX_DEPTH = 10
+
 data/03-final/world-high-res.bin: GRID_EXP = 7
 data/03-final/world-high-res.bin: MAX_DEPTH = 10
 
